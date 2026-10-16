@@ -100,21 +100,35 @@ st.markdown(
     " Destekli Hibrit Makine Öğrenmesi**"
 )
 
+# --- SOL MENÜ (KATEGORİLERE AYRILMIŞ YAPILANDIRMA) ---
 st.sidebar.header("⚙️ Operasyonel Kontrol")
 
 if st.sidebar.button("🔄 Verileri Şimdi Güncelle", use_container_width=True):
   st.cache_data.clear()
   st.rerun()
 
-mode = st.sidebar.radio(
-    "Çalışma Modu Seçin:",
-    [
-        "Canlı Operasyonel Tahmin (Bugün & Yarın)",
-        "Fırtına: Yanlış Alarm (De-Warning) Testi (Simülasyon)",
-        "Dolu / Süper Hücre Riski Testi (Simülasyon)",
-        "Kar / Donma Fazı Testi (Simülasyon)",
-    ],
+st.sidebar.markdown("---")
+st.sidebar.subheader("📡 Veri Akışı Seçimi")
+
+main_category = st.sidebar.radio(
+    "Görüntülenecek Katman:",
+    ["🟢 Canlı Operasyonel Tahmin", "📂 Geçmiş Veriler & Test Senaryoları"],
 )
+
+if main_category == "🟢 Canlı Operasyonel Tahmin":
+  mode = "Canlı Operasyonel"
+else:
+  with st.sidebar.expander(
+      "📌 Senaryo Seçmek İçin Tıklayın", expanded=True
+  ):
+    mode = st.radio(
+        "İncelenecek Geçmiş Vaka:",
+        [
+            "Fırtına: Yanlış Alarm (De-Warning) Testi",
+            "Dolu / Süper Hücre Riski Testi",
+            "Kar / Donma Fazı Testi",
+        ],
+    )
 
 try:
   with open("models/metacast_weights.json", "r", encoding="utf-8") as f:
@@ -127,7 +141,7 @@ except Exception as e:
   st.error(f"Model yüklenemedi: {e}")
   st.stop()
 
-if "Canlı Operasyonel" in mode:
+if mode == "Canlı Operasyonel":
   with st.spinner("Canlı atmosfer modelleri çekiliyor..."):
     df, last_update = fetch_live_forecast()
   st.sidebar.caption(f"🕒 Son Güncelleme: **{last_update}**")
@@ -181,7 +195,6 @@ X_input = np.column_stack([
 X_norm = (X_input - mean) / std
 probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 
-# 4 Üst Metrik Kartı (Tarih Asla Kesilmez)
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("İncelenen Tarih", date_display)
 col1.caption(f"📌 {tag_sub} | Zirve: **{peak_time}**")
@@ -202,7 +215,6 @@ col4.caption(f"Min Sıcaklık: {temp.min():.1f}°C | Yağış: {precip.sum():.1f
 
 st.markdown("---")
 
-# Karar Öncelik Mantığı
 if "Dolu" in mode:
   st.error(
       f"🚨 **DOLU VE KONVEKTİF FIRTINA ALARMI - [{peak_time}]:** Yüksek"
