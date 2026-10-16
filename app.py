@@ -100,7 +100,7 @@ st.markdown(
     " Destekli Hibrit Makine Öğrenmesi**"
 )
 
-# --- SOL MENÜ (KATEGORİLERE AYRILMIŞ YAPILANDIRMA) ---
+# --- SOL MENÜ ---
 st.sidebar.header("⚙️ Operasyonel Kontrol")
 
 if st.sidebar.button("🔄 Verileri Şimdi Güncelle", use_container_width=True):
@@ -178,10 +178,30 @@ gust_factor = (
 
 temp = df["temperature_2m_ecmwf_ifs"]
 precip = df["precipitation_ecmwf_ifs"]
-is_snow_phase = ((temp <= 1.5) & (precip > 0)).astype(int)
-hail_potential = ((temp >= 22.0) & (precip >= 2.0) & (gust_mean >= 35.0)).astype(
-    int
-)
+
+# --- YAĞIŞ TÜRÜ TESPİT MANTIĞI ---
+precip_types = []
+precip_colors = []
+
+for t_val, p_val, g_val in zip(temp, precip, gust_mean):
+  if p_val <= 0.05:
+    precip_types.append("Yağış Yok")
+    precip_colors.append("rgba(0,0,0,0)")
+  elif t_val <= 1.5:
+    precip_types.append("❄️ Kar / Sulu Kar")
+    precip_colors.append("#90caf9")  # Açık mavi/buz
+  elif t_val >= 22.0 and p_val >= 2.0 and g_val >= 35.0:
+    precip_types.append("⚡ Dolu / Konvektif Sağanak")
+    precip_colors.append("#e91e63")  # Canlı pembe/mor dolu rengi
+  else:
+    precip_types.append("💧 Sıvı Yağmur")
+    precip_colors.append("#0288d1")  # Klasik yağmur mavisi
+
+df["precip_type"] = precip_types
+is_snow_phase = (df["precip_type"] == "❄️ Kar / Sulu Kar").astype(int)
+hail_potential = (
+    df["precip_type"] == "⚡ Dolu / Konvektif Sağanak"
+).astype(int)
 
 X_input = np.column_stack([
     df["wind_speed_10m_ecmwf_ifs"].values,
@@ -297,8 +317,11 @@ fig_wind.update_layout(
 )
 st.plotly_chart(fig_wind, width="stretch")
 
-st.markdown("### 🌧️ Saatlik Sıcaklık, Yağış ve Donma Sınırı")
+# --- GELİŞMİŞ TERMODİNAMİK VE YAĞIŞ TÜRÜ GRAFİĞİ ---
+st.markdown("### 🌧️ Saatlik Sıcaklık ve Yağış Türü Dağılımı")
 fig_weather = go.Figure()
+
+# Sıcaklık Çizgisi
 fig_weather.add_trace(
     go.Scatter(
         x=df["time"],
@@ -307,21 +330,30 @@ fig_weather.add_trace(
         line=dict(color="#ff7f0e", width=2),
     )
 )
+
+# Yağış Türü Çubukları (Her türe özel renk ve hover metni)
 fig_weather.add_trace(
     go.Bar(
         x=df["time"],
         y=precip,
-        name="Yağış (mm)",
-        marker_color="#17becf",
+        name="Yağış Miktarı (mm)",
+        marker_color=precip_colors,
+        text=df["precip_type"],
+        hovertemplate=(
+            "<b>Saat:</b> %{x|%H:00}<br><b>Yağış:</b> %{y:.1f}"
+            " mm<br><b>Tür:</b> %{text}<extra></extra>"
+        ),
         yaxis="y2",
     )
 )
+
 fig_weather.add_hline(
     y=0,
     line_dash="dot",
     line_color="blue",
     annotation_text="Donma Sınırı (0°C)",
 )
+
 fig_weather.update_layout(
     xaxis_title="Saat",
     yaxis=dict(title="Sıcaklık (°C)"),
@@ -330,10 +362,19 @@ fig_weather.update_layout(
     ),
     hovermode="x unified",
     template="plotly_white",
-    height=360,
+    height=370,
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
 )
 st.plotly_chart(fig_weather, width="stretch")
 
+# Gösterge Açıklaması (Legend)
+st.caption(
+    "🎨 **Yağış Türü Renk Kodları:** 🔵 **Mavi:** Sıvı Yağmur | ❄️ **Açık"
+    " Mavi:** Kar / Sulu Kar (T ≤ 1.5°C) | 🔴 **Pembe/Mor:** Dolu / Konvektif"
+    " Şiddetli Sağanak"
+)
+
+# Detay Tablosu (Yağış Türü Sütunu Eklendi)
 with st.expander("📋 Saat Saat Tüm Meteorolojik Değerler Tablosu (Tıkla ve Aç)"):
   display_df = pd.DataFrame({
       "Saat": df["time"].dt.strftime("%H:00"),
@@ -343,6 +384,7 @@ with st.expander("📋 Saat Saat Tüm Meteorolojik Değerler Tablosu (Tıkla ve 
       "Model Ortalaması (km/s)": gust_mean.round(1),
       "Sıcaklık (°C)": temp.round(1),
       "Yağış (mm)": precip.round(1),
+      "Yağış Türü": df["precip_type"],
       "ML Risk Olasılığı (%)": probabilities.round(1),
   })
   st.dataframe(display_df, use_container_width=True)
