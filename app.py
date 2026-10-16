@@ -12,6 +12,23 @@ st.set_page_config(
     layout="wide",
 )
 
+# Kesilmeleri (1014 ... gibi) kesin olarak engelleyen CSS
+st.markdown(
+    """
+<style>
+div[data-testid="stMetricValue"] {
+    font-size: 1.55rem !important;
+    white-space: nowrap !important;
+}
+div[data-testid="stMetricValue"] > div {
+    white-space: nowrap !important;
+    text-overflow: clip !important;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 
 def sigmoid(z):
   return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
@@ -317,9 +334,49 @@ col3.caption("Fizik Destekli ML Olasılığı")
 col4.metric("Kar Fazı / Donma Saati", f"{int(is_snow_phase.sum())} saat")
 col4.caption(f"Min Sıcaklık: {temp.min():.1f}°C | Yağış: {precip.sum():.1f} mm")
 
+# --- KISA ATMOSFERİK PARAMETRE ÖZETİ HESAPLAMALARI ---
+total_precip = precip.sum()
+if total_precip <= 0.05:
+  precip_prob_str = "%5 (Çok Düşük)"
+  dom_type = "☀️ Yağış Yok"
+else:
+  # Yağış miktarına ve saatlik yayılıma göre olasılık kestirimi
+  prob_val = min(95, max(30, int(25 + total_precip * 20)))
+  precip_prob_str = f"%{prob_val} ({total_precip:.1f} mm)"
+  if hail_potential.sum() > 0:
+    dom_type = "⚡ Dolu / Konvektif"
+  elif is_snow_phase.sum() > 0:
+    dom_type = "❄️ Kar / Sulu Kar"
+  else:
+    dom_type = "💧 Sıvı Yağmur"
+
+avg_wind = df["wind_speed_10m_ecmwf_ifs"].mean()
+avg_pressure = df["surface_pressure_ecmwf_ifs"].mean()
+pres_diff_val = pressure_diff.iloc[peak_idx]
+pres_trend_str = (
+    "Sabit"
+    if abs(pres_diff_val) < 1.0
+    else ("Düşüşte" if pres_diff_val < 0 else "Yükselişte")
+)
+
+# --- 4'LÜ KISA PARAMETRE ÖZET BANDI ---
+st.markdown("##### 📌 Günlük Kritik Atmosfer Parametreleri Özeti")
+s1, s2, s3, s4 = st.columns(4)
+s1.metric("Yağış İhtimali", precip_prob_str)
+s1.caption(f"Toplam Birikim: **{total_precip:.1f} mm**")
+
+s2.metric("Baskın Yağış Türü", dom_type)
+s2.caption(f"Termik Aralık: {temp.min():.1f}°C / {temp.max():.1f}°C")
+
+s3.metric("Rüzgâr Hızı", f"{avg_wind:.1f} km/s")
+s3.caption(f"Pik Hamle: **{peak_gust:.1f} km/s**")
+
+s4.metric("Zemin Basıncı", f"{avg_pressure:.1f} hPa")
+s4.caption(f"3s Eğilim: {pres_diff_val:+.1f} hPa ({pres_trend_str})")
+
 # --- ERHAÇ HAVALİMANI (LTAT) GELİŞMİŞ İSTASYON BANDI ---
 st.markdown("---")
-m1, m2, m3, m4, m5 = st.columns([2.0, 0.75, 0.85, 0.8, 1.6])
+m1, m2, m3, m4, m5 = st.columns([2.0, 0.75, 0.85, 0.95, 1.45])
 m1.markdown(f"📡 **Erhaç (LTAT) Canlı METAR:** `{metar['raw']}`")
 m2.metric(
     "Termometre",
@@ -328,13 +385,19 @@ m2.metric(
 m2.caption("Yer İstasyonu")
 m3.metric("Yer Hamlesi", f"{metar['gust_kmh']} km/s")
 m3.caption("LTAT Ölçümü")
+
+# Basınç değeri (kesilme korumalı)
 m4.metric(
     "Basınç",
-    f"{metar['altim_hpa']} hPa" if metar["altim_hpa"] else "1014 hPa",
+    (
+        f"{int(metar['altim_hpa'])} hPa"
+        if metar["altim_hpa"]
+        else "1014 hPa"
+    ),
 )
 m4.caption("Altimetre")
 
-# ÇOKLU HADİSE ROZET ÜRETECİ (Asla Kesilmez, Ekrana Esnek Sığar)
+# ÇOKLU HADİSE ROZET ÜRETECİ (Asla Kesilmez)
 active_badges = []
 if metar["is_hail"]:
   active_badges.append(
@@ -420,7 +483,6 @@ fog_override = (
     and (metar["visib_m"] and metar["visib_m"] <= 1000)
 )
 
-# BİLEŞİK ÇOKLU HADİSE UYARISI (Örn: Kar + Sis veya Oraj + Dolu)
 if metar["is_snow"] and metar["is_fog"] and mode == "Canlı Operasyonel":
   st.error(
       "🚨 **BİLEŞİK TEHLİKE (KAR VE YOĞUN SİS):** Erhaç İstasyonunda hem kar"
