@@ -17,7 +17,7 @@ def sigmoid(z):
   return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
 
 
-@st.cache_data(ttl=600)  # Varsayılan önbellek süresi 10 dakikaya indirildi
+@st.cache_data(ttl=600)
 def fetch_live_forecast():
   url = "https://api.open-meteo.com/v1/forecast"
   params = {
@@ -43,18 +43,20 @@ def fetch_live_forecast():
 
 
 def generate_scenario(name: str):
-  hours = pd.date_range(start="2026-10-17 00:00", periods=24, freq="h")
-
+  # Simülasyon tarihleri canlı 17 Ekim ile karışmasın diye mevsimine göre ayrıldı
   if "Yanlış Alarm" in name:
+    hours = pd.date_range(start="2024-04-12 00:00", periods=24, freq="h")
     ecmwf = np.array([25 + 40 * np.sin(i / 3.8) ** 2 for i in range(24)])
     gfs = ecmwf * 0.95
     icon = ecmwf * 0.90
     temp = np.full(24, 18.0)
     precip = np.full(24, 0.0)
-    wind_dir = np.full(24, 215.0)
+    wind_dir = np.full(24, 215.0)  # Beydağları dik açı (blokaj)
     pressure = np.full(24, 1018.0)
+    tag = "12 Nisan (İlkbahar Fırtına Simülasyonu)"
 
   elif "Dolu" in name:
+    hours = pd.date_range(start="2024-06-05 00:00", periods=24, freq="h")
     ecmwf = np.array([20 + 35 * np.sin(i / 3.8) ** 2 for i in range(24)])
     gfs = ecmwf * 1.05
     icon = ecmwf * 1.0
@@ -62,8 +64,10 @@ def generate_scenario(name: str):
     precip = np.array([0 if i < 14 or i > 17 else 8.5 for i in range(24)])
     wind_dir = np.full(24, 45.0)
     pressure = np.linspace(1015, 1006, 24)
+    tag = "05 Haziran (Yaz Dolu/Süper Hücre Simülasyonu)"
 
-  else:
+  else:  # Kar / Donma Fazı
+    hours = pd.date_range(start="2024-01-20 00:00", periods=24, freq="h")
     ecmwf = np.full(24, 25.0)
     gfs = np.full(24, 28.0)
     icon = np.full(24, 24.0)
@@ -71,6 +75,7 @@ def generate_scenario(name: str):
     precip = np.array([1.5 if 10 <= i <= 20 else 0.0 for i in range(24)])
     wind_dir = np.full(24, 15.0)
     pressure = np.full(24, 1012.0)
+    tag = "20 Ocak (Kış Kar/Donma Fazı Simülasyonu)"
 
   df_sim = pd.DataFrame({
       "time": hours,
@@ -83,7 +88,7 @@ def generate_scenario(name: str):
       "temperature_2m_ecmwf_ifs": temp,
       "precipitation_ecmwf_ifs": precip,
   })
-  return df_sim, datetime.now().strftime("%H:%M:%S")
+  return df_sim, tag
 
 
 st.title("⚡ MetaCast: Malatya Havzası Karar-Destek Platformu")
@@ -92,10 +97,8 @@ st.markdown(
     " Destekli Hibrit Makine Öğrenmesi**"
 )
 
-# Yan Menü (Sidebar)
 st.sidebar.header("⚙️ Operasyonel Kontrol")
 
-# Yenileme Butonu
 if st.sidebar.button("🔄 Verileri Şimdi Güncelle", use_container_width=True):
   st.cache_data.clear()
   st.rerun()
@@ -125,19 +128,19 @@ if "Canlı Operasyonel" in mode:
   with st.spinner("Canlı atmosfer modelleri çekiliyor..."):
     df, last_update = fetch_live_forecast()
   st.sidebar.caption(f"🕒 Son Güncelleme: **{last_update}**")
-else:
-  df, _ = generate_scenario(mode)
 
-df["time"] = pd.to_datetime(df["time"])
-
-if "Canlı Operasyonel" in mode:
   target_date = st.sidebar.date_input(
       "İncelenecek Tarih:", value=df["time"].dt.date.iloc[24]
   )
+  df["time"] = pd.to_datetime(df["time"])
   df = df[df["time"].dt.date == target_date].reset_index(drop=True)
   if df.empty:
     st.warning("Seçilen tarih için veri aralığı bulunamadı.")
     st.stop()
+  date_label = df["time"].iloc[0].strftime("%d %B %Y (Canlı Tahmin)")
+else:
+  df, date_label = generate_scenario(mode)
+  df["time"] = pd.to_datetime(df["time"])
 
 ecmwf = df["wind_gusts_10m_ecmwf_ifs"]
 gfs = df["wind_gusts_10m_gfs_seamless"]
@@ -177,7 +180,7 @@ X_norm = (X_input - mean) / std
 probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("İncelenen Tarih / Saat", df["time"].iloc[0].strftime("%d %B %Y"))
+col1.metric("İncelenen Senaryo / Tarih", date_label)
 col1.caption(f"Kritik Zirve: **{peak_time}**")
 
 col2.metric("Beklenen Pik Rüzgâr", f"{peak_gust:.1f} km/s")
@@ -196,49 +199,50 @@ col4.caption(f"Min Sıcaklık: {temp.min():.1f}°C | Yağış: {precip.sum():.1f
 
 st.markdown("---")
 
-if "Yanlış Alarm" in mode or (peak_gust >= 45.0 and risk_score < 40.0):
+# Karar Öncelik Mantığı (Önce Simülasyon Özel Durumları)
+if "Dolu" in mode:
+  st.error(
+      f"🚨 **DOLU VE KONVEKTİF FIRTINA ALARMI - [{peak_time}]:** Yüksek"
+      f" sıcaklık ({temp.max():.1f}°C), ani sağanak ({precip.max():.1f} mm) ve"
+      " açık vadi koridoru kesişmektedir. Malatya kayısı bahçeleri ve araçlar"
+      " için dolu koruma tedbirleri uygulanmalıdır."
+  )
+elif "Kar" in mode:
+  st.info(
+      f"❄️ **YAĞIŞ FAZ DÖNÜŞÜMÜ (KAR VE GİZLİ BUZLANMA) - [{peak_time}]:**"
+      f" Yağış esnasında sıcaklık {temp.min():.1f}°C seviyesine inmektedir."
+      " Sıvı yağış şehir merkezinde kar ve zemin buzlanmasına dönüşecektir."
+  )
+elif "Yanlış Alarm" in mode:
   st.warning(
       f"⚠️ **DE-WARNING (UYARI GERİ ÇEKME / ALARM İPTALİ) - [{peak_time}]:**"
       f" Sayısal modeller {peak_gust:.1f} km/s hızında fırtına gösteriyor."
       " Ancak rüzgârın Beydağları orografik engeline (215° dağ duvarı) çarpması"
       " ve barometrenin sabit kalması nedeniyle hava kütlesi Malatya şehir"
-      " merkezine inemeden sönümlenecektir. **Sarı kodlu fırtına uyarısı"
-      " merkez için geçerliliğini yitirmiştir.**"
-  )
-elif peak_gust >= 50.0 and risk_score >= 50.0:
-  st.error(
-      f"🚨 **DOĞRULANMIŞ ŞİDDETLİ FIRTINA TEHLİKESİ - [{peak_time}]:** Modeller"
-      f" ve yapay zekâ {peak_gust:.1f} km/s hamle riskini teyit ediyor. Dağ"
-      " blokajı koridoru açık olduğundan çatı uçması ve ulaşımda aksama"
-      " tedbirleri derhal uygulanmalıdır."
-  )
-elif peak_gust >= 30.0:
-  st.info(
-      f"💨 **ORTA KUVVETTE RÜZGÂR - [{peak_time}]:** Beklenen pik hamle"
-      f" {peak_gust:.1f} km/s seviyesindedir. Fırtına eşiğinin (50 km/s)"
-      " altındadır; kritik bir afet riski bulunmamaktadır."
-  )
-elif "Dolu" in mode:
-  st.error(
-      "🚨 **DOLU VE KONVEKTİF FIRTINA ALARMI:** Yüksek sıcaklık (28°C), ani"
-      " sağanak ve açık vadi koridoru kesişmektedir. Tarım arazileri için dolu"
-      " tedbirleri uygulanmalıdır."
-  )
-elif "Kar" in mode:
-  st.info(
-      "❄️ **YAĞIŞ FAZ DÖNÜŞÜMÜ (KAR VE GİZLİ BUZLANMA):** Yağış esnasında"
-      " sıcaklık 1.5°C altına inmektedir. Yağış şehir merkezinde kar ve zemin"
-      " buzlanmasına dönüşecektir."
+      " merkezine inemeden sönümlenecektir. **Sarı kodlu fırtına uyarısı merkez"
+      " için iptal edildi.**"
   )
 else:
-  st.success(
-      f"✅ **STABİL ATMOSFER KOŞULLARI ({df['time'].iloc[0].strftime('%d %B %Y')}):**"
-      " Malatya havzası için kritik bir afet anomalisi tespit edilmemiştir."
-  )
+  # Canlı Mod Kararları
+  if peak_gust >= 50.0 and risk_score >= 50.0:
+    st.error(
+        f"🚨 **DOĞRULANMIŞ ŞİDDETLİ FIRTINA TEHLİKESİ - [{peak_time}]:** Modeller"
+        f" ve yapay zekâ {peak_gust:.1f} km/s hamle riskini teyit ediyor."
+        " Tedbirler uygulanmalıdır."
+    )
+  elif peak_gust >= 30.0:
+    st.info(
+        f"💨 **ORTA KUVVETTE RÜZGÂR - [{peak_time}]:** Beklenen pik hamle"
+        f" {peak_gust:.1f} km/s seviyesindedir. Fırtına eşiğinin (50 km/s)"
+        " altındadır; kritik bir afet riski bulunmamaktadır."
+    )
+  else:
+    st.success(
+        f"✅ **STABİL ATMOSFER KOŞULLARI ({date_label}):** Malatya havzası"
+        " için kritik bir afet anomalisi tespit edilmemiştir."
+    )
 
-st.markdown(
-    f"### 📊 Sayısal Modellerin Saatlik Rüzgâr Hamlesi Kıyası ({df['time'].iloc[0].strftime('%d %B %Y')})"
-)
+st.markdown(f"### 📊 Saatlik Rüzgâr Hamlesi Kıyası ({date_label})")
 fig_wind = go.Figure()
 fig_wind.add_trace(
     go.Scatter(
