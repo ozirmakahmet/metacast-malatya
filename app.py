@@ -19,7 +19,7 @@ def sigmoid(z):
 
 @st.cache_data(ttl=300)
 def fetch_live_metar():
-  """Malatya Erhaç Havalimanı (LTAT) canlı METAR gözlemini çeker."""
+  """Malatya Erhaç Havalimanı (LTAT) canlı METAR gözlemini ve hadiselerini çözer."""
   url = "https://aviationweather.gov/api/data/metar?ids=LTAT&format=json"
   try:
     resp = requests.get(url, timeout=5)
@@ -31,14 +31,31 @@ def fetch_live_metar():
       gust_kmh = wgst_kt * 1.852
       temp_c = data.get("temp", None)
       altim_hpa = data.get("altim", None)
+      visib_sm = data.get("visib", None)
+      visib_m = (
+          round(visib_sm * 1609.34) if isinstance(visib_sm, (int, float)) else None
+      )
       raw_metar = data.get("rawOb", "METAR LTAT Verisi")
       obs_time = data.get("reportTime", "")
+
+      # Hadise Çözümleme
+      raw_upper = raw_metar.upper()
+      is_hail = any(x in raw_upper for x in [" GR ", " GS ", "+GR", "+GS"])
+      is_ts = " TS" in raw_upper or "TS " in raw_upper or "VCTS" in raw_upper
+      is_fog = " FG " in raw_upper or "FZFG" in raw_upper
+      is_snow = " SN " in raw_upper or "+SN" in raw_upper or "-SN" in raw_upper
+
       return {
           "status": "online",
           "speed_kmh": round(speed_kmh, 1),
           "gust_kmh": round(gust_kmh, 1),
           "temp_c": temp_c,
           "altim_hpa": altim_hpa,
+          "visib_m": visib_m,
+          "is_hail": is_hail,
+          "is_ts": is_ts,
+          "is_fog": is_fog,
+          "is_snow": is_snow,
           "raw": raw_metar,
           "time": obs_time,
       }
@@ -48,8 +65,13 @@ def fetch_live_metar():
       "status": "offline",
       "speed_kmh": 0.0,
       "gust_kmh": 0.0,
-      "temp_c": 15.0,
+      "temp_c": 12.0,
       "altim_hpa": 1015.0,
+      "visib_m": 10000,
+      "is_hail": False,
+      "is_ts": False,
+      "is_fog": False,
+      "is_snow": False,
       "raw": "LTAT İstasyonu Çevrimdışı (Simülasyon Modu)",
       "time": datetime.now().strftime("%H:%M"),
   }
@@ -181,7 +203,7 @@ except Exception as e:
   st.stop()
 
 # Canlı METAR İstasyon Verisini Çek
-metar_data = fetch_live_metar()
+metar = fetch_live_metar()
 
 if mode == "Canlı Operasyonel":
   with st.spinner("Canlı atmosfer modelleri çekiliyor..."):
@@ -256,7 +278,7 @@ X_input = np.column_stack([
 X_norm = (X_input - mean) / std
 probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 
-# Üst Metrik Kartları
+# 4 Üst Metrik Kartı
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("İncelenen Tarih", date_display)
 col1.caption(f"📌 {tag_sub} | Zirve: **{peak_time}**")
@@ -275,38 +297,95 @@ col3.caption("Fizik Destekli ML Olasılığı")
 col4.metric("Kar Fazı / Donma Saati", f"{int(is_snow_phase.sum())} saat")
 col4.caption(f"Min Sıcaklık: {temp.min():.1f}°C | Yağış: {precip.sum():.1f} mm")
 
-# --- MALATYA ERHAÇ CANLI METAR DOĞRULAMA KARTI ---
+# --- ERHAÇ HAVALİMANI (LTAT) GELİŞMİŞ İSTASYON BANDI ---
 st.markdown("---")
-m_col1, m_col2, m_col3 = st.columns([2, 1, 1])
-m_col1.markdown(
-    f"📡 **Malatya Erhaç (LTAT) Yer İstasyonu:** `{metar_data['raw']}`"
+m1, m2, m3, m4, m5 = st.columns([2.5, 1, 1, 1, 1.2])
+m1.markdown(f"📡 **Erhaç (LTAT) Canlı METAR:** `{metar['raw']}`")
+m2.metric(
+    "Termometre",
+    f"{metar['temp_c']}°C" if metar["temp_c"] is not None else "--",
 )
-m_col2.metric("İstasyon Hamlesi", f"{metar_data['gust_kmh']} km/s")
-m_col3.metric(
-    "İstasyon Basıncı",
-    (
-        f"{metar_data['altim_hpa']} hPa"
-        if metar_data["altim_hpa"]
-        else "1015 hPa"
-    ),
+m2.caption("Yer İstasyonu")
+m3.metric("Yer Hamlesi", f"{metar['gust_kmh']} km/s")
+m3.caption("LTAT Ölçümü")
+m4.metric(
+    "Basınç",
+    f"{metar['altim_hpa']} hPa" if metar["altim_hpa"] else "1015 hPa",
 )
+m4.caption("Altimetre")
+
+# Anlık Teşhis Rozeti
+if metar["is_hail"]:
+  status_badge = "🔴 DOLU / BUZ"
+elif metar["is_ts"]:
+  status_badge = "⚡ ORAJ / YILDIRIM"
+elif metar["is_fog"]:
+  status_badge = "🌫️ YOĞUN SİS"
+elif metar["is_snow"]:
+  status_badge = "❄️ AKTİF KAR"
+else:
+  status_badge = "🟢 SAKİN / AÇIK"
+
+m5.metric("Anlık Hadise", status_badge)
+m5.caption(f"Görüş: {metar['visib_m']}m" if metar["visib_m"] else "Görüş: Açık")
 st.markdown("---")
 
-# --- KARAR MOTORU (MODEL OVERRIDE KURALI İLE GÜÇLENDİRİLDİ) ---
-# Override Kuralı: Modeller yanıldıysa ve yer istasyonu/barometre çöküşü varsa devreye girer
-is_model_blindness = (
+# --- ÇOKLU TEHLİKE OVERRIDE KARAR MOTORU ---
+# 1. Zirai Don Kontrolü (Modeller don göstermese bile yer istasyonu <= 1°C ise)
+frost_override = (
+    mode == "Canlı Operasyonel"
+    and temp.min() > 1.5
+    and metar["temp_c"] is not None
+    and metar["temp_c"] <= 1.0
+)
+
+# 2. Dolu / Oraj Override (Modeller kaçırsa bile METAR kodunda TS veya GR varsa)
+hail_ts_override = mode == "Canlı Operasyonel" and (
+    metar["is_hail"] or metar["is_ts"]
+)
+
+# 3. Fırtına Model Körlüğü Override (Modeller sakin gösterirken yer hamlesi >= 45 km/s ise)
+wind_blindness = (
     mode == "Canlı Operasyonel"
     and peak_gust < 45.0
-    and (metar_data["gust_kmh"] >= 45.0 or pressure_diff.min() <= -3.0)
+    and (metar["gust_kmh"] >= 45.0 or pressure_diff.min() <= -3.0)
 )
 
-if is_model_blindness:
+# 4. Sis / Havacılık Görüş Override
+fog_override = (
+    mode == "Canlı Operasyonel"
+    and metar["is_fog"]
+    and (metar["visib_m"] and metar["visib_m"] <= 1000)
+)
+
+if hail_ts_override:
   st.error(
-      f"🚨 **MODEL KÖRLÜĞÜ (OVERRIDE ENGELİ AKTİF):** ECMWF, GFS ve ICON"
-      f" modelleri sakin bir hava ({peak_gust:.1f} km/s) öngörmesine rağmen,"
-      f" Malatya Erhaç (LTAT) yer istasyonu {metar_data['gust_kmh']} km/s hamle"
-      " veya ani barometrik çöküş tespit etti! **Sayısal modeller geçersiz"
-      " kılındı; havzada yerel fırtına tedbirleri uygulanmalıdır.**"
+      "🚨 **ANLIK DOLU / ORAJ TESPİT EDİLDİ (METAR OVERRIDE):** Sayısal modeller"
+      " konvektif patlamayı henüz yakalamamış olsa da, Erhaç İstasyonu"
+      f" {'DOLU (GR/GS)' if metar['is_hail'] else 'ORAJ/YILDIRIM (TS)'} rapor"
+      " etti! **Malatya kayısı bahçeleri ve araçlar için acil dolu tedbirleri"
+      " devreye sokulmalıdır.**"
+  )
+elif frost_override:
+  st.error(
+      "🚨 **ZİRAİ DON TEHLİKESİ (YER İSTASYON OVERRIDE):** Sayısal modeller don"
+      f" eşiği görmüyor ancak Malatya Erhaç yer termometresi {metar['temp_c']}°C"
+      " seviyesine indi! **Gece saatlerinde Malatya çanağındaki enverziyon"
+      " nedeniyle kayısı bahçelerinde zirai don tedbirleri uygulanmalıdır.**"
+  )
+elif wind_blindness:
+  st.error(
+      f"🚨 **FIRTIMA MODEL KÖRLÜĞÜ (OVERRIDE AKTİF):** Sayısal modeller sakin"
+      f" hava ({peak_gust:.1f} km/s) öngörmesine rağmen, yer istasyonu"
+      f" {metar['gust_kmh']} km/s hamle veya ani barometrik çöküş tespit etti!"
+      " **Sayısal modeller geçersiz kılındı; havzada yerel fırtına tedbirleri"
+      " uygulanmalıdır.**"
+  )
+elif fog_override:
+  st.warning(
+      "🌫️ **DÜŞÜK GÖRÜŞ VE YOĞUN SİS UYARISI:** Erhaç Havalimanı görüş"
+      f" mesafesi {metar['visib_m']} metreye inmiştir. Uçuş operasyonlarında ve"
+      " çevre yollarında gizli buzlanma/sis tedbirleri uygulanmalıdır."
   )
 elif "Dolu" in mode:
   st.error(
