@@ -17,6 +17,44 @@ def sigmoid(z):
   return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
 
 
+@st.cache_data(ttl=300)
+def fetch_live_metar():
+  """Malatya Erhaç Havalimanı (LTAT) canlı METAR gözlemini çeker."""
+  url = "https://aviationweather.gov/api/data/metar?ids=LTAT&format=json"
+  try:
+    resp = requests.get(url, timeout=5)
+    if resp.status_code == 200 and resp.json():
+      data = resp.json()[0]
+      wspd_kt = data.get("wspd", 0) or 0
+      wgst_kt = data.get("wgst", 0) or wspd_kt
+      speed_kmh = wspd_kt * 1.852
+      gust_kmh = wgst_kt * 1.852
+      temp_c = data.get("temp", None)
+      altim_hpa = data.get("altim", None)
+      raw_metar = data.get("rawOb", "METAR LTAT Verisi")
+      obs_time = data.get("reportTime", "")
+      return {
+          "status": "online",
+          "speed_kmh": round(speed_kmh, 1),
+          "gust_kmh": round(gust_kmh, 1),
+          "temp_c": temp_c,
+          "altim_hpa": altim_hpa,
+          "raw": raw_metar,
+          "time": obs_time,
+      }
+  except Exception:
+    pass
+  return {
+      "status": "offline",
+      "speed_kmh": 0.0,
+      "gust_kmh": 0.0,
+      "temp_c": 15.0,
+      "altim_hpa": 1015.0,
+      "raw": "LTAT İstasyonu Çevrimdışı (Simülasyon Modu)",
+      "time": datetime.now().strftime("%H:%M"),
+  }
+
+
 @st.cache_data(ttl=600)
 def fetch_live_forecast():
   url = "https://api.open-meteo.com/v1/forecast"
@@ -51,7 +89,7 @@ def generate_scenario(name: str):
     icon = ecmwf * 0.90
     temp = np.full(24, 18.0)
     precip = np.full(24, 0.0)
-    wind_dir = np.full(24, 215.0)  # Beydağları dik açı (blokaj)
+    wind_dir = np.full(24, 215.0)  # Beydağları dik açı
     pressure = np.full(24, 1018.0)
     date_display = "12 Nisan 2024"
     tag_sub = "İlkbahar Fırtına Simülasyonu"
@@ -97,7 +135,7 @@ def generate_scenario(name: str):
 st.title("⚡ MetaCast: Malatya Havzası Karar-Destek Platformu")
 st.markdown(
     "📍 **Hedef Bölge:** Malatya Merkez, Battalgazi & Erhaç (LTAT) | 🔬 **Fizik"
-    " Destekli Hibrit Makine Öğrenmesi**"
+    " Destekli Hibrit ML + METAR İstasyon Doğrulaması**"
 )
 
 # --- SOL MENÜ ---
@@ -130,6 +168,7 @@ else:
         ],
     )
 
+# Model ağırlıklarını oku
 try:
   with open("models/metacast_weights.json", "r", encoding="utf-8") as f:
     payload = json.load(f)
@@ -141,10 +180,13 @@ except Exception as e:
   st.error(f"Model yüklenemedi: {e}")
   st.stop()
 
+# Canlı METAR İstasyon Verisini Çek
+metar_data = fetch_live_metar()
+
 if mode == "Canlı Operasyonel":
   with st.spinner("Canlı atmosfer modelleri çekiliyor..."):
     df, last_update = fetch_live_forecast()
-  st.sidebar.caption(f"🕒 Son Güncelleme: **{last_update}**")
+  st.sidebar.caption(f"🕒 Son Model Güncellemesi: **{last_update}**")
 
   default_date = df["time"].dt.date.iloc[24]
   target_date = st.sidebar.date_input("İncelenecek Tarih:", value=default_date)
@@ -179,23 +221,22 @@ gust_factor = (
 temp = df["temperature_2m_ecmwf_ifs"]
 precip = df["precipitation_ecmwf_ifs"]
 
-# --- YAĞIŞ TÜRÜ TESPİT MANTIĞI ---
+# Yağış türü dağılımı
 precip_types = []
 precip_colors = []
-
 for t_val, p_val, g_val in zip(temp, precip, gust_mean):
   if p_val <= 0.05:
     precip_types.append("Yağış Yok")
     precip_colors.append("rgba(0,0,0,0)")
   elif t_val <= 1.5:
     precip_types.append("❄️ Kar / Sulu Kar")
-    precip_colors.append("#90caf9")  # Açık mavi/buz
+    precip_colors.append("#90caf9")
   elif t_val >= 22.0 and p_val >= 2.0 and g_val >= 35.0:
     precip_types.append("⚡ Dolu / Konvektif Sağanak")
-    precip_colors.append("#e91e63")  # Canlı pembe/mor dolu rengi
+    precip_colors.append("#e91e63")
   else:
     precip_types.append("💧 Sıvı Yağmur")
-    precip_colors.append("#0288d1")  # Klasik yağmur mavisi
+    precip_colors.append("#0288d1")
 
 df["precip_type"] = precip_types
 is_snow_phase = (df["precip_type"] == "❄️ Kar / Sulu Kar").astype(int)
@@ -215,6 +256,7 @@ X_input = np.column_stack([
 X_norm = (X_input - mean) / std
 probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 
+# Üst Metrik Kartları
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("İncelenen Tarih", date_display)
 col1.caption(f"📌 {tag_sub} | Zirve: **{peak_time}**")
@@ -233,9 +275,40 @@ col3.caption("Fizik Destekli ML Olasılığı")
 col4.metric("Kar Fazı / Donma Saati", f"{int(is_snow_phase.sum())} saat")
 col4.caption(f"Min Sıcaklık: {temp.min():.1f}°C | Yağış: {precip.sum():.1f} mm")
 
+# --- MALATYA ERHAÇ CANLI METAR DOĞRULAMA KARTI ---
+st.markdown("---")
+m_col1, m_col2, m_col3 = st.columns([2, 1, 1])
+m_col1.markdown(
+    f"📡 **Malatya Erhaç (LTAT) Yer İstasyonu:** `{metar_data['raw']}`"
+)
+m_col2.metric("İstasyon Hamlesi", f"{metar_data['gust_kmh']} km/s")
+m_col3.metric(
+    "İstasyon Basıncı",
+    (
+        f"{metar_data['altim_hpa']} hPa"
+        if metar_data["altim_hpa"]
+        else "1015 hPa"
+    ),
+)
 st.markdown("---")
 
-if "Dolu" in mode:
+# --- KARAR MOTORU (MODEL OVERRIDE KURALI İLE GÜÇLENDİRİLDİ) ---
+# Override Kuralı: Modeller yanıldıysa ve yer istasyonu/barometre çöküşü varsa devreye girer
+is_model_blindness = (
+    mode == "Canlı Operasyonel"
+    and peak_gust < 45.0
+    and (metar_data["gust_kmh"] >= 45.0 or pressure_diff.min() <= -3.0)
+)
+
+if is_model_blindness:
+  st.error(
+      f"🚨 **MODEL KÖRLÜĞÜ (OVERRIDE ENGELİ AKTİF):** ECMWF, GFS ve ICON"
+      f" modelleri sakin bir hava ({peak_gust:.1f} km/s) öngörmesine rağmen,"
+      f" Malatya Erhaç (LTAT) yer istasyonu {metar_data['gust_kmh']} km/s hamle"
+      " veya ani barometrik çöküş tespit etti! **Sayısal modeller geçersiz"
+      " kılındı; havzada yerel fırtına tedbirleri uygulanmalıdır.**"
+  )
+elif "Dolu" in mode:
   st.error(
       f"🚨 **DOLU VE KONVEKTİF FIRTINA ALARMI - [{peak_time}]:** Yüksek"
       f" sıcaklık ({temp.max():.1f}°C), ani sağanak ({precip.max():.1f} mm) ve"
@@ -317,11 +390,8 @@ fig_wind.update_layout(
 )
 st.plotly_chart(fig_wind, width="stretch")
 
-# --- GELİŞMİŞ TERMODİNAMİK VE YAĞIŞ TÜRÜ GRAFİĞİ ---
 st.markdown("### 🌧️ Saatlik Sıcaklık ve Yağış Türü Dağılımı")
 fig_weather = go.Figure()
-
-# Sıcaklık Çizgisi
 fig_weather.add_trace(
     go.Scatter(
         x=df["time"],
@@ -330,8 +400,6 @@ fig_weather.add_trace(
         line=dict(color="#ff7f0e", width=2),
     )
 )
-
-# Yağış Türü Çubukları (Her türe özel renk ve hover metni)
 fig_weather.add_trace(
     go.Bar(
         x=df["time"],
@@ -346,14 +414,12 @@ fig_weather.add_trace(
         yaxis="y2",
     )
 )
-
 fig_weather.add_hline(
     y=0,
     line_dash="dot",
     line_color="blue",
     annotation_text="Donma Sınırı (0°C)",
 )
-
 fig_weather.update_layout(
     xaxis_title="Saat",
     yaxis=dict(title="Sıcaklık (°C)"),
@@ -367,14 +433,12 @@ fig_weather.update_layout(
 )
 st.plotly_chart(fig_weather, width="stretch")
 
-# Gösterge Açıklaması (Legend)
 st.caption(
     "🎨 **Yağış Türü Renk Kodları:** 🔵 **Mavi:** Sıvı Yağmur | ❄️ **Açık"
     " Mavi:** Kar / Sulu Kar (T ≤ 1.5°C) | 🔴 **Pembe/Mor:** Dolu / Konvektif"
     " Şiddetli Sağanak"
 )
 
-# Detay Tablosu (Yağış Türü Sütunu Eklendi)
 with st.expander("📋 Saat Saat Tüm Meteorolojik Değerler Tablosu (Tıkla ve Aç)"):
   display_df = pd.DataFrame({
       "Saat": df["time"].dt.strftime("%H:00"),
