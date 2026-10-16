@@ -39,11 +39,11 @@ def fetch_live_forecast():
   response = requests.get(url, params=params)
   response.raise_for_status()
   df = pd.DataFrame(response.json()["hourly"])
+  df["time"] = pd.to_datetime(df["time"])
   return df, datetime.now().strftime("%H:%M:%S")
 
 
 def generate_scenario(name: str):
-  # Simülasyon tarihleri canlı 17 Ekim ile karışmasın diye mevsimine göre ayrıldı
   if "Yanlış Alarm" in name:
     hours = pd.date_range(start="2024-04-12 00:00", periods=24, freq="h")
     ecmwf = np.array([25 + 40 * np.sin(i / 3.8) ** 2 for i in range(24)])
@@ -78,7 +78,7 @@ def generate_scenario(name: str):
     tag = "20 Ocak (Kış Kar/Donma Fazı Simülasyonu)"
 
   df_sim = pd.DataFrame({
-      "time": hours,
+      "time": pd.to_datetime(hours),
       "wind_gusts_10m_ecmwf_ifs": ecmwf,
       "wind_gusts_10m_gfs_seamless": gfs,
       "wind_gusts_10m_icon_seamless": icon,
@@ -129,10 +129,9 @@ if "Canlı Operasyonel" in mode:
     df, last_update = fetch_live_forecast()
   st.sidebar.caption(f"🕒 Son Güncelleme: **{last_update}**")
 
-  target_date = st.sidebar.date_input(
-      "İncelenecek Tarih:", value=df["time"].dt.date.iloc[24]
-  )
-  df["time"] = pd.to_datetime(df["time"])
+  # Tarih seçici
+  default_date = df["time"].dt.date.iloc[24]
+  target_date = st.sidebar.date_input("İncelenecek Tarih:", value=default_date)
   df = df[df["time"].dt.date == target_date].reset_index(drop=True)
   if df.empty:
     st.warning("Seçilen tarih için veri aralığı bulunamadı.")
@@ -140,7 +139,6 @@ if "Canlı Operasyonel" in mode:
   date_label = df["time"].iloc[0].strftime("%d %B %Y (Canlı Tahmin)")
 else:
   df, date_label = generate_scenario(mode)
-  df["time"] = pd.to_datetime(df["time"])
 
 ecmwf = df["wind_gusts_10m_ecmwf_ifs"]
 gfs = df["wind_gusts_10m_gfs_seamless"]
@@ -199,7 +197,7 @@ col4.caption(f"Min Sıcaklık: {temp.min():.1f}°C | Yağış: {precip.sum():.1f
 
 st.markdown("---")
 
-# Karar Öncelik Mantığı (Önce Simülasyon Özel Durumları)
+# Karar Öncelik Mantığı
 if "Dolu" in mode:
   st.error(
       f"🚨 **DOLU VE KONVEKTİF FIRTINA ALARMI - [{peak_time}]:** Yüksek"
@@ -223,7 +221,6 @@ elif "Yanlış Alarm" in mode:
       " için iptal edildi.**"
   )
 else:
-  # Canlı Mod Kararları
   if peak_gust >= 50.0 and risk_score >= 50.0:
     st.error(
         f"🚨 **DOĞRULANMIŞ ŞİDDETLİ FIRTINA TEHLİKESİ - [{peak_time}]:** Modeller"
