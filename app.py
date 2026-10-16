@@ -53,7 +53,8 @@ def generate_scenario(name: str):
     precip = np.full(24, 0.0)
     wind_dir = np.full(24, 215.0)  # Beydağları dik açı (blokaj)
     pressure = np.full(24, 1018.0)
-    tag = "12 Nisan (İlkbahar Fırtına Simülasyonu)"
+    date_display = "12 Nisan 2024"
+    tag_sub = "İlkbahar Fırtına Simülasyonu"
 
   elif "Dolu" in name:
     hours = pd.date_range(start="2024-06-05 00:00", periods=24, freq="h")
@@ -64,7 +65,8 @@ def generate_scenario(name: str):
     precip = np.array([0 if i < 14 or i > 17 else 8.5 for i in range(24)])
     wind_dir = np.full(24, 45.0)
     pressure = np.linspace(1015, 1006, 24)
-    tag = "05 Haziran (Yaz Dolu/Süper Hücre Simülasyonu)"
+    date_display = "05 Haziran 2024"
+    tag_sub = "Yaz Dolu/Süper Hücre Simülasyonu"
 
   else:  # Kar / Donma Fazı
     hours = pd.date_range(start="2024-01-20 00:00", periods=24, freq="h")
@@ -75,7 +77,8 @@ def generate_scenario(name: str):
     precip = np.array([1.5 if 10 <= i <= 20 else 0.0 for i in range(24)])
     wind_dir = np.full(24, 15.0)
     pressure = np.full(24, 1012.0)
-    tag = "20 Ocak (Kış Kar/Donma Fazı Simülasyonu)"
+    date_display = "20 Ocak 2024"
+    tag_sub = "Kış Kar/Donma Fazı Simülasyonu"
 
   df_sim = pd.DataFrame({
       "time": pd.to_datetime(hours),
@@ -88,7 +91,7 @@ def generate_scenario(name: str):
       "temperature_2m_ecmwf_ifs": temp,
       "precipitation_ecmwf_ifs": precip,
   })
-  return df_sim, tag
+  return df_sim, date_display, tag_sub
 
 
 st.title("⚡ MetaCast: Malatya Havzası Karar-Destek Platformu")
@@ -129,16 +132,17 @@ if "Canlı Operasyonel" in mode:
     df, last_update = fetch_live_forecast()
   st.sidebar.caption(f"🕒 Son Güncelleme: **{last_update}**")
 
-  # Tarih seçici
   default_date = df["time"].dt.date.iloc[24]
   target_date = st.sidebar.date_input("İncelenecek Tarih:", value=default_date)
   df = df[df["time"].dt.date == target_date].reset_index(drop=True)
   if df.empty:
     st.warning("Seçilen tarih için veri aralığı bulunamadı.")
     st.stop()
-  date_label = df["time"].iloc[0].strftime("%d %B %Y (Canlı Tahmin)")
+
+  date_display = df["time"].iloc[0].strftime("%d %B %Y")
+  tag_sub = "Canlı Sayısal Model Tahmini"
 else:
-  df, date_label = generate_scenario(mode)
+  df, date_display, tag_sub = generate_scenario(mode)
 
 ecmwf = df["wind_gusts_10m_ecmwf_ifs"]
 gfs = df["wind_gusts_10m_gfs_seamless"]
@@ -177,9 +181,10 @@ X_input = np.column_stack([
 X_norm = (X_input - mean) / std
 probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 
+# 4 Üst Metrik Kartı (Tarih Asla Kesilmez)
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("İncelenen Senaryo / Tarih", date_label)
-col1.caption(f"Kritik Zirve: **{peak_time}**")
+col1.metric("İncelenen Tarih", date_display)
+col1.caption(f"📌 {tag_sub} | Zirve: **{peak_time}**")
 
 col2.metric("Beklenen Pik Rüzgâr", f"{peak_gust:.1f} km/s")
 col2.caption(f"Modeller Arası Sapma: ±{gust_std.mean():.1f} km/s")
@@ -235,11 +240,11 @@ else:
     )
   else:
     st.success(
-        f"✅ **STABİL ATMOSFER KOŞULLARI ({date_label}):** Malatya havzası"
+        f"✅ **STABİL ATMOSFER KOŞULLARI ({date_display}):** Malatya havzası"
         " için kritik bir afet anomalisi tespit edilmemiştir."
     )
 
-st.markdown(f"### 📊 Saatlik Rüzgâr Hamlesi Kıyası ({date_label})")
+st.markdown(f"### 📊 Saatlik Rüzgâr Hamlesi Kıyası ({date_display})")
 fig_wind = go.Figure()
 fig_wind.add_trace(
     go.Scatter(
