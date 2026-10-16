@@ -205,12 +205,19 @@ if "Yanlış Alarm" in mode or (peak_gust >= 45.0 and risk_score < 40.0):
       " merkezine inemeden sönümlenecektir. **Sarı kodlu fırtına uyarısı"
       " merkez için geçerliliğini yitirmiştir.**"
   )
-elif risk_score >= 50.0:
-  st.error(
-      f"🚨 **DOĞRULANMIŞ ŞİDDETLİ FIRTINA TEHLİKESİ - [{peak_time}]:** Modeller"
-      f" ve yapay zekâ {peak_gust:.1f} km/s hamle riskini teyit ediyor. Dağ"
-      " blokajı koridoru açık olduğundan çatı uçması ve ulaşımda aksama"
-      " tedbirleri derhal uygulanmalıdır."
+elif peak_gust >= 50.0 and risk_score >= 50.0:
+    st.error(
+        f"🚨 **DOĞRULANMIŞ ŞİDDETLİ FIRTINA TEHLİKESİ - [{peak_time}]:** Modeller"
+        f" ve yapay zekâ {peak_gust:.1f} km/s hamle riskini teyit ediyor. Dağ"
+        " blokajı koridoru açık olduğundan çatı uçması ve ulaşımda aksama"
+        " tedbirleri derhal uygulanmalıdır."
+    )
+elif peak_gust >= 30.0:
+    st.info(
+        f"💨 **ORTA KUVVETTE RÜZGÂR - [{peak_time}]:** Beklenen pik hamle"
+        f" {peak_gust:.1f} km/s seviyesindedir. Fırtına eşiğinin (50 km/s)"
+        " altındadır; kritik bir afet riski bulunmamaktadır."
+    )
   )
 elif "Dolu" in mode:
   st.error(
