@@ -19,7 +19,7 @@ def sigmoid(z):
 
 @st.cache_data(ttl=300)
 def fetch_live_metar():
-  """Malatya Erhaç Havalimanı (LTAT) canlı METAR gözlemini ve hadiselerini çözer."""
+  """Malatya Erhaç Havalimanı (LTAT) canlı METAR gözlemini ve tüm hadiseleri eşzamanlı çözer."""
   url = "https://aviationweather.gov/api/data/metar?ids=LTAT&format=json"
   try:
     resp = requests.get(url, timeout=5)
@@ -38,12 +38,30 @@ def fetch_live_metar():
       raw_metar = data.get("rawOb", "METAR LTAT Verisi")
       obs_time = data.get("reportTime", "")
 
-      # Hadise Çözümleme
+      # Eşzamanlı Çoklu Hadise Tespiti
       raw_upper = raw_metar.upper()
       is_hail = any(x in raw_upper for x in [" GR ", " GS ", "+GR", "+GS"])
       is_ts = " TS" in raw_upper or "TS " in raw_upper or "VCTS" in raw_upper
-      is_fog = " FG " in raw_upper or "FZFG" in raw_upper
-      is_snow = " SN " in raw_upper or "+SN" in raw_upper or "-SN" in raw_upper
+      is_fog = (
+          " FG " in raw_upper
+          or "FZFG" in raw_upper
+          or " BR " in raw_upper
+          or (visib_m and visib_m <= 1500)
+      )
+      is_snow = (
+          " SN " in raw_upper
+          or "+SN" in raw_upper
+          or "-SN" in raw_upper
+          or "RASN" in raw_upper
+          or "SNRA" in raw_upper
+      )
+      is_rain = (
+          " RA " in raw_upper
+          or "+RA" in raw_upper
+          or "-RA" in raw_upper
+          or "SHRA" in raw_upper
+          or "DZ" in raw_upper
+      )
 
       return {
           "status": "online",
@@ -56,6 +74,7 @@ def fetch_live_metar():
           "is_ts": is_ts,
           "is_fog": is_fog,
           "is_snow": is_snow,
+          "is_rain": is_rain,
           "raw": raw_metar,
           "time": obs_time,
       }
@@ -66,12 +85,13 @@ def fetch_live_metar():
       "speed_kmh": 0.0,
       "gust_kmh": 0.0,
       "temp_c": 12.0,
-      "altim_hpa": 1015.0,
+      "altim_hpa": 1014.0,
       "visib_m": 10000,
       "is_hail": False,
       "is_ts": False,
       "is_fog": False,
       "is_snow": False,
+      "is_rain": False,
       "raw": "LTAT İstasyonu Çevrimdışı (Simülasyon Modu)",
       "time": datetime.now().strftime("%H:%M"),
   }
@@ -299,7 +319,7 @@ col4.caption(f"Min Sıcaklık: {temp.min():.1f}°C | Yağış: {precip.sum():.1f
 
 # --- ERHAÇ HAVALİMANI (LTAT) GELİŞMİŞ İSTASYON BANDI ---
 st.markdown("---")
-m1, m2, m3, m4, m5 = st.columns([2.5, 1, 1, 1, 1.2])
+m1, m2, m3, m4, m5 = st.columns([2.0, 0.75, 0.85, 0.8, 1.6])
 m1.markdown(f"📡 **Erhaç (LTAT) Canlı METAR:** `{metar['raw']}`")
 m2.metric(
     "Termometre",
@@ -310,28 +330,73 @@ m3.metric("Yer Hamlesi", f"{metar['gust_kmh']} km/s")
 m3.caption("LTAT Ölçümü")
 m4.metric(
     "Basınç",
-    f"{metar['altim_hpa']} hPa" if metar["altim_hpa"] else "1015 hPa",
+    f"{metar['altim_hpa']} hPa" if metar["altim_hpa"] else "1014 hPa",
 )
 m4.caption("Altimetre")
 
-# Anlık Teşhis Rozeti
+# ÇOKLU HADİSE ROZET ÜRETECİ (Asla Kesilmez, Ekrana Esnek Sığar)
+active_badges = []
 if metar["is_hail"]:
-  status_badge = "🔴 DOLU / BUZ"
-elif metar["is_ts"]:
-  status_badge = "⚡ ORAJ / YILDIRIM"
-elif metar["is_fog"]:
-  status_badge = "🌫️ YOĞUN SİS"
-elif metar["is_snow"]:
-  status_badge = "❄️ AKTİF KAR"
-else:
-  status_badge = "🟢 SAKİN / AÇIK"
+  active_badges.append(
+      ("<span style='background-color: rgba(233,30,99,0.2); border: 1px solid"
+       " #e91e63; color: #ff80ab; padding: 2px 7px; border-radius: 6px;"
+       " font-size: 0.82rem; font-weight: 700;'>🔴 DOLU</span>")
+  )
+if metar["is_ts"]:
+  active_badges.append(
+      ("<span style='background-color: rgba(255,193,7,0.2); border: 1px solid"
+       " #ffc107; color: #ffe082; padding: 2px 7px; border-radius: 6px;"
+       " font-size: 0.82rem; font-weight: 700;'>⚡ ORAJ</span>")
+  )
+if metar["is_snow"]:
+  active_badges.append(
+      ("<span style='background-color: rgba(33,150,243,0.2); border: 1px solid"
+       " #2196f3; color: #90caf9; padding: 2px 7px; border-radius: 6px;"
+       " font-size: 0.82rem; font-weight: 700;'>❄️ KAR</span>")
+  )
+if metar["is_rain"] and not metar["is_snow"]:
+  active_badges.append(
+      ("<span style='background-color: rgba(3,169,244,0.2); border: 1px solid"
+       " #03a9f4; color: #81d4fa; padding: 2px 7px; border-radius: 6px;"
+       " font-size: 0.82rem; font-weight: 700;'>💧 YAĞMUR</span>")
+  )
+if metar["is_fog"]:
+  active_badges.append(
+      ("<span style='background-color: rgba(158,158,158,0.2); border: 1px"
+       " solid #9e9e9e; color: #cfd8dc; padding: 2px 7px; border-radius: 6px;"
+       " font-size: 0.82rem; font-weight: 700;'>🌫️ SİS</span>")
+  )
 
-m5.metric("Anlık Hadise", status_badge)
-m5.caption(f"Görüş: {metar['visib_m']}m" if metar["visib_m"] else "Görüş: Açık")
+if not active_badges:
+  active_badges.append(
+      ("<span style='background-color: rgba(76,175,80,0.2); border: 1px solid"
+       " #4caf50; color: #a5d6a7; padding: 2px 7px; border-radius: 6px;"
+       " font-size: 0.82rem; font-weight: 700;'>🟢 SAKİN</span>")
+  )
+
+badges_html = " ".join(active_badges)
+
+with m5:
+  st.markdown(
+      "<p style='font-size: 0.875rem; color: #9aa0a6; margin-bottom:"
+      " 4px;'>Anlık Hadise</p>",
+      unsafe_allow_html=True,
+  )
+  st.markdown(
+      f"<div style='display: flex; flex-wrap: wrap; gap: 5px; align-items:"
+      f" center;'>{badges_html}</div>",
+      unsafe_allow_html=True,
+  )
+  vis_str = (
+      f"{metar['visib_m']} m"
+      if metar["visib_m"] and metar["visib_m"] < 9999
+      else "Açık (>10 km)"
+  )
+  st.caption(f"Görüş: **{vis_str}**")
+
 st.markdown("---")
 
 # --- ÇOKLU TEHLİKE OVERRIDE KARAR MOTORU ---
-# 1. Zirai Don Kontrolü (Modeller don göstermese bile yer istasyonu <= 1°C ise)
 frost_override = (
     mode == "Canlı Operasyonel"
     and temp.min() > 1.5
@@ -339,26 +404,31 @@ frost_override = (
     and metar["temp_c"] <= 1.0
 )
 
-# 2. Dolu / Oraj Override (Modeller kaçırsa bile METAR kodunda TS veya GR varsa)
 hail_ts_override = mode == "Canlı Operasyonel" and (
     metar["is_hail"] or metar["is_ts"]
 )
 
-# 3. Fırtına Model Körlüğü Override (Modeller sakin gösterirken yer hamlesi >= 45 km/s ise)
 wind_blindness = (
     mode == "Canlı Operasyonel"
     and peak_gust < 45.0
     and (metar["gust_kmh"] >= 45.0 or pressure_diff.min() <= -3.0)
 )
 
-# 4. Sis / Havacılık Görüş Override
 fog_override = (
     mode == "Canlı Operasyonel"
     and metar["is_fog"]
     and (metar["visib_m"] and metar["visib_m"] <= 1000)
 )
 
-if hail_ts_override:
+# BİLEŞİK ÇOKLU HADİSE UYARISI (Örn: Kar + Sis veya Oraj + Dolu)
+if metar["is_snow"] and metar["is_fog"] and mode == "Canlı Operasyonel":
+  st.error(
+      "🚨 **BİLEŞİK TEHLİKE (KAR VE YOĞUN SİS):** Erhaç İstasyonunda hem kar"
+      " yağışı hem de yoğun sis aynı anda tespit edildi. Karayollarında buzlanma"
+      " ve havalimanında görüş düşüşü nedeniyle en üst düzey tedbirler"
+      " uygulanmalıdır."
+  )
+elif hail_ts_override:
   st.error(
       "🚨 **ANLIK DOLU / ORAJ TESPİT EDİLDİ (METAR OVERRIDE):** Sayısal modeller"
       " konvektif patlamayı henüz yakalamamış olsa da, Erhaç İstasyonu"
