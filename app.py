@@ -12,7 +12,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# Kesilmeleri (1014 ... gibi) kesin olarak engelleyen CSS
+# Kesilmeleri önleyen genel stil
 st.markdown(
     """
 <style>
@@ -23,6 +23,18 @@ div[data-testid="stMetricValue"] {
 div[data-testid="stMetricValue"] > div {
     white-space: nowrap !important;
     text-overflow: clip !important;
+}
+.time-window-box {
+    background: linear-gradient(90deg, rgba(255,152,0,0.12), rgba(244,67,54,0.12));
+    border-left: 5px solid #ff9800;
+    padding: 12px 18px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 </style>
 """,
@@ -36,7 +48,6 @@ def sigmoid(z):
 
 @st.cache_data(ttl=300)
 def fetch_live_metar():
-  """Malatya Erhaç Havalimanı (LTAT) canlı METAR gözlemini ve tüm hadiseleri eşzamanlı çözer."""
   url = "https://aviationweather.gov/api/data/metar?ids=LTAT&format=json"
   try:
     resp = requests.get(url, timeout=5)
@@ -55,7 +66,6 @@ def fetch_live_metar():
       raw_metar = data.get("rawOb", "METAR LTAT Verisi")
       obs_time = data.get("reportTime", "")
 
-      # Eşzamanlı Çoklu Hadise Tespiti
       raw_upper = raw_metar.upper()
       is_hail = any(x in raw_upper for x in [" GR ", " GS ", "+GR", "+GS"])
       is_ts = " TS" in raw_upper or "TS " in raw_upper or "VCTS" in raw_upper
@@ -148,7 +158,7 @@ def generate_scenario(name: str):
     icon = ecmwf * 0.90
     temp = np.full(24, 18.0)
     precip = np.full(24, 0.0)
-    wind_dir = np.full(24, 215.0)  # Beydağları dik açı
+    wind_dir = np.full(24, 215.0)
     pressure = np.full(24, 1018.0)
     date_display = "12 Nisan 2024"
     tag_sub = "İlkbahar Fırtına Simülasyonu"
@@ -165,7 +175,7 @@ def generate_scenario(name: str):
     date_display = "05 Haziran 2024"
     tag_sub = "Yaz Dolu/Süper Hücre Simülasyonu"
 
-  else:  # Kar / Donma Fazı
+  else:
     hours = pd.date_range(start="2024-01-20 00:00", periods=24, freq="h")
     ecmwf = np.full(24, 25.0)
     gfs = np.full(24, 28.0)
@@ -239,7 +249,6 @@ except Exception as e:
   st.error(f"Model yüklenemedi: {e}")
   st.stop()
 
-# Canlı METAR İstasyon Verisini Çek
 metar = fetch_live_metar()
 
 if mode == "Canlı Operasyonel":
@@ -334,13 +343,12 @@ col3.caption("Fizik Destekli ML Olasılığı")
 col4.metric("Kar Fazı / Donma Saati", f"{int(is_snow_phase.sum())} saat")
 col4.caption(f"Min Sıcaklık: {temp.min():.1f}°C | Yağış: {precip.sum():.1f} mm")
 
-# --- KISA ATMOSFERİK PARAMETRE ÖZETİ HESAPLAMALARI ---
+# --- KISA ATMOSFERİK PARAMETRE ÖZETİ ---
 total_precip = precip.sum()
 if total_precip <= 0.05:
   precip_prob_str = "%5 (Çok Düşük)"
   dom_type = "☀️ Yağış Yok"
 else:
-  # Yağış miktarına ve saatlik yayılıma göre olasılık kestirimi
   prob_val = min(95, max(30, int(25 + total_precip * 20)))
   precip_prob_str = f"%{prob_val} ({total_precip:.1f} mm)"
   if hail_potential.sum() > 0:
@@ -359,7 +367,6 @@ pres_trend_str = (
     else ("Düşüşte" if pres_diff_val < 0 else "Yükselişte")
 )
 
-# --- 4'LÜ KISA PARAMETRE ÖZET BANDI ---
 st.markdown("##### 📌 Günlük Kritik Atmosfer Parametreleri Özeti")
 s1, s2, s3, s4 = st.columns(4)
 s1.metric("Yağış İhtimali", precip_prob_str)
@@ -385,8 +392,6 @@ m2.metric(
 m2.caption("Yer İstasyonu")
 m3.metric("Yer Hamlesi", f"{metar['gust_kmh']} km/s")
 m3.caption("LTAT Ölçümü")
-
-# Basınç değeri (kesilme korumalı)
 m4.metric(
     "Basınç",
     (
@@ -397,7 +402,6 @@ m4.metric(
 )
 m4.caption("Altimetre")
 
-# ÇOKLU HADİSE ROZET ÜRETECİ (Asla Kesilmez)
 active_badges = []
 if metar["is_hail"]:
   active_badges.append(
@@ -458,6 +462,40 @@ with m5:
   st.caption(f"Görüş: **{vis_str}**")
 
 st.markdown("---")
+
+# --- ZAMAN PENCERESİ VE SÜRE HESAPLAMA MOTORU (IMPACT WINDOW) ---
+# Hadise eşiği: Rüzgar >= 30 km/s VEYA Yağış >= 0.5 mm VEYA Kar/Donma
+active_indices = df.index[
+    (gust_mean >= 30.0) | (precip >= 0.5) | (is_snow_phase == 1)
+].tolist()
+
+if active_indices:
+  start_idx = active_indices[0]
+  end_idx = active_indices[-1]
+  start_time_str = df["time"].iloc[start_idx].strftime("%H:00")
+  # Bitiş saati için sonraki saati alıyoruz
+  end_time_str = (
+      (df["time"].iloc[end_idx] + pd.Timedelta(hours=1)).strftime("%H:00")
+      if end_idx < len(df) - 1
+      else "23:59"
+  )
+  duration_hours = len(active_indices)
+  duration_minutes = duration_hours * 60
+  time_window_badge = (
+      f"⏱️ **Kritik Olay Zaman Penceresi:** `{start_time_str} - {end_time_str}`"
+      f" | ⏳ **Tahmini Süre:** `{duration_hours} Saat ({duration_minutes}"
+      f" Dakika)` | ⚡ **Zirve (Pik):** `{df['time'].iloc[peak_idx].strftime('%H:00')}`"
+  )
+else:
+  time_window_badge = (
+      "⏱️ **Kritik Olay Zaman Penceresi:** `Aktif Etki Yok` | ⏳ **Tahmini"
+      " Süre:** `0 Dakika` | 🌿 **Atmosfer Stabil**"
+  )
+
+st.markdown(
+    f"<div class='time-window-box'><span>{time_window_badge}</span></div>",
+    unsafe_allow_html=True,
+)
 
 # --- ÇOKLU TEHLİKE OVERRIDE KARAR MOTORU ---
 frost_override = (
