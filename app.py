@@ -505,7 +505,7 @@ def generate_scenario(name: str):
   return df_sim, date_display, tag_sub
 
 
-# --- HARİTA, VEKTÖR VE RADAR (dBZ) ÇİZİM MOTORU (DÜZELTİLMİŞ) ---
+# --- HARİTA, VEKTÖR VE RADAR (dBZ) ÇİZİM MOTORU (TAM UYUMLU) ---
 def build_topographic_vector_map(
     wind_deg: float,
     wind_speed: float,
@@ -514,7 +514,6 @@ def build_topographic_vector_map(
     map_df: pd.DataFrame,
     is_sim: bool = False,
 ):
-  """Malatya topoğrafyasını, rüzgâr akış vektörünü ve Marshall-Palmer radar yansıtırlık (dBZ) hücresini çizer."""
   fig = go.Figure()
   trace_layer = go.Scattermap if hasattr(go, "Scattermap") else go.Scattermapbox
 
@@ -526,19 +525,16 @@ def build_topographic_vector_map(
           lat=beydaglari_lat,
           lon=beydaglari_lon,
           mode="lines+markers",
-          line=dict(width=7, color="rgba(141, 110, 99, 0.85)"),
-          marker=dict(size=8, color="#5d4037"),
+          line=dict(width=6, color="#8d6e63"),
+          marker=dict(size=7, color="#5d4037"),
           name="🏔️ Beydağları Bariyeri (2.500m+)",
           hoverinfo="text",
-          text=[
-              "Beydağları Sıradağ Duvarı - Orografik Blokaj Hattı"
-              for _ in beydaglari_lat
-          ],
+          text="Beydağları Sıradağ Duvarı - Orografik Blokaj",
       )
   )
 
   # 2. Malatya Çanağı & Kayısı Havzası (Ova Tabanı)
-  # HATA DÜZELTİLDİ: text dizisi lat uzunluğu (5 eleman) ile eşitlendi
+  # dash="dot" parametresi Scattermap ile uyumsuz olduğu için kaldırıldı
   ova_lat = [38.32, 38.40, 38.42, 38.35, 38.32]
   ova_lon = [38.25, 38.20, 38.38, 38.42, 38.25]
   fig.add_trace(
@@ -547,18 +543,15 @@ def build_topographic_vector_map(
           lon=ova_lon,
           mode="lines",
           fill="toself",
-          fillcolor="rgba(129, 199, 132, 0.18)",
-          line=dict(width=2, color="rgba(76, 175, 80, 0.6)", dash="dot"),
+          fillcolor="rgba(76, 175, 80, 0.20)",
+          line=dict(width=2, color="#4caf50"),
           name="🌾 Malatya Çanağı (Ova Tabanı)",
           hoverinfo="text",
-          text=[
-              "Malatya Tarımsal Havzası - Gece Enverziyon Tabanı"
-              for _ in ova_lat
-          ],
+          text="Malatya Tarımsal Havzası - Gece Enverziyon Tabanı",
       )
   )
 
-  # 3. Rüzgâr Akış Vektörü (Rüzgârın estiği yönden merkeze doğru)
+  # 3. Rüzgâr Akış Vektörü
   rad = np.radians(wind_deg)
   center_lat, center_lon = 38.35, 38.28
   vector_len = 0.22
@@ -572,20 +565,14 @@ def build_topographic_vector_map(
           lon=[start_lon, center_lon],
           mode="lines+markers",
           line=dict(width=5, color=arrow_color),
-          marker=dict(
-              size=[10, 16], symbol=["circle", "triangle-up"], color=arrow_color
-          ),
+          marker=dict(size=[8, 16], color=arrow_color),
           name=f"💨 Rüzgâr Akışı ({wind_speed:.0f} km/s - {wind_deg:.0f}°)",
           hoverinfo="text",
-          text=[
-              f"Hava Akımı Başlangıcı ({wind_deg:.0f}°)",
-              f"Şehre Giriş Noktası ({wind_speed:.1f} km/s)",
-          ],
+          text=f"Rüzgâr Yönü: {wind_deg:.0f}° | Hız: {wind_speed:.1f} km/s",
       )
   )
 
   # 4. Radar Yansıtırlık (dBZ) Eko Hücresi
-  # HATA DÜZELTİLDİ: radar_lat dizisi uzunluğu ile text eşitlendi
   dbz_val, dbz_desc, dbz_fill, dbz_border = calculate_radar_dbz(
       precip_val, cape_val
   )
@@ -610,10 +597,7 @@ def build_topographic_vector_map(
             line=dict(width=2, color=dbz_border),
             name=f"📡 Radar Yansıtırlığı: {dbz_val:.1f} dBZ ({dbz_desc})",
             hoverinfo="text",
-            text=[
-                f"Radar Ekosu: {dbz_val:.1f} dBZ - {dbz_desc}"
-                for _ in radar_lat_list
-            ],
+            text=f"Radar Ekosu: {dbz_val:.1f} dBZ ({dbz_desc})",
         )
     )
 
@@ -624,7 +608,7 @@ def build_topographic_vector_map(
             lat=[row["Enlem"]],
             lon=[row["Boylam"]],
             mode="markers+text",
-            marker=dict(size=17, color=row["Risk Rengi"], opacity=0.95),
+            marker=dict(size=16, color=row["Risk Rengi"], opacity=0.95),
             text=[row["Bölge Adı"]],
             textposition="top right",
             hovertemplate=(
