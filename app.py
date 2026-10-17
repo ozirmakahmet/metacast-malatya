@@ -1166,7 +1166,7 @@ if wa_phone and wa_apikey:
     else:
       st.sidebar.error(status_text)
 
-# --- İNTERAKTİF COĞRAFİ RİSK HARİTASI (PLOTLY) ---
+# --- İNTERAKTİF COĞRAFİ RİSK HARİTASI (PLOTLY V6+ VE ESKİ SÜRÜM UYUMLU) ---
 st.markdown("### 🗺️ Malatya Havzası İnteraktif Coğrafi Risk Haritası")
 
 erh_gust = peak_gust
@@ -1245,33 +1245,62 @@ map_df = pd.DataFrame({
 })
 
 fig_map = go.Figure()
-for _, row in map_df.iterrows():
-  fig_map.add_trace(
-      go.Scattermapbox(
-          lat=[row["Enlem"]],
-          lon=[row["Boylam"]],
-          mode="markers+text",
-          marker=dict(size=18, color=row["Risk Rengi"], opacity=0.9),
-          text=[row["Bölge Adı"]],
-          textposition="top right",
-          hovertemplate=(
-              f"<b>{row['Bölge Adı']}</b> ({row['Rakım']})<br>Durum:"
-              f" {row['Durum']}<br>Pik Rüzgâr: {row['Pik Hamle (km/s)']} km/s |"
-              f" Min Sıcaklık: {row['Gece Min (°C)']}°C<extra></extra>"
-          ),
-          showlegend=False,
-      )
+
+if hasattr(go, "Scattermap"):
+  for _, row in map_df.iterrows():
+    fig_map.add_trace(
+        go.Scattermap(
+            lat=[row["Enlem"]],
+            lon=[row["Boylam"]],
+            mode="markers+text",
+            marker=dict(size=18, color=row["Risk Rengi"], opacity=0.9),
+            text=[row["Bölge Adı"]],
+            textposition="top right",
+            hovertemplate=(
+                f"<b>{row['Bölge Adı']}</b> ({row['Rakım']})<br>Durum:"
+                f" {row['Durum']}<br>Pik Rüzgâr: {row['Pik Hamle (km/s)']} km/s"
+                f" | Min Sıcaklık: {row['Gece Min (°C)']}°C<extra></extra>"
+            ),
+            showlegend=False,
+        )
+    )
+  fig_map.update_layout(
+      map=dict(
+          style="open-street-map",
+          center=dict(lat=38.25, lon=38.15),
+          zoom=9.1,
+      ),
+      margin=dict(l=0, r=0, t=0, b=0),
+      height=400,
+  )
+else:
+  for _, row in map_df.iterrows():
+    fig_map.add_trace(
+        go.Scattermapbox(
+            lat=[row["Enlem"]],
+            lon=[row["Boylam"]],
+            mode="markers+text",
+            marker=dict(size=18, color=row["Risk Rengi"], opacity=0.9),
+            text=[row["Bölge Adı"]],
+            textposition="top right",
+            hovertemplate=(
+                f"<b>{row['Bölge Adı']}</b> ({row['Rakım']})<br>Durum:"
+                f" {row['Durum']}<br>Pik Rüzgâr: {row['Pik Hamle (km/s)']} km/s"
+                f" | Min Sıcaklık: {row['Gece Min (°C)']}°C<extra></extra>"
+            ),
+            showlegend=False,
+        )
+    )
+  fig_map.update_layout(
+      mapbox=dict(
+          style="open-street-map",
+          center=dict(lat=38.25, lon=38.15),
+          zoom=9.1,
+      ),
+      margin=dict(l=0, r=0, t=0, b=0),
+      height=400,
   )
 
-fig_map.update_layout(
-    mapbox=dict(
-        style="open-street-map",
-        center=dict(lat=38.25, lon=38.15),
-        zoom=9.1,
-    ),
-    margin=dict(l=0, r=0, t=0, b=0),
-    height=400,
-)
 st.plotly_chart(fig_map, use_container_width=True)
 
 # 4 Bölge Kartları
