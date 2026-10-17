@@ -1624,56 +1624,57 @@ with r_col4:
   )
 # --- MEKÂNSAL FARKINDALIK (HARİTA & OROGRAFİ) ---
 st.markdown("### 🧭 Mekânsal Rüzgâr Dinamikleri & Orografik Etkileşim")
-c_map1, c_map2 = st.columns([1.5, 1.5])
+
+c_map1, c_map2 = st.columns([1.7, 1.3])
 with c_map1:
     # Malatya Merkezi
     center_lat, center_lon = 38.3552, 38.3095
     
-    # Oku daha belirgin yapmak için mesafeyi biraz uzattık
+    # Oku daha belirgin yapmak için
     wind_rad = np.radians(live_wind_deg)
-    start_lat = center_lat + (0.3 * np.cos(wind_rad))
-    start_lon = center_lon + (0.3 * np.sin(wind_rad))
+    start_lat = center_lat + (0.25 * np.cos(wind_rad))
+    start_lon = center_lon + (0.25 * np.sin(wind_rad))
 
     fig_map = go.Figure()
 
-    # Beydağları Bölgesi (Güneybatı) - Kalkan/Poligon Şeklinde
+    # Beydağları Bölgesi (Daha geniş ve doğal bir kalkan)
     fig_map.add_trace(go.Scattermap(
-        lat=[38.10, 38.25, 38.20, 38.05, 38.10], # Kapalı alan (Poligon)
-        lon=[38.00, 38.10, 38.25, 38.15, 38.00],
+        lat=[38.10, 38.15, 38.25, 38.20, 38.05, 37.95, 38.10], 
+        lon=[38.00, 38.05, 38.20, 38.35, 38.25, 38.05, 38.00],
         mode='lines',
         fill='toself',
-        fillcolor='rgba(121, 85, 72, 0.4)',
-        line=dict(width=2, color='rgba(121, 85, 72, 0.9)'),
-        name="Beydağları (Orografik Bariyer)",
+        fillcolor='rgba(121, 85, 72, 0.45)', # Yarı saydam kahverengi
+        line=dict(width=2, color='rgba(90, 60, 50, 0.9)'),
+        name="Beydağları",
         hoverinfo="name"
     ))
 
-    # Karakaya Barajı Bölgesi (Doğu) - Havza Şeklinde
+    # Karakaya Barajı Bölgesi (Baraj gölünün kıvrımlarına daha uygun)
     fig_map.add_trace(go.Scattermap(
-        lat=[38.35, 38.55, 38.60, 38.40, 38.35],
-        lon=[38.65, 38.70, 38.85, 38.80, 38.65],
+        lat=[38.35, 38.45, 38.60, 38.65, 38.50, 38.30, 38.35],
+        lon=[38.65, 38.75, 38.80, 38.65, 38.55, 38.60, 38.65],
         mode='lines',
         fill='toself',
-        fillcolor='rgba(3, 169, 244, 0.4)',
-        line=dict(width=2, color='rgba(3, 169, 244, 0.9)'),
-        name="Karakaya Barajı (Nem Kaynağı)",
+        fillcolor='rgba(3, 169, 244, 0.45)', # Yarı saydam mavi
+        line=dict(width=2, color='rgba(2, 119, 189, 0.9)'),
+        name="Karakaya Barajı",
         hoverinfo="name"
     ))
 
-    # Erhaç İstasyonu (Doğrudan Harita Üzerinde Yazı)
+    # Erhaç İstasyonu
     fig_map.add_trace(go.Scattermap(
         lat=[38.4312],
         lon=[38.0898],
         mode='markers+text',
-        marker=dict(size=14, color='orange'),
-        text=["Erhaç (LTAT)"],
+        marker=dict(size=14, color='#ff9800'),
+        text=["Erhaç İstasyonu (LTAT)"],
         textposition="top right",
-        textfont=dict(color="orange", size=13, family="Arial Black"),
+        textfont=dict(color="#ff9800", size=14, family="Arial Black"),
         name="Erhaç (LTAT)",
         hoverinfo="name"
     ))
 
-    # Şehir Merkezi (Doğrudan Harita Üzerinde Yazı)
+    # Şehir Merkezi
     fig_map.add_trace(go.Scattermap(
         lat=[center_lat],
         lon=[center_lon],
@@ -1681,7 +1682,7 @@ with c_map1:
         marker=dict(size=14, color='black'),
         text=["Malatya Merkez"],
         textposition="bottom right",
-        textfont=dict(color="black", size=13, family="Arial Black"),
+        textfont=dict(color="black", size=14, family="Arial Black"),
         name="Malatya Merkez",
         hoverinfo="name"
     ))
@@ -1691,43 +1692,60 @@ with c_map1:
         lat=[start_lat, center_lat],
         lon=[start_lon, center_lon],
         mode='lines+markers',
-        line=dict(width=4, color='red'),
-        marker=dict(size=12, color='red'), 
-        name=f"Anlık Rüzgar ({live_wind_deg:.0f}°)",
+        line=dict(width=5, color='red'),
+        marker=dict(size=[8, 15], color='red', symbol='arrow-down'), 
+        name=f"Rüzgâr Yönü ({live_wind_deg:.0f}°)",
         hoverinfo="name"
     ))
 
     fig_map.update_layout(
         map=dict(
             style="white-bg", 
-            center=dict(lat=38.35, lon=38.35),
+            center=dict(lat=38.35, lon=38.40),
             zoom=8.0,
             layers=[
                 dict(
                     sourcetype="raster",
-                    # Yükseklik ve kabartmaları gösteren OpenTopoMap sunucusu
                     source=["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"],
                     below="traces"
                 )
             ]
         ),
         showlegend=False,
-        height=340,
+        height=380,
         margin=dict(l=0, r=0, t=0, b=0)
     )
     st.plotly_chart(fig_map, use_container_width=True)
+    
+    # Harita Göstergesi (Lejant)
+    st.markdown(
+        """
+        <div style="display: flex; gap: 15px; justify-content: center; font-size: 0.85rem; padding-top: 5px; color: #cfd8dc;">
+            <div style="display: flex; align-items: center; gap: 5px;"><div style="width: 12px; height: 12px; background-color: rgba(121, 85, 72, 0.7); border: 1px solid #5a3c32;"></div> Beydağları (Dağlık Engel)</div>
+            <div style="display: flex; align-items: center; gap: 5px;"><div style="width: 12px; height: 12px; background-color: rgba(3, 169, 244, 0.7); border: 1px solid #0277bd;"></div> Karakaya Barajı (Nem Havzası)</div>
+            <div style="display: flex; align-items: center; gap: 5px;"><div style="width: 20px; height: 3px; background-color: red;"></div> Rüzgârın Geldiği Yön</div>
+        </div>
+        """, unsafe_allow_html=True
+    )
 
 with c_map2:
     st.markdown(
         f"""
-        <div class="benchmark-box" style="height: 100%; display: flex; flex-direction: column; justify-content: center; margin-top: 0;">
-            <h5 style="margin: 0 0 10px 0; color: #ffb74d;">⛰️ Bölgesel Etki Analizi & De-Warning</h5>
-            <p style="font-size: 0.95rem; line-height: 1.6; color: #eceff1; margin-bottom: 8px;">
-                <strong>Mevcut Rüzgâr Yönü:</strong> <span style="color: #f44336; font-weight: bold;">{live_wind_deg:.0f}°</span>
+        <div class="benchmark-box" style="height: 100%; display: flex; flex-direction: column; justify-content: center; margin-top: 0; padding: 20px;">
+            <h5 style="margin: 0 0 15px 0; color: #ffb74d; border-bottom: 1px solid rgba(255,183,77,0.3); padding-bottom: 10px;">⛰️ Orografik Karar Motoru (De-Warning)</h5>
+            
+            <p style="font-size: 1.05rem; color: #eceff1; margin-bottom: 15px;">
+                <strong>Anlık Rüzgâr Yönü:</strong> <span style="color: #f44336; font-size: 1.2rem; font-weight: bold; background-color: rgba(244,67,54,0.1); padding: 2px 6px; border-radius: 4px;">{live_wind_deg:.0f}°</span>
             </p>
-            <p style="font-size: 0.9rem; line-height: 1.5; color: #cfd8dc; margin-bottom:0;">
-                MetaCast karar motoru, Malatya'nın topoğrafik yapısını aktif kısıt olarak kullanır. Rüzgâr haritada işaretli <strong>Beydağları bariyerinden (Güneybatı)</strong> estiğinde, orografik sürtünme nedeniyle vadi içinde şiddet kaybeder ve yapay zeka gereksiz fırtına alarmlarını iptal eder (<em>De-Warning</em>). Rüzgâr <strong>Karakaya Barajı (Doğu)</strong> üzerinden estiğinde ise Malatya Çanağı'na nem taşır; bu durum zirai don riskini doğrudan değiştirir.
+            
+            <p style="font-size: 0.95rem; line-height: 1.6; color: #b0bec5; margin-bottom:12px;">
+                Model, Malatya'nın topoğrafik özelliklerini makine öğrenmesi kısıtı olarak kullanır:
             </p>
+            
+            <ul style="font-size: 0.9rem; line-height: 1.5; color: #cfd8dc; margin-bottom: 0; padding-left: 20px;">
+                <li style="margin-bottom: 8px;"><strong>Dağ Blokajı (Kahverengi Alan):</strong> Rüzgâr haritada işaretli Beydağları üzerinden (Güneybatı 215°) estiğinde orografik sürtünme yaşar. Yapay zeka bu durumu algılar ve gereksiz fırtına alarmlarını iptal eder.</li>
+                <li><strong>Nem Taşınımı (Mavi Alan):</strong> Rüzgâr Karakaya Barajı yönünden (Doğu) estiğinde ise Malatya çanağına ekstra nem taşır. Model bu nemi hesaplayarak Zirai Don eşiklerini günceller.</li>
+            </ul>
         </div>
         """, unsafe_allow_html=True
     )
