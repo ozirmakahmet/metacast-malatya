@@ -684,12 +684,25 @@ if mode == "What-If Laboratuvarı":
         "Termodinamik CAPE (J/kg):", 0, 2800, def_cape, key="sim_cp"
     )
 
-  sim_speed = sim_gust * 0.45
-sim_angle_diff = np.radians(sim_dir - 215.0)
-sim_blockage = float(np.abs(np.cos(sim_angle_diff)))
-sim_gust_factor = min(5.0, max(1.0, sim_gust / (sim_speed + 1e-5)))
-sim_is_snow = 1.0 if sim_temp <= 1.5 else 0.0
-sim_hail_pot = 1.0 if (sim_cape >= 900.0 or sim_temp >= 24.0) else 0.0
+ sim_speed = sim_gust * 0.45
+  sim_angle_diff = np.radians(sim_dir - 215.0)
+  sim_blockage = float(np.abs(np.cos(sim_angle_diff)))
+  sim_gust_factor = min(5.0, max(1.0, sim_gust / (sim_speed + 1e-5)))
+  sim_is_snow = 1.0 if sim_temp <= 1.5 else 0.0
+  sim_hail_pot = 1.0 if (sim_cape >= 900.0 or sim_temp >= 24.0) else 0.0
+
+  # --- FİZİKSEL TUTARLILIK DENETİMİ (PHYSICS SANITY CHECK) ---
+  physics_warnings = []
+  if sim_cape > 1000 and sim_temp < 10.0:
+      physics_warnings.append("⚠️ **Termodinamik Çelişki:** Soğuk havada (<10°C) yüksek konvektif enerji (CAPE >1000) oluşması fiziksel olarak zordur. Model bunu yapay bir anomali olarak değerlendirebilir.")
+  if sim_temp <= 2.0 and sim_cloud > 60:
+      physics_warnings.append("ℹ️ **Radyasyon Donu Kısıtı:** Bulutluluk yüksek olduğu için yer ışıması (radyasyonel soğuma) engellenir. Bu senaryoda gerçekleşecek don, radyasyon donu değil; rüzgârlı 'Adveksiyon Donu' karakterine geçer.")
+  if sim_gust > 70 and sim_cloud < 20 and sim_cape < 100:
+      physics_warnings.append("ℹ️ **Kuru Fırtına Tespiti:** Bulutsuz ve stabil atmosferde (CAPE=0) bu şiddetteki hamleler ancak çok güçlü bir sinoptik basınç gradyanıyla mümkündür.")
+
+  if physics_warnings:
+      for pw in physics_warnings:
+          st.warning(pw)
 
 # --- FİZİKSEL TUTARLILIK DENETİMİ (PHYSICS SANITY CHECK) ---
 physics_warnings = []
