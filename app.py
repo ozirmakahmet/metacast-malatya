@@ -1732,19 +1732,19 @@ with c_map2:
     st.markdown(
         f"""
         <div class="benchmark-box" style="height: 100%; display: flex; flex-direction: column; justify-content: center; margin-top: 0; padding: 20px;">
-            <h5 style="margin: 0 0 15px 0; color: #ffb74d; border-bottom: 1px solid rgba(255,183,77,0.3); padding-bottom: 10px;">⛰️ Orografik Karar Motoru (De-Warning)</h5>
+            <h5 style="margin: 0 0 15px 0; color: #ffb74d; border-bottom: 1px solid rgba(255,183,77,0.3); padding-bottom: 10px;">⛰️ Orografik Karar Motoru (De-Warning Modülü)</h5>
             
             <p style="font-size: 1.05rem; color: #eceff1; margin-bottom: 15px;">
                 <strong>Anlık Rüzgâr Yönü:</strong> <span style="color: #f44336; font-size: 1.2rem; font-weight: bold; background-color: rgba(244,67,54,0.1); padding: 2px 6px; border-radius: 4px;">{live_wind_deg:.0f}°</span>
             </p>
             
             <p style="font-size: 0.95rem; line-height: 1.6; color: #b0bec5; margin-bottom:12px;">
-                Model, Malatya'nın topoğrafik özelliklerini makine öğrenmesi kısıtı olarak kullanır:
+                MetaCast, Malatya havzasının fiziki coğrafyasını dinamik bir modelleme kısıtı (Physics-Informed) olarak kullanır:
             </p>
             
             <ul style="font-size: 0.9rem; line-height: 1.5; color: #cfd8dc; margin-bottom: 0; padding-left: 20px;">
-                <li style="margin-bottom: 8px;"><strong>Dağ Blokajı (Kahverengi Alan):</strong> Rüzgâr haritada işaretli Beydağları üzerinden (Güneybatı 215°) estiğinde orografik sürtünme yaşar. Yapay zeka bu durumu algılar ve gereksiz fırtına alarmlarını iptal eder.</li>
-                <li><strong>Nem Taşınımı (Mavi Alan):</strong> Rüzgâr Karakaya Barajı yönünden (Doğu) estiğinde ise Malatya çanağına ekstra nem taşır. Model bu nemi hesaplayarak Zirai Don eşiklerini günceller.</li>
+                <li style="margin-bottom: 8px;"><strong>Orografik Sürtünme ve Bariyer Etkisi (Kahverengi Alan):</strong> Rüzgâr haritada işaretli Beydağları yönünden (Güneybatı ~215°) estiğinde, dağ silsilesinin oluşturduğu kalkan hava kütlesini sönümler. Model bu fiziksel engeli hesaplayarak şehir merkezi için oluşan sahte fırtına uyarılarını iptal eder (<em>De-Warning</em>).</li>
+                <li><strong>Göl Etkisi ve Termal Tamponlama (Mavi Alan):</strong> Karakaya Baraj Gölü (Doğu), bölge için büyük bir nem deposu ve termal regülatördür. Rüzgâr bu su kütlesi üzerinden vadiye girdiğinde model, havadaki nem oranının (çiy noktası) yükseleceğini hesaplar ve zirai don tahmin modelini bu yeni termodinamik veriye göre kalibre eder.</li>
             </ul>
         </div>
         """, unsafe_allow_html=True
