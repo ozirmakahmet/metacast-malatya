@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# Kesilmeleri önleyen genel stil
+# Kesilmeleri önleyen ve kartları biçimlendiren stil
 st.markdown(
     """
 <style>
@@ -52,6 +52,50 @@ div[data-testid="stMetricValue"] > div {
 
 def sigmoid(z):
   return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
+
+
+def validate_telemetry(temp, speed_kmh, gust_kmh, altim_hpa):
+  """Fiziksel Mantık Denetimi (Sanity Check)
+
+  Bozuk sensör, teleks aktarım bozulması veya uçuk verileri filtreler.
+  """
+  warnings = []
+  is_valid = True
+
+  # 1. Sıcaklık Sınırı (-30°C ile +50°C arası)
+  valid_temp = temp
+  if temp is not None:
+    if not (-30.0 <= temp <= 50.0):
+      warnings.append(
+          f"Uçuk Termometre Değeri ({temp}°C) - Sensör Hatası Nedeniyle"
+          " Filtrelendi"
+      )
+      valid_temp = None
+      is_valid = False
+
+  # 2. Rüzgâr / Hamle Sınırı (0 - 200 km/s arası)
+  valid_speed = speed_kmh
+  valid_gust = gust_kmh
+  if not (0.0 <= speed_kmh <= 200.0) or not (0.0 <= gust_kmh <= 220.0):
+    warnings.append(
+        f"Fizik Dışı Rüzgâr Hamlesi ({gust_kmh} km/s) - Telemetri Hatası Olarak"
+        " Ayıklandı"
+    )
+    valid_speed = 0.0
+    valid_gust = 0.0
+    is_valid = False
+
+  # 3. Altimetre Basınç Sınırı (950 - 1060 hPa arası)
+  valid_altim = altim_hpa
+  if altim_hpa is not None:
+    if not (950.0 <= altim_hpa <= 1060.0):
+      warnings.append(
+          f"Anormal Altimetre Basıncı ({altim_hpa} hPa) - Barometre Hatası"
+      )
+      valid_altim = None
+      is_valid = False
+
+  return is_valid, valid_temp, valid_speed, valid_gust, valid_altim, warnings
 
 
 def parse_metar_clouds(raw_metar: str) -> str:
@@ -97,16 +141,23 @@ def fetch_live_metar():
       data = resp.json()[0]
       wspd_kt = data.get("wspd", 0) or 0
       wgst_kt = data.get("wgst", 0) or wspd_kt
-      speed_kmh = wspd_kt * 1.852
-      gust_kmh = wgst_kt * 1.852
-      temp_c = data.get("temp", None)
-      altim_hpa = data.get("altim", None)
+      raw_speed_kmh = wspd_kt * 1.852
+      raw_gust_kmh = wgst_kt * 1.852
+      raw_temp = data.get("temp", None)
+      raw_altim = data.get("altim", None)
       visib_sm = data.get("visib", None)
       visib_m = (
           round(visib_sm * 1609.34) if isinstance(visib_sm, (int, float)) else None
       )
       raw_metar = data.get("rawOb", "METAR LTAT Verisi")
       obs_time = data.get("reportTime", "")
+
+      # Sanity Check Filtrelemesi
+      is_valid, temp_c, speed_kmh, gust_kmh, altim_hpa, telemetry_warnings = (
+          validate_telemetry(
+              raw_temp, raw_speed_kmh, raw_gust_kmh, raw_altim
+          )
+      )
 
       raw_upper = raw_metar.upper()
       is_hail = any(x in raw_upper for x in [" GR ", " GS ", "+GR", "+GS"])
@@ -135,7 +186,7 @@ def fetch_live_metar():
       cloud_desc = parse_metar_clouds(raw_metar)
 
       return {
-          "status": "online",
+          "status": "online" if is_valid else "degraded",
           "speed_kmh": round(speed_kmh, 1),
           "gust_kmh": round(gust_kmh, 1),
           "temp_c": temp_c,
@@ -147,25 +198,32 @@ def fetch_live_metar():
           "is_snow": is_snow,
           "is_rain": is_rain,
           "cloud_desc": cloud_desc,
+          "warnings": telemetry_warnings,
           "raw": raw_metar,
           "time": obs_time,
       }
   except Exception:
     pass
+
+  # Fail-Safe Modu
   return {
       "status": "offline",
       "speed_kmh": 0.0,
       "gust_kmh": 0.0,
-      "temp_c": 12.0,
-      "altim_hpa": 1014.0,
-      "visib_m": 10000,
+      "temp_c": None,
+      "altim_hpa": None,
+      "visib_m": None,
       "is_hail": False,
       "is_ts": False,
       "is_fog": False,
       "is_snow": False,
       "is_rain": False,
-      "cloud_desc": "Açık / Bulutsuz",
-      "raw": "LTAT İstasyonu Çevrimdışı (Simülasyon Modu)",
+      "cloud_desc": "İstasyon Bağlantısı Yok",
+      "warnings": [
+          "NOAA/Aviation API bağlantısı kurulamadı. İstasyon verisi"
+          " çevrimdışı."
+      ],
+      "raw": "LTAT İstasyonu Çevrimdışı (Fail-Safe Modu)",
       "time": datetime.now().strftime("%H:%M"),
   }
 
@@ -295,7 +353,7 @@ def generate_scenario(name: str):
 st.title("⚡ MetaCast: Malatya Havzası Karar-Destek Platformu")
 st.markdown(
     "📍 **Hedef Bölge:** Malatya Merkez, Battalgazi & Erhaç (LTAT) | 🔬 **Fizik"
-    " Destekli Hibrit ML + METAR İstasyon Doğrulaması**"
+    " Destekli Hibrit ML + METAR Doğrulaması**"
 )
 
 # --- SOL MENÜ ---
@@ -337,10 +395,26 @@ try:
   mean = np.array(payload["mean"])
   std = np.array(payload["std"])
 except Exception as e:
-  st.error(f"Model yüklenemedi: {e}")
+  st.error(f"Model ağırlıkları yüklenemedi: {e}")
   st.stop()
 
 metar = fetch_live_metar()
+
+# FAIL-SAFE VE SANITY CHECK UYARI BANTLARI
+if metar["status"] == "offline":
+  st.warning(
+      "⚠️ **İSTASYON VERİ BAĞLANTISI KESİLDİ (FAIL-SAFE AKTİF):** Erhaç (LTAT)"
+      " yer istasyonu telemetrisi şu anda çevrimdışı. Sistem otomatik olarak"
+      " 'Güvenli Mod'a geçmiştir; kararlar küresel sayısal modeller konsensüsü"
+      " ile üretilmektedir."
+  )
+elif metar["status"] == "degraded" and metar["warnings"]:
+  st.error(
+      "⚠️ **TELEMETRİ SANITY CHECK UYARISI (BOZUK SENSÖR):** Erhaç yer"
+      " istasyonundan gelen bazı veriler fiziksel mantık sınırlarını aştığı için"
+      f" filtrelendi: *{' | '.join(metar['warnings'])}*. Hatalı sensör"
+      " değerleri karar motoruna dahil edilmemiştir."
+  )
 
 if mode == "Canlı Operasyonel":
   with st.spinner("Canlı atmosfer modelleri çekiliyor..."):
@@ -384,7 +458,6 @@ cloud_cover = df.get(
     df.get("cloud_cover", pd.Series(np.zeros(len(df)))),
 )
 
-# Gece Açık Hava & Zirai Don Değerlendirmesi
 night_mask = (df["time"].dt.hour >= 21) | (df["time"].dt.hour <= 7)
 night_temps = temp[night_mask]
 night_clouds = cloud_cover[night_mask]
@@ -401,7 +474,6 @@ else:
 
 is_radiation_frost_danger = night_min_temp <= 2.0 and night_avg_cloud <= 35.0
 
-# Yağış türü dağılımı
 precip_types = []
 precip_colors = []
 for t_val, p_val, g_val in zip(temp, precip, gust_mean):
@@ -436,7 +508,6 @@ X_input = np.column_stack([
 X_norm = (X_input - mean) / std
 probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 
-# 4 Üst Metrik Kartı
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("İncelenen Tarih", date_display)
 col1.caption(f"📌 {tag_sub} | Zirve: **{peak_time}**")
@@ -598,10 +669,7 @@ with m5:
 
 st.markdown("---")
 
-# ==============================================================================
-# 🎯 YENİ EKLENEN 2 ANALİTİK KART: MODEL GÜVENİLİRLİĞİ & BAĞIMSIZ TEHLİKE TESPİTİ
-# ==============================================================================
-# Mevcut saatteki model tahminini al
+# --- MODEL GÜVENİLİRLİĞİ VE İSTASYON BAZLI BAĞIMSIZ TEHLİKE TESPİTİ ---
 now_hour = datetime.now().hour
 cur_idx = (
     now_hour
@@ -613,42 +681,55 @@ mod_gust_now = float(gust_mean.iloc[cur_idx])
 mod_temp_now = float(temp.iloc[cur_idx])
 mod_pres_now = float(df["surface_pressure_ecmwf_ifs"].iloc[cur_idx])
 
-# 1. Delta (Fark) ve Güvenilirlik Hesaplaması
 obs_gust = (
     float(metar["gust_kmh"]) if metar["gust_kmh"] else float(metar["speed_kmh"])
 )
 obs_temp = float(metar["temp_c"]) if metar["temp_c"] is not None else None
 obs_pres = float(metar["altim_hpa"]) if metar["altim_hpa"] else None
 
-delta_wind = mod_gust_now - obs_gust
-delta_temp = (mod_temp_now - obs_temp) if obs_temp is not None else 0.0
-delta_pres = (mod_pres_now - obs_pres) if obs_pres is not None else 0.0
+if metar["status"] != "offline":
+  delta_wind = mod_gust_now - obs_gust
+  delta_temp = (mod_temp_now - obs_temp) if obs_temp is not None else 0.0
+  delta_pres = (mod_pres_now - obs_pres) if obs_pres is not None else 0.0
 
-# Güvenilirlik Puanı Formülü (Hata arttıkça puan düşer)
-wind_penalty = min(50.0, abs(delta_wind) * 2.5)
-temp_penalty = min(30.0, abs(delta_temp) * 6.0)
-pres_penalty = min(20.0, abs(delta_pres) * 2.0)
-model_reliability_score = max(
-    15.0, 100.0 - (wind_penalty + temp_penalty + pres_penalty)
-)
+  wind_penalty = min(50.0, abs(delta_wind) * 2.5)
+  temp_penalty = min(30.0, abs(delta_temp) * 6.0)
+  pres_penalty = min(20.0, abs(delta_pres) * 2.0)
+  model_reliability_score = max(
+      15.0, 100.0 - (wind_penalty + temp_penalty + pres_penalty)
+  )
 
-if model_reliability_score >= 80:
-  rel_status = "🟢 Yüksek Uyum (Gözlemle Tutarlı)"
-  bias_comment = "Sayısal modeller yer istasyonu ile yüksek paralellikte."
-elif model_reliability_score >= 55:
-  rel_status = "🟡 Orta Düzey Sapma"
-  bias_comment = (
-      "Model ile istasyon arasında kısmi ayrışma var; yerel rüzgâr/sıcaklık"
-      " sapması izlenmeli."
+  if model_reliability_score >= 80:
+    rel_status = "🟢 Yüksek Uyum (Gözlemle Tutarlı)"
+    bias_comment = "Sayısal modeller yer istasyonu ile yüksek paralellikte."
+  elif model_reliability_score >= 55:
+    rel_status = "🟡 Orta Düzey Sapma"
+    bias_comment = (
+        "Model ile istasyon arasında kısmi ayrışma var; yerel rüzgâr/sıcaklık"
+        " sapması izlenmeli."
+    )
+  else:
+    rel_status = "🔴 Düşük Güvenilirlik (Model Körlüğü Riski)"
+    bias_comment = (
+        "Model tahminleri yerel yer ölçümünden koptu! Kararlarda METAR"
+        " gözlemi esas alınmalıdır."
+    )
+  delta_display = (
+      f"<div><strong>Δ Rüzgâr:</strong> {delta_wind:+.1f} km/s</div><div><strong>Δ"
+      f" Sıcaklık:</strong> {delta_temp:+.1f} °C</div><div><strong>Δ"
+      f" Basınç:</strong> {delta_pres:+.1f} hPa</div>"
   )
 else:
-  rel_status = "🔴 Düşük Güvenilirlik (Model Körlüğü Riski)"
+  model_reliability_score = 50.0
+  rel_status = "⚪ İstasyon Çevrimdışı (Hesaplanamıyor)"
   bias_comment = (
-      "Model tahminleri yerel yer ölçümünden koptu! Kararlarda METAR"
-      " gözlemi esas alınmalıdır."
+      "Erhaç verisi alınamadığı için model doğrulama puanı askıya alındı."
+  )
+  delta_display = (
+      "<div><strong>Δ Rüzgâr:</strong> --</div><div><strong>Δ Sıcaklık:</strong>"
+      " --</div><div><strong>Δ Basınç:</strong> --</div>"
   )
 
-# 2. Modellerden Bağımsız Yerel Tehlike Tespiti
 indep_hazards = []
 indep_level = "🟢 GÜVENLİ / SAKİN"
 indep_badge_color = "#4caf50"
@@ -696,7 +777,6 @@ if not indep_hazards:
 
 hazards_list_str = "<br>• ".join(indep_hazards)
 
-# İki Kartı Yan Yana Yerleştir
 v_col1, v_col2 = st.columns(2)
 
 with v_col1:
@@ -709,9 +789,7 @@ with v_col1:
         </div>
         <p style="margin: 0; font-size: 0.9rem; color: #cfd8dc;"><strong>Doğrulama Durumu:</strong> {rel_status}</p>
         <div style="margin-top: 8px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 0.85rem;">
-            <div><strong>Δ Rüzgâr:</strong> {delta_wind:+.1f} km/s</div>
-            <div><strong>Δ Sıcaklık:</strong> {delta_temp:+.1f} °C</div>
-            <div><strong>Δ Basınç:</strong> {delta_pres:+.1f} hPa</div>
+            {delta_display}
         </div>
         <p style="margin: 8px 0 0 0; font-size: 0.8rem; color: #9aa0a6;"><em>💡 {bias_comment}</em></p>
     </div>
