@@ -37,6 +37,13 @@ div[data-testid="stMetricValue"] > div {
     flex-wrap: wrap;
     gap: 10px;
 }
+.card-box {
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 15px;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -192,7 +199,6 @@ def fetch_live_forecast():
 
 def generate_scenario(name: str):
   if "Zirai Don" in name:
-    # 14 Nisan: Gece açık ve 04:00-06:00 arası -1.5°C'ye inen radyasyon donu
     hours = pd.date_range(start="2024-04-14 00:00", periods=24, freq="h")
     ecmwf = np.full(24, 8.0)
     gfs = np.full(24, 7.0)
@@ -224,7 +230,7 @@ def generate_scenario(name: str):
         1.5,
     ])
     precip = np.full(24, 0.0)
-    cloud = np.full(24, 5.0)  # %5 açık gökyüzü
+    cloud = np.full(24, 5.0)
     wind_dir = np.full(24, 180.0)
     pressure = np.full(24, 1024.0)
     date_display = "14 Nisan 2024"
@@ -323,7 +329,6 @@ else:
         ],
     )
 
-# Model ağırlıklarını oku
 try:
   with open("models/metacast_weights.json", "r", encoding="utf-8") as f:
     payload = json.load(f)
@@ -339,12 +344,12 @@ metar = fetch_live_metar()
 
 if mode == "Canlı Operasyonel":
   with st.spinner("Canlı atmosfer modelleri çekiliyor..."):
-    df, last_update = fetch_live_forecast()
+    df_raw, last_update = fetch_live_forecast()
   st.sidebar.caption(f"🕒 Son Model Güncellemesi: **{last_update}**")
 
-  default_date = df["time"].dt.date.iloc[24]
+  default_date = df_raw["time"].dt.date.iloc[24]
   target_date = st.sidebar.date_input("İncelenecek Tarih:", value=default_date)
-  df = df[df["time"].dt.date == target_date].reset_index(drop=True)
+  df = df_raw[df_raw["time"].dt.date == target_date].reset_index(drop=True)
   if df.empty:
     st.warning("Seçilen tarih için veri aralığı bulunamadı.")
     st.stop()
@@ -379,8 +384,7 @@ cloud_cover = df.get(
     df.get("cloud_cover", pd.Series(np.zeros(len(df)))),
 )
 
-# --- GECE AÇIK HAVA & ZİRAİ DON HESAPLAMA MOTORU ---
-# Gece saatleri: 21:00 - 07:00 arası
+# Gece Açık Hava & Zirai Don Değerlendirmesi
 night_mask = (df["time"].dt.hour >= 21) | (df["time"].dt.hour <= 7)
 night_temps = temp[night_mask]
 night_clouds = cloud_cover[night_mask]
@@ -395,7 +399,6 @@ else:
   night_min_time = df["time"].iloc[temp.argmin()].strftime("%H:00")
   night_avg_cloud = cloud_cover.mean()
 
-# Radyasyonel Don Kuralı: Gece sıcaklık <= 2.0°C VE Gece bulutluluk <= 35%
 is_radiation_frost_danger = night_min_temp <= 2.0 and night_avg_cloud <= 35.0
 
 # Yağış türü dağılımı
@@ -482,7 +485,6 @@ elif avg_cloud <= 65:
 else:
   cloud_desc_summary = f"%{avg_cloud:.0f} (Kapalı)"
 
-# Gece Açık Hava / Don Durumu Açıklaması
 if is_radiation_frost_danger:
   frost_shield = f"❄️ Gece Don Riski! (Açık & {night_min_temp:.1f}°C)"
 elif night_min_temp <= 2.0 and night_avg_cloud > 35:
@@ -595,6 +597,144 @@ with m5:
   st.caption(f"Görüş: **{vis_str}**")
 
 st.markdown("---")
+
+# ==============================================================================
+# 🎯 YENİ EKLENEN 2 ANALİTİK KART: MODEL GÜVENİLİRLİĞİ & BAĞIMSIZ TEHLİKE TESPİTİ
+# ==============================================================================
+# Mevcut saatteki model tahminini al
+now_hour = datetime.now().hour
+cur_idx = (
+    now_hour
+    if now_hour < len(df)
+    else int(np.argmin(np.abs(df["time"].dt.hour - now_hour)))
+)
+
+mod_gust_now = float(gust_mean.iloc[cur_idx])
+mod_temp_now = float(temp.iloc[cur_idx])
+mod_pres_now = float(df["surface_pressure_ecmwf_ifs"].iloc[cur_idx])
+
+# 1. Delta (Fark) ve Güvenilirlik Hesaplaması
+obs_gust = (
+    float(metar["gust_kmh"]) if metar["gust_kmh"] else float(metar["speed_kmh"])
+)
+obs_temp = float(metar["temp_c"]) if metar["temp_c"] is not None else None
+obs_pres = float(metar["altim_hpa"]) if metar["altim_hpa"] else None
+
+delta_wind = mod_gust_now - obs_gust
+delta_temp = (mod_temp_now - obs_temp) if obs_temp is not None else 0.0
+delta_pres = (mod_pres_now - obs_pres) if obs_pres is not None else 0.0
+
+# Güvenilirlik Puanı Formülü (Hata arttıkça puan düşer)
+wind_penalty = min(50.0, abs(delta_wind) * 2.5)
+temp_penalty = min(30.0, abs(delta_temp) * 6.0)
+pres_penalty = min(20.0, abs(delta_pres) * 2.0)
+model_reliability_score = max(
+    15.0, 100.0 - (wind_penalty + temp_penalty + pres_penalty)
+)
+
+if model_reliability_score >= 80:
+  rel_status = "🟢 Yüksek Uyum (Gözlemle Tutarlı)"
+  bias_comment = "Sayısal modeller yer istasyonu ile yüksek paralellikte."
+elif model_reliability_score >= 55:
+  rel_status = "🟡 Orta Düzey Sapma"
+  bias_comment = (
+      "Model ile istasyon arasında kısmi ayrışma var; yerel rüzgâr/sıcaklık"
+      " sapması izlenmeli."
+  )
+else:
+  rel_status = "🔴 Düşük Güvenilirlik (Model Körlüğü Riski)"
+  bias_comment = (
+      "Model tahminleri yerel yer ölçümünden koptu! Kararlarda METAR"
+      " gözlemi esas alınmalıdır."
+  )
+
+# 2. Modellerden Bağımsız Yerel Tehlike Tespiti
+indep_hazards = []
+indep_level = "🟢 GÜVENLİ / SAKİN"
+indep_badge_color = "#4caf50"
+
+if obs_gust >= 50.0:
+  indep_hazards.append(f"Kuvvetli Fırtına Hamlesi ({obs_gust:.1f} km/s)")
+  indep_level = "🔴 KRİTİK TEHLİKE"
+  indep_badge_color = "#f44336"
+elif obs_gust >= 35.0:
+  indep_hazards.append(f"Kuvvetli Yer Hamlesi ({obs_gust:.1f} km/s)")
+  if indep_level != "🔴 KRİTİK TEHLİKE":
+    indep_level = "🟡 DİKKAT"
+    indep_badge_color = "#ff9800"
+
+if obs_temp is not None and obs_temp <= 0.0:
+  indep_hazards.append(f"Aktif Don Hadisesi ({obs_temp:.1f}°C)")
+  indep_level = "🔴 KRİTİK TEHLİKE"
+  indep_badge_color = "#f44336"
+elif obs_temp is not None and obs_temp <= 2.0:
+  indep_hazards.append(f"Zirai Don Eşiği ({obs_temp:.1f}°C)")
+  if indep_level != "🔴 KRİTİK TEHLİKE":
+    indep_level = "🟡 DİKKAT"
+    indep_badge_color = "#ff9800"
+
+if metar["is_hail"]:
+  indep_hazards.append("Dolu / Buz Paleti Yağışı (GR/GS)")
+  indep_level = "🔴 KRİTİK TEHLİKE"
+  indep_badge_color = "#f44336"
+
+if metar["is_ts"]:
+  indep_hazards.append("Aktif Oraj / Şimşek Hadisesi (TS)")
+  indep_level = "🔴 KRİTİK TEHLİKE"
+  indep_badge_color = "#f44336"
+
+if metar["is_fog"] or (metar["visib_m"] and metar["visib_m"] <= 1000):
+  indep_hazards.append(f"Yoğun Sis / Görüş Kısıtı ({metar['visib_m']}m)")
+  if indep_level != "🔴 KRİTİK TEHLİKE":
+    indep_level = "🟡 DİKKAT"
+    indep_badge_color = "#ff9800"
+
+if not indep_hazards:
+  indep_hazards.append(
+      "İstasyon verilerinde kritik meteorolojik tehlike saptanmadı."
+  )
+
+hazards_list_str = "<br>• ".join(indep_hazards)
+
+# İki Kartı Yan Yana Yerleştir
+v_col1, v_col2 = st.columns(2)
+
+with v_col1:
+  st.markdown(
+      f"""
+    <div class="card-box">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <strong style="font-size: 1.05rem;">📊 Model Güvenilirlik & Hata Analizi</strong>
+            <span style="font-weight: 700; color: #90caf9;">%{model_reliability_score:.0f} Güvenilirlik</span>
+        </div>
+        <p style="margin: 0; font-size: 0.9rem; color: #cfd8dc;"><strong>Doğrulama Durumu:</strong> {rel_status}</p>
+        <div style="margin-top: 8px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 0.85rem;">
+            <div><strong>Δ Rüzgâr:</strong> {delta_wind:+.1f} km/s</div>
+            <div><strong>Δ Sıcaklık:</strong> {delta_temp:+.1f} °C</div>
+            <div><strong>Δ Basınç:</strong> {delta_pres:+.1f} hPa</div>
+        </div>
+        <p style="margin: 8px 0 0 0; font-size: 0.8rem; color: #9aa0a6;"><em>💡 {bias_comment}</em></p>
+    </div>
+    """,
+      unsafe_allow_html=True,
+  )
+
+with v_col2:
+  st.markdown(
+      f"""
+    <div class="card-box">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <strong style="font-size: 1.05rem;">🛡️ İstasyon Bazlı Bağımsız Tehlike Tespiti</strong>
+            <span style="background-color: {indep_badge_color}; color: #fff; padding: 2px 8px; border-radius: 6px; font-size: 0.78rem; font-weight: 700;">{indep_level}</span>
+        </div>
+        <p style="margin: 0 0 4px 0; font-size: 0.84rem; color: #9aa0a6;">Modellerden bağımsız, Erhaç zemin gözlemi doğrudan teşhisi:</p>
+        <div style="font-size: 0.88rem; line-height: 1.4; color: #eceff1;">
+            • {hazards_list_str}
+        </div>
+    </div>
+    """,
+      unsafe_allow_html=True,
+  )
 
 # --- ZAMAN PENCERESİ VE SÜRE HESAPLAMA MOTORU (IMPACT WINDOW) ---
 if is_radiation_frost_danger:
