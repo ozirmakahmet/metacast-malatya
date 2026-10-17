@@ -1599,7 +1599,68 @@ with r_col4:
   )
 
 st.markdown("---")
+# --- MEKÂNSAL FARKINDALIK (RÜZGÂR PUSULASI & OROGRAFİ) ---
+st.markdown("### 🧭 Mekânsal Rüzgâr Dinamikleri & Orografik Etkileşim")
 
+c_map1, c_map2 = st.columns([1.2, 2])
+with c_map1:
+    # Rüzgâr Pusulası (Polar Chart)
+    fig_compass = go.Figure()
+    
+    # Beydağları Blokaj Alanı (Güneybatı - ~190° ile 240° arası)
+    fig_compass.add_trace(go.Barpolar(
+        r=[100], theta=[215], width=[50],
+        marker_color="rgba(121, 85, 72, 0.4)",
+        name="Beydağları Bariyeri (215°)",
+        hoverinfo="name"
+    ))
+    
+    # Karakaya Barajı Etkisi (Doğu - ~45° ile 135° arası)
+    fig_compass.add_trace(go.Barpolar(
+        r=[100], theta=[90], width=[90],
+        marker_color="rgba(3, 169, 244, 0.3)",
+        name="Karakaya Barajı (Nem Kaynağı)",
+        hoverinfo="name"
+    ))
+    
+    # Mevcut Rüzgâr Yönü Ok Çizimi
+    fig_compass.add_trace(go.Scatterpolar(
+        r=[0, 85], theta=[live_wind_deg, live_wind_deg],
+        mode="lines+markers",
+        line=dict(color="#f44336", width=4),
+        marker=dict(size=[0, 10], color="#f44336"),
+        name=f"Anlık Rüzgâr ({live_wind_deg:.0f}°)",
+    ))
+    
+    fig_compass.update_layout(
+        polar=dict(
+            angularaxis=dict(direction="clockwise", rotation=90, tickvals=[0, 45, 90, 135, 180, 225, 270, 315], ticktext=['K', 'KD', 'D', 'GD', 'G', 'GB', 'B', 'KB']),
+            radialaxis=dict(visible=False, range=[0, 100])
+        ),
+        showlegend=True,
+        legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
+        height=320,
+        margin=dict(t=20, b=20, l=20, r=20),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)"
+    )
+    st.plotly_chart(fig_compass, use_container_width=True)
+    
+with c_map2:
+    st.markdown(
+        f"""
+        <div class="benchmark-box" style="height: 90%; display: flex; flex-direction: column; justify-content: center; margin-top: 10px;">
+            <h5 style="margin: 0 0 10px 0; color: #ffb74d;">⛰️ Bölgesel Etki Analizi & De-Warning</h5>
+            <p style="font-size: 0.95rem; line-height: 1.6; color: #eceff1; margin-bottom: 8px;">
+                <strong>Mevcut Rüzgâr Yönü:</strong> <span style="color: #f44336; font-weight: bold;">{live_wind_deg:.0f}°</span>
+            </p>
+            <p style="font-size: 0.9rem; line-height: 1.5; color: #cfd8dc; margin-bottom:0;">
+                MetaCast karar motoru, Malatya'nın topoğrafik yapısını aktif kısıt olarak kullanır. Rüzgâr güneybatı sektöründen (<strong>215° - Beydağları bariyeri</strong>) estiğinde orografik sürtünme nedeniyle vadi içinde şiddet kaybeder ve yapay zeka gereksiz fırtına alarmlarını iptal eder (<em>De-Warning</em>). Doğu yönünden estiğinde ise <strong>Karakaya Barajı</strong> üzerinden geçerek Malatya Çanağı'na nem taşır; bu durum zirai don parametrelerini doğrudan değiştirir.
+            </p>
+        </div>
+        """, unsafe_allow_html=True
+    )
+st.markdown("---")
 # --- SAATLİK SAYISAL MODEL GRAFİKLERİ ---
 st.markdown(f"### 📊 Erhaç Üssü Saatlik Sayısal Rüzgâr Hamlesi Kıyası ({date_display})")
 fig_wind = go.Figure()
