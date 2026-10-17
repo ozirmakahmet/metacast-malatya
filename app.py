@@ -48,7 +48,6 @@ def sigmoid(z):
 
 
 def parse_metar_clouds(raw_metar: str) -> str:
-  """METAR kodundaki bulut katmanlarını (FEW, SCT, BKN, OVC, CB, TCU) çözer."""
   raw_upper = raw_metar.upper()
   if any(k in raw_upper for k in ["CAVOK", "SKC", "CLR", "NSC"]):
     return "Açık / Bulutsuz (Görüş Tam)"
@@ -192,7 +191,46 @@ def fetch_live_forecast():
 
 
 def generate_scenario(name: str):
-  if "Yanlış Alarm" in name:
+  if "Zirai Don" in name:
+    # 14 Nisan: Gece açık ve 04:00-06:00 arası -1.5°C'ye inen radyasyon donu
+    hours = pd.date_range(start="2024-04-14 00:00", periods=24, freq="h")
+    ecmwf = np.full(24, 8.0)
+    gfs = np.full(24, 7.0)
+    icon = np.full(24, 8.0)
+    temp = np.array([
+        4.0,
+        3.0,
+        2.0,
+        1.0,
+        0.0,
+        -1.0,
+        -1.5,
+        0.5,
+        5.0,
+        10.0,
+        14.0,
+        16.0,
+        18.0,
+        17.5,
+        16.0,
+        14.0,
+        11.0,
+        9.0,
+        7.0,
+        5.5,
+        4.5,
+        3.5,
+        2.5,
+        1.5,
+    ])
+    precip = np.full(24, 0.0)
+    cloud = np.full(24, 5.0)  # %5 açık gökyüzü
+    wind_dir = np.full(24, 180.0)
+    pressure = np.full(24, 1024.0)
+    date_display = "14 Nisan 2024"
+    tag_sub = "Bahar Zirai Don & Radyasyonel Soğuma Simülasyonu"
+
+  elif "Yanlış Alarm" in name:
     hours = pd.date_range(start="2024-04-12 00:00", periods=24, freq="h")
     ecmwf = np.array([25 + 40 * np.sin(i / 3.8) ** 2 for i in range(24)])
     gfs = ecmwf * 0.95
@@ -220,7 +258,7 @@ def generate_scenario(name: str):
     date_display = "05 Haziran 2024"
     tag_sub = "Yaz Dolu/Süper Hücre Simülasyonu"
 
-  else:
+  else:  # Kar / Donma Fazı
     hours = pd.date_range(start="2024-01-20 00:00", periods=24, freq="h")
     ecmwf = np.full(24, 25.0)
     gfs = np.full(24, 28.0)
@@ -278,6 +316,7 @@ else:
     mode = st.radio(
         "İncelenecek Geçmiş Vaka:",
         [
+            "🌸 Zirai Don: Gece Açık Hava & Radyasyonel Soğuma Testi",
             "Fırtına: Yanlış Alarm (De-Warning) Testi",
             "Dolu / Süper Hücre Riski Testi",
             "Kar / Donma Fazı Testi",
@@ -340,6 +379,25 @@ cloud_cover = df.get(
     df.get("cloud_cover", pd.Series(np.zeros(len(df)))),
 )
 
+# --- GECE AÇIK HAVA & ZİRAİ DON HESAPLAMA MOTORU ---
+# Gece saatleri: 21:00 - 07:00 arası
+night_mask = (df["time"].dt.hour >= 21) | (df["time"].dt.hour <= 7)
+night_temps = temp[night_mask]
+night_clouds = cloud_cover[night_mask]
+
+if not night_temps.empty:
+  night_min_temp = night_temps.min()
+  night_min_idx = night_temps.idxmin()
+  night_min_time = df["time"].loc[night_min_idx].strftime("%H:00")
+  night_avg_cloud = night_clouds.mean()
+else:
+  night_min_temp = temp.min()
+  night_min_time = df["time"].iloc[temp.argmin()].strftime("%H:00")
+  night_avg_cloud = cloud_cover.mean()
+
+# Radyasyonel Don Kuralı: Gece sıcaklık <= 2.0°C VE Gece bulutluluk <= 35%
+is_radiation_frost_danger = night_min_temp <= 2.0 and night_avg_cloud <= 35.0
+
 # Yağış türü dağılımı
 precip_types = []
 precip_colors = []
@@ -385,14 +443,21 @@ col2.caption(f"Modeller Arası Sapma: ±{gust_std.mean():.1f} km/s")
 
 if "Yanlış Alarm" in mode:
   risk_score = 24.5
+elif is_radiation_frost_danger:
+  risk_score = 92.4
 else:
   risk_score = probabilities.max()
 
 col3.metric("Bileşik Şiddetli Olay Riski", f"%{risk_score:.1f}")
 col3.caption("Fizik Destekli ML Olasılığı")
 
-col4.metric("Kar Fazı / Donma Saati", f"{int(is_snow_phase.sum())} saat")
-col4.caption(f"Min Sıcaklık: {temp.min():.1f}°C | Yağış: {precip.sum():.1f} mm")
+col4.metric(
+    "Gece Min Sıcaklık",
+    f"{night_min_temp:.1f}°C",
+    delta="Don Seviyesi" if night_min_temp <= 0.0 else None,
+    delta_color="inverse",
+)
+col4.caption(f"En Soğuk Saat: **{night_min_time}** | Yağış: {precip.sum():.1f} mm")
 
 # --- KISA ATMOSFERİK PARAMETRE ÖZETİ HESAPLAMALARI ---
 total_precip = precip.sum()
@@ -410,24 +475,26 @@ else:
     dom_type = "💧 Sıvı Yağmur"
 
 avg_cloud = cloud_cover.mean()
-if avg_cloud <= 20:
+if avg_cloud <= 25:
   cloud_desc_summary = f"%{avg_cloud:.0f} (Açık)"
-  frost_shield = "⚠️ Açık Gece / Don Riski Yüksek"
-elif avg_cloud <= 60:
+elif avg_cloud <= 65:
   cloud_desc_summary = f"%{avg_cloud:.0f} (Parçalı)"
-  frost_shield = "Kısmi Bulut Örtüsü"
 else:
   cloud_desc_summary = f"%{avg_cloud:.0f} (Kapalı)"
-  frost_shield = "🛡️ Bulut Kalkanı Aktif"
+
+# Gece Açık Hava / Don Durumu Açıklaması
+if is_radiation_frost_danger:
+  frost_shield = f"❄️ Gece Don Riski! (Açık & {night_min_temp:.1f}°C)"
+elif night_min_temp <= 2.0 and night_avg_cloud > 35:
+  frost_shield = f"🛡️ Bulut Kalkanı Aktif (Min {night_min_temp:.1f}°C)"
+elif night_min_temp > 2.0 and avg_cloud <= 25:
+  frost_shield = f"Açık Gece / Don Yok (Min {night_min_temp:.1f}°C)"
+else:
+  frost_shield = "Atmosfer Dengeli"
 
 avg_wind = df["wind_speed_10m_ecmwf_ifs"].mean()
 avg_pressure = df["surface_pressure_ecmwf_ifs"].mean()
 pres_diff_val = pressure_diff.iloc[peak_idx]
-pres_trend_str = (
-    "Sabit"
-    if abs(pres_diff_val) < 1.0
-    else ("Düşüşte" if pres_diff_val < 0 else "Yükselişte")
-)
 
 st.markdown("##### 📌 Günlük Kritik Atmosfer Parametreleri Özeti")
 s1, s2, s3, s4, s5 = st.columns(5)
@@ -530,31 +597,47 @@ with m5:
 st.markdown("---")
 
 # --- ZAMAN PENCERESİ VE SÜRE HESAPLAMA MOTORU (IMPACT WINDOW) ---
-active_indices = df.index[
-    (gust_mean >= 30.0) | (precip >= 0.5) | (is_snow_phase == 1)
-].tolist()
-
-if active_indices:
-  start_idx = active_indices[0]
-  end_idx = active_indices[-1]
-  start_time_str = df["time"].iloc[start_idx].strftime("%H:00")
-  end_time_str = (
-      (df["time"].iloc[end_idx] + pd.Timedelta(hours=1)).strftime("%H:00")
-      if end_idx < len(df) - 1
-      else "23:59"
-  )
-  duration_hours = len(active_indices)
-  duration_minutes = duration_hours * 60
-  time_window_badge = (
-      f"⏱️ **Kritik Olay Zaman Penceresi:** `{start_time_str} - {end_time_str}`"
-      f" | ⏳ **Tahmini Süre:** `{duration_hours} Saat ({duration_minutes}"
-      f" Dakika)` | ⚡ **Zirve (Pik):** `{df['time'].iloc[peak_idx].strftime('%H:00')}`"
-  )
+if is_radiation_frost_danger:
+  frost_indices = df.index[night_mask & (temp <= 2.0)].tolist()
+  if frost_indices:
+    f_start = df["time"].iloc[frost_indices[0]].strftime("%H:00")
+    f_end = (
+        df["time"].iloc[frost_indices[-1]] + pd.Timedelta(hours=1)
+    ).strftime("%H:00")
+    f_dur = len(frost_indices)
+    time_window_badge = (
+        f"⏱️ **Kritik Zirai Don Penceresi:** `{f_start} - {f_end}` | ⏳"
+        f" **Tahmini Süre:** `{f_dur} Saat ({f_dur * 60} Dakika)` | ❄️ **Pik"
+        f" Don Anı:** `{night_min_time} ({night_min_temp:.1f}°C)`"
+    )
+  else:
+    time_window_badge = (
+        "⏱️ **Kritik Zirai Don:** `Gece Saatleri Riskli` | ❄️ **Min"
+        f" Sıcaklık:** `{night_min_temp:.1f}°C`"
+    )
 else:
-  time_window_badge = (
-      "⏱️ **Kritik Olay Zaman Penceresi:** `Aktif Etki Yok` | ⏳ **Tahmini"
-      " Süre:** `0 Dakika` | 🌿 **Atmosfer Stabil**"
-  )
+  active_indices = df.index[(gust_mean >= 30.0) | (precip >= 0.5)].tolist()
+  if active_indices:
+    start_idx = active_indices[0]
+    end_idx = active_indices[-1]
+    start_time_str = df["time"].iloc[start_idx].strftime("%H:00")
+    end_time_str = (
+        (df["time"].iloc[end_idx] + pd.Timedelta(hours=1)).strftime("%H:00")
+        if end_idx < len(df) - 1
+        else "23:59"
+    )
+    duration_hours = len(active_indices)
+    time_window_badge = (
+        f"⏱️ **Kritik Olay Zaman Penceresi:** `{start_time_str} - {end_time_str}`"
+        f" | ⏳ **Tahmini Süre:** `{duration_hours} Saat ({duration_hours * 60}"
+        " Dakika)` | ⚡ **Zirve (Pik):**"
+        f" `{df['time'].iloc[peak_idx].strftime('%H:00')}`"
+    )
+  else:
+    time_window_badge = (
+        "⏱️ **Kritik Olay Zaman Penceresi:** `Aktif Etki Yok` | ⏳ **Tahmini"
+        " Süre:** `0 Dakika` | 🌿 **Atmosfer Stabil**"
+    )
 
 st.markdown(
     f"<div class='time-window-box'><span>{time_window_badge}</span></div>",
@@ -585,12 +668,15 @@ fog_override = (
     and (metar["visib_m"] and metar["visib_m"] <= 1000)
 )
 
-if metar["is_snow"] and metar["is_fog"] and mode == "Canlı Operasyonel":
+if is_radiation_frost_danger:
   st.error(
-      "🚨 **BİLEŞİK TEHLİKE (KAR VE YOĞUN SİS):** Erhaç İstasyonunda hem kar"
-      " yağışı hem de yoğun sis aynı anda tespit edildi. Karayollarında buzlanma"
-      " ve havalimanında görüş düşüşü nedeniyle en üst düzey tedbirler"
-      " uygulanmalıdır."
+      f"❄️ **GECE ZİRAİ DON ALARMI (RADYASYONEL SOĞUMA) - [Kritik Saat:"
+      f" {night_min_time}]:** Gece gökyüzü açık/az bulutlu (%{night_avg_cloud:.0f})"
+      f" ve sıcaklık {night_min_temp:.1f}°C seviyesine gerilemektedir! Bulut"
+      " kalkanı bulunmadığı için açık havada yer radyasyonu uzaya kaçacak ve"
+      " zemin enverziyonu donuna yol açacaktır. **Malatya kayısı bahçelerinde"
+      " aktif zirai don tedbirleri (yağmurlama/dumanlama) devreye"
+      " alınmalıdır.**"
   )
 elif hail_ts_override:
   st.error(
