@@ -92,7 +92,6 @@ def sigmoid(z):
 
 # --- RADAR dBZ DÖNÜŞÜM MOTORU (MARSHALL-PALMER FORMÜLÜ) ---
 def calculate_radar_dbz(precip_rate_mmh: float, cape_val: float = 0.0):
-  """Yağış birikiminden ve CAPE indeksinden radar yansıtırlık (dBZ) değerini hesaplar."""
   if precip_rate_mmh <= 0.02 and cape_val < 600:
     return 0.0, "Eko Yok (<10 dBZ)", "rgba(0,0,0,0)", "#4caf50"
 
@@ -100,7 +99,6 @@ def calculate_radar_dbz(precip_rate_mmh: float, cape_val: float = 0.0):
   z = 200.0 * (r**1.6)
   dbz = float(10.0 * np.log10(z))
 
-  # CAPE konvektif patlama takviyesi
   if cape_val >= 900:
     dbz = max(dbz, 53.0)
   elif cape_val >= 500:
@@ -507,7 +505,7 @@ def generate_scenario(name: str):
   return df_sim, date_display, tag_sub
 
 
-# --- HARİTA, VEKTÖR VE RADAR (dBZ) ÇİZİM MOTORU ---
+# --- HARİTA, VEKTÖR VE RADAR (dBZ) ÇİZİM MOTORU (DÜZELTİLMİŞ) ---
 def build_topographic_vector_map(
     wind_deg: float,
     wind_speed: float,
@@ -540,6 +538,7 @@ def build_topographic_vector_map(
   )
 
   # 2. Malatya Çanağı & Kayısı Havzası (Ova Tabanı)
+  # HATA DÜZELTİLDİ: text dizisi lat uzunluğu (5 eleman) ile eşitlendi
   ova_lat = [38.32, 38.40, 38.42, 38.35, 38.32]
   ova_lon = [38.25, 38.20, 38.38, 38.42, 38.25]
   fig.add_trace(
@@ -552,7 +551,10 @@ def build_topographic_vector_map(
           line=dict(width=2, color="rgba(76, 175, 80, 0.6)", dash="dot"),
           name="🌾 Malatya Çanağı (Ova Tabanı)",
           hoverinfo="text",
-          text=["Malatya Tarımsal Havzası - Gece Enverziyon Tabanı"],
+          text=[
+              "Malatya Tarımsal Havzası - Gece Enverziyon Tabanı"
+              for _ in ova_lat
+          ],
       )
   )
 
@@ -583,28 +585,35 @@ def build_topographic_vector_map(
   )
 
   # 4. Radar Yansıtırlık (dBZ) Eko Hücresi
+  # HATA DÜZELTİLDİ: radar_lat dizisi uzunluğu ile text eşitlendi
   dbz_val, dbz_desc, dbz_fill, dbz_border = calculate_radar_dbz(
       precip_val, cape_val
   )
   if dbz_val > 10.0:
-    # Yağış kütlesinin giriş koridoru boyunca radar eko elipsi
     mid_lat = (start_lat + center_lat) / 2.0
     mid_lon = (start_lon + center_lon) / 2.0
     radar_angles = np.linspace(0, 2 * np.pi, 16)
-    radar_lat = mid_lat + 0.08 * np.sin(radar_angles)
-    radar_lon = mid_lon + 0.10 * np.cos(radar_angles)
+    radar_lat_list = list(mid_lat + 0.08 * np.sin(radar_angles)) + [
+        mid_lat + 0.08 * np.sin(radar_angles)[0]
+    ]
+    radar_lon_list = list(mid_lon + 0.10 * np.cos(radar_angles)) + [
+        mid_lon + 0.10 * np.cos(radar_angles)[0]
+    ]
 
     fig.add_trace(
         trace_layer(
-            lat=list(radar_lat) + [radar_lat[0]],
-            lon=list(radar_lon) + [radar_lon[0]],
+            lat=radar_lat_list,
+            lon=radar_lon_list,
             mode="lines",
             fill="toself",
             fillcolor=dbz_fill,
             line=dict(width=2, color=dbz_border),
             name=f"📡 Radar Yansıtırlığı: {dbz_val:.1f} dBZ ({dbz_desc})",
             hoverinfo="text",
-            text=[f"Radar Ekosu: {dbz_val:.1f} dBZ - {dbz_desc}"],
+            text=[
+                f"Radar Ekosu: {dbz_val:.1f} dBZ - {dbz_desc}"
+                for _ in radar_lat_list
+            ],
         )
     )
 
@@ -1035,11 +1044,9 @@ peak_idx = int(np.argmax(gust_mean))
 peak_time = df["time"].iloc[peak_idx].strftime("%d.%m.%Y - Saat %H:00")
 peak_gust = gust_mean.iloc[peak_idx]
 
-# Canlı rüzgâr açısı dizisi ve pik skaler değer
 wind_dir_series = df["wind_direction_10m_ecmwf_ifs"]
 live_wind_deg = float(wind_dir_series.iloc[peak_idx])
 
-# DÜZELTİLDİ: mountain_blockage bir pandas Series olarak hesaplanır
 pressure_diff = df["surface_pressure_ecmwf_ifs"].diff(periods=3).fillna(0)
 angle_diff = np.radians(wind_dir_series - 215.0)
 mountain_blockage = np.abs(np.cos(angle_diff))
@@ -1094,7 +1101,6 @@ df["precip_type"] = precip_types
 is_snow_phase = (df["precip_type"] == "❄️ Kar / Sulu Kar").astype(int)
 hail_potential = (df["precip_type"] == "⚡ Dolu / Süper Hücre").astype(int)
 
-# HATA GİDERİLDİ: mountain_blockage.values artık güvenle çalışır
 X_input = np.column_stack([
     df["wind_speed_10m_ecmwf_ifs"].values,
     pressure_diff.values,
