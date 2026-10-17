@@ -67,6 +67,19 @@ div[data-testid="stMetricValue"] > div {
     padding: 12px 14px;
     height: 100%;
 }
+.radar-legend-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(90deg, #2196f3, #4caf50, #ffeb3b, #ff9800, #f44336, #9c27b0);
+    height: 14px;
+    border-radius: 4px;
+    margin-top: 6px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #000;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -75,6 +88,56 @@ div[data-testid="stMetricValue"] > div {
 
 def sigmoid(z):
   return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
+
+
+# --- RADAR dBZ DÖNÜŞÜM MOTORU (MARSHALL-PALMER FORMÜLÜ) ---
+def calculate_radar_dbz(precip_rate_mmh: float, cape_val: float = 0.0):
+  """Yağış birikiminden ve CAPE indeksinden radar yansıtırlık (dBZ) değerini hesaplar."""
+  if precip_rate_mmh <= 0.02 and cape_val < 600:
+    return 0.0, "Eko Yok (<10 dBZ)", "rgba(0,0,0,0)", "#4caf50"
+
+  r = max(0.08, precip_rate_mmh)
+  z = 200.0 * (r**1.6)
+  dbz = float(10.0 * np.log10(z))
+
+  # CAPE konvektif patlama takviyesi
+  if cape_val >= 900:
+    dbz = max(dbz, 53.0)
+  elif cape_val >= 500:
+    dbz = max(dbz, 42.0)
+
+  dbz = min(65.0, max(10.0, dbz))
+
+  if dbz < 20:
+    return dbz, "Hafif Çisenti (<20 dBZ)", "rgba(33, 150, 243, 0.40)", "#2196f3"
+  elif dbz < 35:
+    return (
+        dbz,
+        "Orta Kuvvette Yağmur (20-35 dBZ)",
+        "rgba(76, 175, 80, 0.50)",
+        "#4caf50",
+    )
+  elif dbz < 45:
+    return (
+        dbz,
+        "Kuvvetli Sağanak (35-45 dBZ)",
+        "rgba(255, 235, 59, 0.60)",
+        "#ffeb3b",
+    )
+  elif dbz < 55:
+    return (
+        dbz,
+        "Çok Şiddetli Fırtına (45-55 dBZ)",
+        "rgba(244, 67, 54, 0.70)",
+        "#f44336",
+    )
+  else:
+    return (
+        dbz,
+        "Dolu / Süper Hücre (>55 dBZ)",
+        "rgba(156, 39, 176, 0.80)",
+        "#9c27b0",
+    )
 
 
 # --- MLOps VERİ GÜNLÜĞÜ (SQLITE) ---
@@ -444,29 +507,30 @@ def generate_scenario(name: str):
   return df_sim, date_display, tag_sub
 
 
-# --- HARİTA VE VEKTÖR ÇİZİM YARDIMCISI ---
+# --- HARİTA, VEKTÖR VE RADAR (dBZ) ÇİZİM MOTORU ---
 def build_topographic_vector_map(
     wind_deg: float,
     wind_speed: float,
     precip_val: float,
+    cape_val: float,
     map_df: pd.DataFrame,
     is_sim: bool = False,
 ):
-  """Malatya topoğrafyasını, dağ/ova hatlarını ve rüzgâr/yağış akış vektörünü çizer."""
+  """Malatya topoğrafyasını, rüzgâr akış vektörünü ve Marshall-Palmer radar yansıtırlık (dBZ) hücresini çizer."""
   fig = go.Figure()
+  trace_layer = go.Scattermap if hasattr(go, "Scattermap") else go.Scattermapbox
 
-  # 1. Beydağları Dağ Sırası Bariyeri (Doğal Dağ Hattı - Kahverengi Kuşak)
+  # 1. Beydağları Sıradağ Bariyeri (2.500m+)
   beydaglari_lat = [38.22, 38.16, 38.10, 38.05]
   beydaglari_lon = [38.48, 38.30, 38.15, 37.95]
-  trace_bey = go.Scattermap if hasattr(go, "Scattermap") else go.Scattermapbox
   fig.add_trace(
-      trace_bey(
+      trace_layer(
           lat=beydaglari_lat,
           lon=beydaglari_lon,
           mode="lines+markers",
           line=dict(width=7, color="rgba(141, 110, 99, 0.85)"),
           marker=dict(size=8, color="#5d4037"),
-          name="🏔️ Beydağları Dağ Bariyeri (2.500m+)",
+          name="🏔️ Beydağları Bariyeri (2.500m+)",
           hoverinfo="text",
           text=[
               "Beydağları Sıradağ Duvarı - Orografik Blokaj Hattı"
@@ -475,36 +539,33 @@ def build_topographic_vector_map(
       )
   )
 
-  # 2. Malatya Çanağı & Kayısı Havzası (Ova Tabanı / Enverziyon Alanı)
+  # 2. Malatya Çanağı & Kayısı Havzası (Ova Tabanı)
   ova_lat = [38.32, 38.40, 38.42, 38.35, 38.32]
   ova_lon = [38.25, 38.20, 38.38, 38.42, 38.25]
   fig.add_trace(
-      trace_bey(
+      trace_layer(
           lat=ova_lat,
           lon=ova_lon,
           mode="lines",
           fill="toself",
           fillcolor="rgba(129, 199, 132, 0.18)",
           line=dict(width=2, color="rgba(76, 175, 80, 0.6)", dash="dot"),
-          name="🌾 Malatya - Battalgazi Çanağı (Ova Tabanı)",
+          name="🌾 Malatya Çanağı (Ova Tabanı)",
           hoverinfo="text",
           text=["Malatya Tarımsal Havzası - Gece Enverziyon Tabanı"],
       )
   )
 
-  # 3. Rüzgâr ve Yağış Akış Vektörü (Rüzgârın estiği yönden şehre doğru oku)
-  # Meteorolojik rüzgâr açısı theta: rüzgârın geldiği yön.
-  # Vektörün başlangıç noktası: şehir merkezinin 0.22 derece açığında
+  # 3. Rüzgâr Akış Vektörü (Rüzgârın estiği yönden merkeze doğru)
   rad = np.radians(wind_deg)
   center_lat, center_lon = 38.35, 38.28
   vector_len = 0.22
   start_lat = center_lat + vector_len * np.cos(rad)
   start_lon = center_lon + vector_len * np.sin(rad)
 
-  # Rüzgâr Akış Oku
   arrow_color = "#00e5ff" if wind_speed < 45 else "#ff1744"
   fig.add_trace(
-      trace_bey(
+      trace_layer(
           lat=[start_lat, center_lat],
           lon=[start_lon, center_lon],
           mode="lines+markers",
@@ -521,27 +582,36 @@ def build_topographic_vector_map(
       )
   )
 
-  # Yağış Kütlesi Vektörü (Eğer yağış varsa)
-  if precip_val > 0.1:
+  # 4. Radar Yansıtırlık (dBZ) Eko Hücresi
+  dbz_val, dbz_desc, dbz_fill, dbz_border = calculate_radar_dbz(
+      precip_val, cape_val
+  )
+  if dbz_val > 10.0:
+    # Yağış kütlesinin giriş koridoru boyunca radar eko elipsi
+    mid_lat = (start_lat + center_lat) / 2.0
+    mid_lon = (start_lon + center_lon) / 2.0
+    radar_angles = np.linspace(0, 2 * np.pi, 16)
+    radar_lat = mid_lat + 0.08 * np.sin(radar_angles)
+    radar_lon = mid_lon + 0.10 * np.cos(radar_angles)
+
     fig.add_trace(
-        trace_bey(
-            lat=[start_lat * 0.998, center_lat],
-            lon=[start_lon * 0.998, center_lon],
+        trace_layer(
+            lat=list(radar_lat) + [radar_lat[0]],
+            lon=list(radar_lon) + [radar_lon[0]],
             mode="lines",
-            line=dict(width=4, color="#29b6f6", dash="dash"),
-            name=f"🌧️ Yağış Taşınımı ({precip_val:.1f} mm)",
+            fill="toself",
+            fillcolor=dbz_fill,
+            line=dict(width=2, color=dbz_border),
+            name=f"📡 Radar Yansıtırlığı: {dbz_val:.1f} dBZ ({dbz_desc})",
             hoverinfo="text",
-            text=[
-              "Yağış Kütlesi Giriş Koridoru",
-              "Yağışın Şehir Üzerine Yayılımı",
-          ],
+            text=[f"Radar Ekosu: {dbz_val:.1f} dBZ - {dbz_desc}"],
         )
     )
 
-  # 4. Gözlem / Temsili İstasyon Noktaları
+  # 5. İstasyon Noktaları
   for _, row in map_df.iterrows():
     fig.add_trace(
-        trace_bey(
+        trace_layer(
             lat=[row["Enlem"]],
             lon=[row["Boylam"]],
             mode="markers+text",
@@ -558,26 +628,27 @@ def build_topographic_vector_map(
     )
 
   layout_map_key = "map" if hasattr(go, "Scattermap") else "mapbox"
-  layout_dict = {
-      layout_map_key: dict(
-          style="open-street-map",
-          center=dict(lat=38.28, lon=38.22),
-          zoom=9.0,
-      ),
-      "margin": dict(l=0, r=0, t=10, b=0),
-      "height": 430,
-      "legend": dict(
-          orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0
-      ),
-  }
-  fig.update_layout(**layout_dict)
-  return fig
+  fig.update_layout(
+      {
+          layout_map_key: dict(
+              style="open-street-map",
+              center=dict(lat=38.28, lon=38.22),
+              zoom=9.0,
+          ),
+          "margin": dict(l=0, r=0, t=10, b=0),
+          "height": 430,
+          "legend": dict(
+              orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0
+          ),
+      }
+  )
+  return fig, dbz_val, dbz_desc
 
 
 st.title("⚡ MetaCast: Malatya Havzası Karar-Destek Platformu")
 st.markdown(
     "📍 **Hedef Bölge:** Malatya Çanağı & Erhaç (LTAT) | 🔬 **Fizik Destekli"
-    " PIML + Topoğrafik Rüzgâr/Yağış Simülasyonu**"
+    " PIML + Topoğrafik Rüzgâr/Radar (dBZ) Simülasyonu**"
 )
 
 # --- SOL MENÜ ---
@@ -714,19 +785,17 @@ if mode == "Akademik Doğrulama Modu":
   st.stop()
 
 # ==============================================================================
-# 🧪 "WHAT-IF" SİMÜLASYON LABORATUVARI (TAM KONTROL / SADECE BURADA MÜDAHALE VAR)
+# 🧪 "WHAT-IF" SİMÜLASYON LABORATUVARI
 # ==============================================================================
 if mode == "What-If Laboratuvarı":
   st.subheader(
-      "🧪 'What-If' Atmosfer & Orografi Simülasyon Laboratuvarı (Kullanıcı"
-      " Kontrolü)"
+      "🧪 'What-If' Atmosfer, Orografi & Radar (dBZ) Simülasyon Laboratuvarı"
   )
   st.caption(
       "⚠️ Bu sekme yalnızca eğitim ve hipotez testleri içindir. Canlı operasyon"
       " verilerini etkilemez."
   )
 
-  # 1. Hazır Sinoptik Koridor Seçimi
   preset_corridor = st.selectbox(
       "🌪️ Malatya Tipik Meteorolojik Hava Koridoru Seçin:",
       [
@@ -796,10 +865,7 @@ if mode == "What-If Laboratuvarı":
         360.0,
         def_dir,
         key="sim_d",
-        help=(
-            "215° = Beydağları Dağ Bariyeri | 340° = Kuzey Soğuk Hattı | 45° ="
-            " Fırat Vadisi"
-        ),
+        help="215° = Beydağları Dağ Bariyeri | 340° = Kuzey Soğuk Hattı | 45° = Fırat Vadisi",
     )
   with w_c2:
     sim_temp = st.slider(
@@ -820,7 +886,6 @@ if mode == "What-If Laboratuvarı":
         "Termodinamik CAPE (J/kg):", 0, 2800, def_cape, key="sim_cp"
     )
 
-  # PIML Simülasyon Çıkarımı
   sim_speed = sim_gust * 0.45
   sim_angle_diff = np.radians(sim_dir - 215.0)
   sim_blockage = float(np.abs(np.cos(sim_angle_diff)))
@@ -839,7 +904,6 @@ if mode == "What-If Laboratuvarı":
   sim_X_norm = (sim_X - mean) / std
   sim_prob = float(sigmoid(np.dot(sim_X_norm, weights) + bias) * 100.0)
 
-  # Orografik engelleme mantığı
   is_blocked = sim_blockage >= 0.70 and sim_pres_diff > -3.0
   if is_blocked and sim_gust >= 45.0:
     sim_final_risk = 24.5
@@ -886,7 +950,6 @@ if mode == "What-If Laboratuvarı":
   else:
     st.success(sim_banner)
 
-  # Simülasyon Haritası
   sim_map_df = pd.DataFrame({
       "Bölge Adı": [
           "Erhaç Düzlüğü",
@@ -927,31 +990,33 @@ if mode == "What-If Laboratuvarı":
       ],
   })
 
-  st.markdown("#### 🗺️ Simülasyon Akış Haritası (Dağ/Ova ve Rüzgâr İzi)")
-  st.caption(
-      "Mavi/Kırmızı ok rüzgârın ve hava kütlesinin şehre giriş açısını ve hızını"
-      " temsil eder:"
+  st.markdown(
+      "#### 🗺️ Simülasyon Akış Haritası (Dağ/Ova, Rüzgâr İzi & Radar Ekosu)"
   )
-  fig_sim_map = build_topographic_vector_map(
-      sim_dir,
-      sim_gust,
-      (2.5 if sim_hail_pot else 0.0),
-      sim_map_df,
-      is_sim=True,
+  sim_precip_rate = 8.5 if sim_hail_pot else (1.5 if sim_temp <= 1.5 else 0.0)
+  fig_sim_map, sim_dbz, sim_dbz_desc = build_topographic_vector_map(
+      sim_dir, sim_gust, sim_precip_rate, sim_cape, sim_map_df, is_sim=True
   )
   st.plotly_chart(fig_sim_map, use_container_width=True)
+
+  st.markdown(
+      f"**📡 Simülasyon Radar Reflektifliği:** `{sim_dbz:.1f} dBZ - {sim_dbz_desc}`"
+  )
+  st.markdown(
+      """<div class="radar-legend-bar"><span>15 dBZ (Çisenti)</span><span>30 dBZ (Yağmur)</span><span>45 dBZ (Kuvvetli)</span><span>55+ dBZ (Dolu/Oraj)</span></div>""",
+      unsafe_allow_html=True,
+  )
 
   st.stop()
 
 # ==============================================================================
-# 🟢 CANLI OPERASYONEL TAHMİN (TAMAMEN KORUMALI / MÜDAHALEYE KAPALI)
+# 🟢 CANLI OPERASYONEL TAHMİN (MÜDAHALEYE KAPALI / KORUMALI)
 # ==============================================================================
 if mode == "Canlı Operasyonel":
   with st.spinner("Canlı atmosfer modelleri çekiliyor..."):
     df_raw, last_update = fetch_live_forecast()
   st.sidebar.caption(f"🕒 Son Model Güncellemesi: **{last_update}**")
 
-  # Canlıda kesinlikle bugünün tarihine kilitlenir
   default_date = df_raw["time"].dt.date.iloc[24]
   df = df_raw[df_raw["time"].dt.date == default_date].reset_index(drop=True)
   date_display = df["time"].iloc[0].strftime("%d %B %Y")
@@ -970,11 +1035,13 @@ peak_idx = int(np.argmax(gust_mean))
 peak_time = df["time"].iloc[peak_idx].strftime("%d.%m.%Y - Saat %H:00")
 peak_gust = gust_mean.iloc[peak_idx]
 
-# Canlı rüzgâr açısı (derece)
-live_wind_deg = float(df["wind_direction_10m_ecmwf_ifs"].iloc[peak_idx])
+# Canlı rüzgâr açısı dizisi ve pik skaler değer
+wind_dir_series = df["wind_direction_10m_ecmwf_ifs"]
+live_wind_deg = float(wind_dir_series.iloc[peak_idx])
 
+# DÜZELTİLDİ: mountain_blockage bir pandas Series olarak hesaplanır
 pressure_diff = df["surface_pressure_ecmwf_ifs"].diff(periods=3).fillna(0)
-angle_diff = np.radians(live_wind_deg - 215.0)
+angle_diff = np.radians(wind_dir_series - 215.0)
 mountain_blockage = np.abs(np.cos(angle_diff))
 gust_factor = (
     gust_mean / (df["wind_speed_10m_ecmwf_ifs"] + 1e-5)
@@ -1027,6 +1094,7 @@ df["precip_type"] = precip_types
 is_snow_phase = (df["precip_type"] == "❄️ Kar / Sulu Kar").astype(int)
 hail_potential = (df["precip_type"] == "⚡ Dolu / Süper Hücre").astype(int)
 
+# HATA GİDERİLDİ: mountain_blockage.values artık güvenle çalışır
 X_input = np.column_stack([
     df["wind_speed_10m_ecmwf_ifs"].values,
     pressure_diff.values,
@@ -1656,13 +1724,13 @@ with d3:
 st.markdown("---")
 
 # ==============================================================================
-# 🗺️ CANLI TOPOĞRAFİK RÜZGÂR & YAĞIŞ HARİTASI (SALT-OKUNUR GERÇEK VERİ)
+# 🗺️ CANLI TOPOĞRAFİK RÜZGÂR & RADAR (dBZ) HARİTASI
 # ==============================================================================
-st.markdown("### 🗺️ Malatya Havzası Canlı Topoğrafik Rüzgâr & Yağış Haritası")
+st.markdown("### 🗺️ Malatya Havzası Canlı Topoğrafik Rüzgâr & Radar Haritası")
 st.caption(
-    "🔒 **Canlı Operasyon Modu:** Harita üzerinde Beydağları Sıradağ Bariyeri"
-    " (kahverengi çizgi), Malatya Çanağı (yeşil poligon) ve canlı rüzgâr/yağış"
-    " akış oku yer almaktadır."
+    "🔒 **Canlı Operasyon Modu:** Beydağları Sıradağ Bariyeri (kahverengi"
+    " sırt), Malatya Çanağı (yeşil ova), canlı rüzgâr oku ve radar"
+    " yansıtırlığı (dBZ) gösterilmektedir."
 )
 
 erh_gust = peak_gust
@@ -1740,11 +1808,24 @@ map_df = pd.DataFrame({
     "Durum": [erh_desc, bat_desc, yes_desc, dog_desc],
 })
 
-# Canlı rüzgâr açısı ve pik hamleye göre vektörlü haritayı oluştur
-fig_live_map = build_topographic_vector_map(
-    live_wind_deg, peak_gust, total_precip, map_df, is_sim=False
+fig_live_map, live_dbz, live_dbz_desc = build_topographic_vector_map(
+    live_wind_deg,
+    peak_gust,
+    float(precip.iloc[peak_idx]),
+    float(cape_series.iloc[peak_idx]),
+    map_df,
+    is_sim=False,
 )
 st.plotly_chart(fig_live_map, use_container_width=True)
+
+st.markdown(
+    f"**📡 Anlık Radar Yansıtırlık Durumu:** `{live_dbz:.1f} dBZ -"
+    f" {live_dbz_desc}`"
+)
+st.markdown(
+    """<div class="radar-legend-bar"><span>15 dBZ (Çisenti)</span><span>30 dBZ (Yağmur)</span><span>45 dBZ (Kuvvetli)</span><span>55+ dBZ (Dolu/Oraj)</span></div>""",
+    unsafe_allow_html=True,
+)
 
 # 4 Bölge Kartları
 r_col1, r_col2, r_col3, r_col4 = st.columns(4)
