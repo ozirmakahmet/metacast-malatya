@@ -11,7 +11,7 @@ import requests
 import streamlit as st
 
 st.set_page_config(
-    page_title="MetaCast Malatya - Bilimsel Doğrulama ve Karar Platformu",
+    page_title="MetaCast Malatya - Bilimsel Karar ve Simülasyon Platformu",
     page_icon="⚡",
     layout="wide",
 )
@@ -45,6 +45,13 @@ div[data-testid="stMetricValue"] > div {
     border-radius: 10px;
     padding: 14px 16px;
     margin-bottom: 15px;
+}
+.directive-card {
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 14px;
+    height: 100%;
 }
 .benchmark-box {
     background-color: rgba(33, 150, 243, 0.08);
@@ -440,7 +447,7 @@ def generate_scenario(name: str):
 st.title("⚡ MetaCast: Malatya Havzası Karar-Destek Platformu")
 st.markdown(
     "📍 **Hedef Bölge:** Malatya Çanağı & Erhaç (LTAT) | 🔬 **Fizik Destekli"
-    " PIML + Termodinamik CAPE & MLOps Günlüğü**"
+    " PIML + XAI Açıklanabilirlik & Eylem Reçeteleri**"
 )
 
 # --- SOL MENÜ ---
@@ -459,6 +466,7 @@ main_category = st.sidebar.radio(
         "🟢 Canlı Operasyonel Tahmin",
         "📂 Geçmiş Veriler & Test Senaryoları",
         "📈 Akademik Doğrulama (Out-of-Time Benchmark)",
+        "🧪 'What-If' Afet Simülasyon Laboratuvarı",
     ],
 )
 
@@ -477,8 +485,10 @@ elif main_category == "📂 Geçmiş Veriler & Test Senaryoları":
             "Kar / Donma Fazı Testi",
         ],
     )
-else:
+elif main_category == "📈 Akademik Doğrulama (Out-of-Time Benchmark)":
   mode = "Akademik Doğrulama Modu"
+else:
+  mode = "What-If Laboratuvarı"
 
 try:
   with open("models/metacast_weights.json", "r", encoding="utf-8") as f:
@@ -505,7 +515,7 @@ elif metar["status"] == "degraded" and metar["warnings"]:
       f" {' | '.join(metar['warnings'])}"
   )
 
-# --- AKADEMİK BENCHMARK VE ZAMANSAL AYRILMIŞ TEST KÜMESİ SEKRESİ ---
+# --- 3. AKADEMİK BENCHMARK SEKRESİ ---
 if mode == "Akademik Doğrulama Modu":
   st.subheader(
       "📈 Bağımsız Test Kümesi Doğrulama Raporu (Out-of-Time Benchmark)"
@@ -543,10 +553,6 @@ if mode == "Akademik Doğrulama Modu":
 
   st.markdown("---")
   st.markdown("#### 🗺️ Bölgesel Doğrulama ve İstasyonlar Arası Mekânsal Temsil")
-  st.markdown("""
-    Tek istasyon (Erhaç) yanılgısını gidermek amacıyla Malatya havzası **4 mikroklima segmentine** ayrılmıştır:
-    """)
-
   spatial_df = pd.DataFrame({
       "Segment / Temsili Bölge": [
           "Erhaç Düzlüğü (LTAT)",
@@ -577,7 +583,150 @@ if mode == "Akademik Doğrulama Modu":
   st.dataframe(spatial_df, use_container_width=True)
   st.stop()
 
-# --- CANLI OPERASYONEL VE TEST MODU AKIŞI ---
+# --- 4. "WHAT-IF" İNTERAKTİF AFET SİMÜLASYON LABORATUVARI MODU ---
+if mode == "What-If Laboratuvarı":
+  st.subheader(
+      "🧪 'What-If' İnteraktif Atmosfer & Orografi Simülasyon Laboratuvarı"
+  )
+  st.markdown(
+      "Aşağıdaki sürgüleri kullanarak atmosferik koşulları değiştirin ve"
+      " Beydağları orografisi ile yapay zekânın **anlık fiziksel tepkisini**"
+      " test edin:"
+  )
+
+  w_c1, w_c2, w_c3 = st.columns(3)
+  with w_c1:
+    sim_gust = st.slider("Tahmin Edilen Rüzgâr Hamlesi (km/s):", 10.0, 95.0, 55.0)
+    sim_dir = st.slider(
+        "Rüzgâr Yönü (° Azimut):",
+        0.0,
+        360.0,
+        215.0,
+        help=(
+            "215° = Beydağları duvarı (Maksimum orografik blokaj) | 45° = Açık"
+            " Fırat vadi koridoru (Sıfır blokaj)"
+        ),
+    )
+  with w_c2:
+    sim_temp = st.slider("Hava Sıcaklığı (°C):", -10.0, 38.0, 1.2)
+    sim_pres_diff = st.slider(
+        "3 Saatlik Basınç Değişimi (ΔP hPa):",
+        -8.0,
+        6.0,
+        -1.5,
+        help="Ani düşüşler (≤ -3.0 hPa) yaklaşan fırtına/cepheyi gösterir.",
+    )
+  with w_c3:
+    sim_cloud = st.slider(
+        "Gece Bulutluluk Oranı (%):",
+        0,
+        100,
+        15,
+        help="Düşük bulut örtüsü gece yer radyasyonunun kaçmasına neden olur.",
+    )
+    sim_cape = st.slider(
+        "Termodinamik CAPE (J/kg):",
+        0,
+        2800,
+        250,
+        help=">900 J/kg konvektif patlama ve dolu potansiyelidir.",
+    )
+
+  # Simülasyon Fiziksel Çıkarımı
+  sim_speed = sim_gust * 0.45
+  sim_angle_diff = np.radians(sim_dir - 215.0)
+  sim_blockage = float(np.abs(np.cos(sim_angle_diff)))
+  sim_gust_factor = min(5.0, max(1.0, sim_gust / (sim_speed + 1e-5)))
+  sim_is_snow = 1.0 if sim_temp <= 1.5 else 0.0
+  sim_hail_pot = 1.0 if (sim_cape >= 900.0 or sim_temp >= 24.0) else 0.0
+
+  sim_X = np.array([
+      sim_speed,
+      sim_pres_diff,
+      sim_blockage,
+      sim_gust_factor,
+      sim_is_snow,
+      sim_hail_pot,
+  ])
+  sim_X_norm = (sim_X - mean) / std
+  sim_prob = float(sigmoid(np.dot(sim_X_norm, weights) + bias) * 100.0)
+
+  # Orografik engelleme kontrolü
+  is_blocked = sim_blockage >= 0.70 and sim_pres_diff > -3.0
+  if is_blocked and sim_gust >= 45.0:
+    sim_adjusted_prob = 24.0
+    sim_decision = (
+        "⚠️ DE-WARNING (ALARM İPTALİ): Rüzgâr Beydağları'na (215°) çarptığı için"
+        " Malatya şehir merkezinde fırtına beklenmiyor."
+    )
+    sim_dec_color = "warning"
+  elif sim_temp <= 1.5 and sim_cloud <= 35:
+    sim_adjusted_prob = 94.0
+    sim_decision = (
+        "❄️ KRİTİK ZİRAİ DON ALARMI: Açık gökyüzü nedeniyle yer radyasyonu"
+        " uzaya kaçıyor; kayısı bahçeleri don eşiğinde!"
+    )
+    sim_dec_color = "error"
+  elif sim_hail_pot and sim_gust >= 40:
+    sim_adjusted_prob = 88.0
+    sim_decision = (
+        f"⚡ DOLU VE SÜPER HÜCRE TEHLİKESİ: Yüksek CAPE ({sim_cape} J/kg) ve"
+        " konvektif rüzgâr birleşti!"
+    )
+    sim_dec_color = "error"
+  elif sim_gust >= 50.0:
+    sim_adjusted_prob = sim_prob
+    sim_decision = (
+        f"🚨 ŞİDDETLİ FIRTINA DOĞRULANDI: Vadi koridoru açık ({sim_dir:.0f}°),"
+        f" merkezde {sim_gust:.1f} km/s hamle riski!"
+    )
+    sim_dec_color = "error"
+  else:
+    sim_adjusted_prob = sim_prob
+    sim_decision = (
+        "🟢 DENGELİ ATMOSFER: Simüle edilen değerlerde kritik bir afet anomalisi"
+        " saptanmadı."
+    )
+    sim_dec_color = "success"
+
+  st.markdown("---")
+  r1, r2, r3, r4 = st.columns(4)
+  r1.metric("Simüle Edilen Rüzgâr Hamlesi", f"{sim_gust:.1f} km/s")
+  r1.caption(f"Yön: {sim_dir:.0f}° | Rüzgâr Hızı: {sim_speed:.1f} km/s")
+
+  r2.metric(
+      "Beydağları Blokaj Oranı",
+      f"%{sim_blockage * 100:.0f}",
+      delta="Tam Dağ Engeli" if sim_blockage >= 0.85 else "Açık Koridor",
+      delta_color="normal" if sim_blockage >= 0.85 else "inverse",
+  )
+  r2.caption("215° Duvar İzdüşümü")
+
+  r3.metric(
+      "Simülasyon ML Risk Puanı",
+      f"%{sim_adjusted_prob:.1f}",
+      delta="Yüksek Tehdit" if sim_adjusted_prob >= 50 else "Düşük Risk",
+      delta_color="inverse" if sim_adjusted_prob >= 50 else "normal",
+  )
+  r3.caption("Fizik Destekli PIML Çıkarımı")
+
+  r4.metric("Gece Soğuma Modeli", f"{sim_temp:.1f}°C")
+  r4.caption(
+      "Radyasyonel Don Riski!"
+      if (sim_temp <= 1.5 and sim_cloud <= 35)
+      else "Bulut Kalkanı Mevcut"
+  )
+
+  if sim_dec_color == "error":
+    st.error(sim_decision)
+  elif sim_dec_color == "warning":
+    st.warning(sim_decision)
+  else:
+    st.success(sim_decision)
+
+  st.stop()
+
+# --- NORMAL VERİ AKIŞI (CANLI VEYA GEÇMİŞ SENARYOLAR) ---
 if mode == "Canlı Operasyonel":
   with st.spinner("Canlı atmosfer modelleri çekiliyor..."):
     df_raw, last_update = fetch_live_forecast()
@@ -697,7 +846,7 @@ col4.metric(
 )
 col4.caption(f"En Soğuk Saat: **{night_min_time}** | Yağış: {precip.sum():.1f} mm")
 
-# --- KISA ATMOSFERİK VE TERMODİNAMİK PARAMETRE ÖZETİ ---
+# --- KISA PARAMETRE ÖZETİ ---
 total_precip = precip.sum()
 if total_precip <= 0.05:
   precip_prob_str = "%5 (Çok Düşük)"
@@ -749,7 +898,7 @@ s5.metric(
 )
 s5.caption(f"3s Eğilim: {pressure_diff.iloc[peak_idx]:+.1f} hPa")
 
-# --- ERHAÇ HAVALİMANI (LTAT) GELİŞMİŞ İSTASYON BANDI ---
+# --- ERHAÇ HAVALİMANI (LTAT) İSTASYON BANDI ---
 st.markdown("---")
 m1, m2, m3, m4, m5 = st.columns([2.0, 0.75, 0.85, 0.95, 1.45])
 m1.markdown(f"📡 **Erhaç (LTAT) Canlı METAR:** `{metar['raw']}`")
@@ -810,8 +959,6 @@ if not active_badges:
        " font-size: 0.82rem; font-weight: 700;'>🟢 SAKİN</span>")
   )
 
-badges_html = " ".join(active_badges)
-
 with m5:
   st.markdown(
       "<p style='font-size: 0.875rem; color: #9aa0a6; margin-bottom:"
@@ -820,7 +967,7 @@ with m5:
   )
   st.markdown(
       f"<div style='display: flex; flex-wrap: wrap; gap: 5px; align-items:"
-      f" center;'>{badges_html}</div>",
+      f" center;'>{' '.join(active_badges)}</div>",
       unsafe_allow_html=True,
   )
   vis_str = (
@@ -931,7 +1078,6 @@ if not indep_hazards:
       "İstasyon verilerinde kritik meteorolojik tehlike saptanmadı."
   )
 
-# Doğrulama günlüğüne kaydet (MLOps)
 log_validation_entry(
     mode,
     mod_gust_now,
@@ -1120,6 +1266,202 @@ else:
         f"✅ **STABİL ATMOSFER KOŞULLARI ({date_display}):** Malatya havzası"
         " için kritik bir afet anomalisi tespit edilmemiştir."
     )
+
+# ==============================================================================
+# 🧠 1. AÇIKLANABİLİR YAPAY ZEKÂ (XAI) VE NİTELİK KATKI ANALİZİ (FEATURE ATTRIBUTION)
+# ==============================================================================
+st.markdown("### 🧠 Açıklanabilir Yapay Zekâ (XAI): Model Kararını Gerekçelendirme")
+st.markdown(
+    "<p style='color: #9aa0a6; font-size: 0.9rem; margin-top: -10px;'>"
+    "PIML modelinin karar verirken hangi fiziksel parametreye ne kadar ağırlık"
+    " verdiğini gösteren yerel özellik katkı dağılımı (Logit Contribution):</p>",
+    unsafe_allow_html=True,
+)
+
+# Zirve saatindeki nitelik katkılarını hesapla: w_i * (x_i - mean_i) / std_i
+cur_peak_x = X_norm[peak_idx]
+feature_contributions = cur_peak_x * weights
+feature_names = [
+    "Rüzgâr Taban Hızı (km/s)",
+    "3s Basınç Düşüşü (ΔP)",
+    "Beydağları Dağ Blokajı (215°)",
+    "Hamle Faktörü (Gust/Speed)",
+    "Kar / Donma Fazı Potansiyeli",
+    "Konvektif Dolu İndeksi",
+]
+
+# Görselleştirme DataFrame'i
+xai_df = pd.DataFrame({
+    "Fiziksel Parametre": feature_names,
+    "Risk Katkısı (Logit Etkisi)": feature_contributions,
+})
+xai_df["Etki Yönü"] = np.where(
+    xai_df["Risk Katkısı (Logit Etkisi)"] >= 0,
+    "Riski Artıran (+)",
+    "Riski Düşüren / Sönümleyen (-)",
+)
+xai_df["Renk"] = np.where(
+    xai_df["Risk Katkısı (Logit Etkisi)"] >= 0, "#f44336", "#4caf50"
+)
+
+fig_xai = go.Figure()
+fig_xai.add_trace(
+    go.Bar(
+        y=xai_df["Fiziksel Parametre"],
+        x=xai_df["Risk Katkısı (Logit Etkisi)"],
+        orientation="h",
+        marker=dict(color=xai_df["Renk"]),
+        hovertemplate=(
+            "<b>%{y}</b><br>Katkı Değeri: %{x:.2f}<br>Etki:"
+            " %{marker.color}<extra></extra>"
+        ),
+    )
+)
+fig_xai.add_vline(x=0, line_dash="solid", line_color="rgba(255,255,255,0.2)")
+fig_xai.update_layout(
+    xaxis_title=(
+        "Fiziksel Karar Katkısı (Negatif: Riski Sönümler | Pozitif: Alarm"
+        " Üretir)"
+    ),
+    yaxis=dict(autorange="reversed"),
+    template="plotly_white",
+    height=260,
+    margin=dict(l=0, r=0, t=20, b=10),
+)
+st.plotly_chart(fig_xai, use_container_width=True)
+
+# ==============================================================================
+# 📋 2. SEKTÖREL EYLEME DÖNÜŞTÜRÜLEBİLİR KARAR REÇETELERİ (ACTIONABLE DIRECTIVES)
+# ==============================================================================
+st.markdown("### 📋 Sektörel Eyleme Dönüştürülebilir Operasyonel Reçeteler")
+st.markdown(
+    "<p style='color: #9aa0a6; font-size: 0.9rem; margin-top: -10px;'>Karar"
+    " destek motorunun paydaşlara özel sahadaki acil uygulama direktifleri:</p>",
+    unsafe_allow_html=True,
+)
+
+# Reçete tetikleyicileri
+# 1. Kayısı
+if is_radiation_frost_danger or frost_override:
+  kayisi_status = "🚨 ACİL DON TEDBİRİ AKTİF"
+  kayisi_border = "#f44336"
+  kayisi_recete = (
+      f"• <strong>Kritik Eşik:</strong> Saat {night_min_time} civarında sıcaklık"
+      f" {night_min_temp:.1f}°C'ye inecektir.<br>• <strong>Eylem:</strong> Gece"
+      " 02:00 itibarıyla bahçelerde don savar pervaneleri açın veya üstten"
+      " yağmurlama sistemlerini devreye alarak tomurcuk buz kalkanı oluşturun."
+  )
+elif hail_potential.sum() > 0 or (metar["is_hail"]):
+  kayisi_status = "⚡ DOLU KORUMA ALARMI"
+  kayisi_border = "#e91e63"
+  kayisi_recete = (
+      "• <strong>Kritik Eşik:</strong> CAPE ve hamle dolu yapısını besliyor.<br>•"
+      " <strong>Eylem:</strong> Koruma filelerini gerin; açıkta bulunan hasat"
+      " ekipmanlarını korunaklı depolara çekin."
+  )
+else:
+  kayisi_status = "🟢 ZİRAİ RİSK YOK"
+  kayisi_border = "#4caf50"
+  kayisi_recete = (
+      "• <strong>Durum:</strong> Gece sıcaklıkları don eşiğinin üzerindedir.<br>•"
+      " <strong>Eylem:</strong> Standart bakım ve sulama faaliyetleri"
+      " sürdürülebilir."
+  )
+
+# 2. Şantiye & Vinç
+if peak_gust >= 50.0:
+  santiye_status = "🚨 VİNÇ & İSKELE KİLİDİ"
+  santiye_border = "#f44336"
+  santiye_recete = (
+      f"• <strong>Kritik Eşik:</strong> Hamle {peak_gust:.1f} km/s ile devrilme"
+      " sınırını aşıyor.<br>• <strong>Eylem:</strong> Kule vinç bom dönüş"
+      " kilitlerini açarak serbest salınım (fırdöndü) moduna alın. Dış cephe"
+      " iskele çalışmalarını derhal durdurun."
+  )
+elif peak_gust >= 35.0:
+  santiye_status = "🟡 DİKKAT: YÜKSEKTE ÇALIŞMA"
+  santiye_border = "#ff9800"
+  santiye_recete = (
+      f"• <strong>Kritik Eşik:</strong> Hamle {peak_gust:.1f} km/s"
+      " seviyesinde.<br>• <strong>Eylem:</strong> Hafif çatı ve kalıp"
+      " malzemelerini sabitleyin; kule vinçlerde yük kaldırma tonaj limitini"
+      " %30 düşürün."
+  )
+else:
+  santiye_status = "🟢 GÜVENLİ ŞANTİYE"
+  santiye_border = "#4caf50"
+  santiye_recete = (
+      "• <strong>Durum:</strong> Rüzgâr güvenli çalışma sınırları içerisindedir.<br>•"
+      " <strong>Eylem:</strong> Ağır kaldırma ve yüksekte çalışma rutin olarak"
+      " icra edilebilir."
+  )
+
+# 3. Lojistik & Karayolları
+if is_snow_phase.sum() > 0 or (temp.min() <= 1.0 and precip.sum() > 0.5):
+  loj_status = "❄️ GİZLİ BUZLANMA & TUZLAMA"
+  loj_border = "#2196f3"
+  loj_recete = (
+      "• <strong>Kritik Eşik:</strong> Yağış donma fazında zemin buzlanması"
+      " riski oluşturuyor.<br>• <strong>Eylem:</strong> Doğanşehir ve Reşadiye"
+      " geçitlerine tuzlama ekipleri sevk edilmeli; tır ve ağır vasıtalar için"
+      " zincir kontrolü başlatılmalıdır."
+  )
+elif metar["is_fog"] or (metar["visib_m"] and metar["visib_m"] <= 1200):
+  loj_status = "🌫️ DÜŞÜK GÖRÜŞ REÇETESİ"
+  loj_border = "#ff9800"
+  loj_recete = (
+      f"• <strong>Kritik Eşik:</strong> Erhaç Havalimanı görüşü"
+      f" {metar['visib_m']} m.<br>• <strong>Eylem:</strong> Çevre yolu ve hava"
+      " ulaşımında sis farları ve güvenli takip mesafesi protokolü"
+      " uygulanmalıdır."
+  )
+else:
+  loj_status = "🟢 AÇIK GÜZERGAH"
+  loj_border = "#4caf50"
+  loj_recete = (
+      "• <strong>Durum:</strong> Ana arterlerde ve geçitlerde meteorolojik"
+      " engel saptanmadı.<br>• <strong>Eylem:</strong> Şehirler arası lojistik"
+      " ve havalimanı kalkışları normal akışında."
+  )
+
+d1, d2, d3 = st.columns(3)
+with d1:
+  st.markdown(
+      f"""
+    <div class="directive-card" style="border-left: 5px solid {kayisi_border};">
+        <h5 style="margin: 0 0 6px 0; color: #ffb74d;">🍑 Tarımsal Üretim (Kayısı)</h5>
+        <div style="font-weight: 700; color: {kayisi_border}; font-size: 0.9rem; margin-bottom: 8px;">{kayisi_status}</div>
+        <div style="font-size: 0.85rem; line-height: 1.5; color: #eceff1;">{kayisi_recete}</div>
+    </div>
+    """,
+      unsafe_allow_html=True,
+  )
+
+with d2:
+  st.markdown(
+      f"""
+    <div class="directive-card" style="border-left: 5px solid {santiye_border};">
+        <h5 style="margin: 0 0 6px 0; color: #90caf9;">🏗️ Şantiye & Vinç Güvenliği</h5>
+        <div style="font-weight: 700; color: {santiye_border}; font-size: 0.9rem; margin-bottom: 8px;">{santiye_status}</div>
+        <div style="font-size: 0.85rem; line-height: 1.5; color: #eceff1;">{santiye_recete}</div>
+    </div>
+    """,
+      unsafe_allow_html=True,
+  )
+
+with d3:
+  st.markdown(
+      f"""
+    <div class="directive-card" style="border-left: 5px solid {loj_border};">
+        <h5 style="margin: 0 0 6px 0; color: #a5d6a7;">🚛 Lojistik & Karayolları</h5>
+        <div style="font-weight: 700; color: {loj_border}; font-size: 0.9rem; margin-bottom: 8px;">{loj_status}</div>
+        <div style="font-size: 0.85rem; line-height: 1.5; color: #eceff1;">{loj_recete}</div>
+    </div>
+    """,
+      unsafe_allow_html=True,
+  )
+
+st.markdown("---")
 
 # --- İNTERAKTİF COĞRAFİ RİSK HARİTASI (PLOTLY V6+ VE ESKİ SÜRÜM UYUMLU) ---
 st.markdown("### 🗺️ Malatya Havzası İnteraktif Coğrafi Risk Haritası")
