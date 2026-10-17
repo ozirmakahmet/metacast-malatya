@@ -3,7 +3,6 @@ import json
 import os
 import re
 import sqlite3
-import urllib.parse
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -60,21 +59,6 @@ div[data-testid="stMetricValue"] > div {
     border-radius: 8px;
     padding: 12px 14px;
     height: 100%;
-}
-.wa-btn {
-    display: inline-block;
-    width: 100%;
-    background-color: #25D366;
-    color: white !important;
-    text-align: center;
-    padding: 10px 14px;
-    border-radius: 8px;
-    font-weight: 700;
-    text-decoration: none;
-    margin-top: 10px;
-}
-.wa-btn:hover {
-    background-color: #1ebe5d;
 }
 </style>
 """,
@@ -456,7 +440,7 @@ def generate_scenario(name: str):
 st.title("⚡ MetaCast: Malatya Havzası Karar-Destek Platformu")
 st.markdown(
     "📍 **Hedef Bölge:** Malatya Çanağı & Erhaç (LTAT) | 🔬 **Fizik Destekli"
-    " PIML + WhatsApp Erken Uyarı & MLOps Günlüğü**"
+    " PIML + Termodinamik CAPE & MLOps Günlüğü**"
 )
 
 # --- SOL MENÜ ---
@@ -495,18 +479,6 @@ elif main_category == "📂 Geçmiş Veriler & Test Senaryoları":
     )
 else:
   mode = "Akademik Doğrulama Modu"
-
-# WHATSAPP HIZLI PAYLAŞIM ALANI (SIDEBAR)
-st.sidebar.markdown("---")
-with st.sidebar.expander("📲 WhatsApp Hızlı Alarm Hattı", expanded=True):
-  st.caption(
-      "API gerekmez; tek tıkla doğrudan WhatsApp Web veya uygulamanız açılır."
-  )
-  wa_target_phone = st.sidebar.text_input(
-      "Hedef Telefon (İsteğe bağlı):",
-      placeholder="905xxxxxxxxx (Boş bırakılabilir)",
-      key="wa_dest",
-  )
 
 try:
   with open("models/metacast_weights.json", "r", encoding="utf-8") as f:
@@ -1078,91 +1050,76 @@ fog_override = (
     and (metar["visib_m"] and metar["visib_m"] <= 1000)
 )
 
-active_alarm_msg = ""
 if is_radiation_frost_danger:
-  active_alarm_msg = (
-      f"❄️ GECE ZİRAİ DON ALARMI: Gece açık havada sıcaklık"
-      f" {night_min_temp:.1f}°C seviyesine gerilemektedir! Malatya kayısı"
-      " bahçelerinde aktif tedbirler devreye alınmalıdır."
+  st.error(
+      f"❄️ **GECE ZİRAİ DON ALARMI (RADYASYONEL SOĞUMA) - [Kritik Saat:"
+      f" {night_min_time}]:** Gece bulutsuz (%{night_avg_cloud:.0f}) ve sıcaklık"
+      f" {night_min_temp:.1f}°C! Bulut kalkanı bulunmadığı için yer radyasyonu"
+      " hızla uzaya kaçmaktadır. **Malatya kayısı bahçelerinde aktif zirai don"
+      " tedbirleri devreye alınmalıdır.**"
   )
-  st.error(f"❄️ **GECE ZİRAİ DON ALARMI (RADYASYONEL SOĞUMA):** {active_alarm_msg}")
 elif hail_ts_override:
-  active_alarm_msg = (
-      f"🚨 ANLIK DOLU / ORAJ TESPİT EDİLDİ: Erhaç İstasyonu"
-      f" {'DOLU' if metar['is_hail'] else 'ORAJ'} bildirdi! Araç ve bahçeler"
-      " için acil tedbir alınmalıdır."
+  st.error(
+      "🚨 **ANLIK DOLU / ORAJ TESPİT EDİLDİ (METAR OVERRIDE):** Erhaç İstasyonu"
+      f" {'DOLU (GR/GS)' if metar['is_hail'] else 'ORAJ/YILDIRIM (TS)'} rapor"
+      " etti! **Malatya kayısı bahçeleri ve araçlar için acil dolu tedbirleri"
+      " uygulanmalıdır.**"
   )
-  st.error(active_alarm_msg)
 elif frost_override:
-  active_alarm_msg = (
-      f"🚨 ZİRAİ DON TEHLİKESİ: Erhaç termometresi {metar['temp_c']}°C"
-      " seviyesine indi!"
+  st.error(
+      "🚨 **ZİRAİ DON TEHLİKESİ (YER İSTASYON OVERRIDE):** Malatya Erhaç yer"
+      f" termometresi {metar['temp_c']}°C seviyesine indi! Don tedbirleri"
+      " devreye sokulmalıdır."
   )
-  st.error(active_alarm_msg)
 elif wind_blindness:
-  active_alarm_msg = (
-      f"🚨 FIRTINA MODEL KÖRLÜĞÜ: Modeller sakin öngörürken yer istasyonu"
-      f" {metar['gust_kmh']} km/s hamle ölçtü!"
+  st.error(
+      f"🚨 **FIRTIMA MODEL KÖRLÜĞÜ (OVERRIDE AKTİF):** Sayısal modeller sakin"
+      f" hava öngörmesine rağmen, yer istasyonu {metar['gust_kmh']} km/s hamle"
+      " tespit etti! Yerel fırtına tedbirleri uygulanmalıdır."
   )
-  st.error(active_alarm_msg)
 elif fog_override:
   st.warning(
-      f"🌫️ **DÜŞÜK GÖRÜŞ VE YOĞUN SİS:** Erhaç Havalimanı görüşü"
-      f" {metar['visib_m']} metre."
+      "🌫️ **DÜŞÜK GÖRÜŞ VE YOĞUN SİS UYARISI:** Erhaç Havalimanı görüş"
+      f" mesafesi {metar['visib_m']} metreye inmiştir. Ulaşımda gizli buzlanma"
+      " ve sis tedbirleri uygulanmalıdır."
   )
 elif "Dolu" in mode:
-  active_alarm_msg = (
-      f"🚨 DOLU VE KONVEKTİF FIRTINA ALARMI: Yüksek sıcaklık"
-      f" ({temp.max():.1f}°C) ve CAPE ({max_cape:.0f} J/kg) ile dolu riski!"
+  st.error(
+      f"🚨 **DOLU VE KONVEKTİF FIRTINA ALARMI - [{peak_time}]:** Yüksek"
+      f" sıcaklık ({temp.max():.1f}°C), yüksek CAPE ({max_cape:.0f} J/kg) ve"
+      " ani sağanak kesişmektedir. Dolu koruma tedbirleri uygulanmalıdır."
   )
-  st.error(active_alarm_msg)
 elif "Kar" in mode:
   st.info(
-      f"❄️ **YAĞIŞ FAZ DÖNÜŞÜMÜ (KAR):** Sıcaklık {temp.min():.1f}°C'ye"
-      " inmektedir."
+      f"❄️ **YAĞIŞ FAZ DÖNÜŞÜMÜ (KAR VE GİZLİ BUZLANMA) - [{peak_time}]:**"
+      f" Yağış esnasında sıcaklık {temp.min():.1f}°C seviyesine inmektedir."
+      " Şehir merkezinde kar ve zemin buzlanması beklenmektedir."
   )
 elif "Yanlış Alarm" in mode:
   st.warning(
-      "⚠️ **DE-WARNING (UYARI GERİ ÇEKME):** Fırtına Beydağları orografik engeli"
-      " nedeniyle merkeze inemeyecektir."
+      f"⚠️ **DE-WARNING (UYARI GERİ ÇEKME / ALARM İPTALİ) - [{peak_time}]:**"
+      f" Sayısal modeller {peak_gust:.1f} km/s fırtına gösteriyor. Ancak"
+      " rüzgârın Beydağları orografik engeline (215° dağ duvarı) çarpması"
+      " nedeniyle hava kütlesi Malatya şehir merkezine inemeden"
+      " sönümlenecektir. **Sarı kodlu fırtına uyarısı merkez için iptal"
+      " edildi.**"
   )
 else:
   if peak_gust >= 50.0 and risk_score >= 50.0:
-    active_alarm_msg = (
-        f"🚨 DOĞRULANMIŞ ŞİDDETLİ FIRTINA: {peak_gust:.1f} km/s hamle riski!"
+    st.error(
+        f"🚨 **DOĞRULANMIŞ ŞİDDETLİ FIRTINA TEHLİKESİ - [{peak_time}]:** Modeller"
+        f" ve yapay zekâ {peak_gust:.1f} km/s hamle riskini teyit ediyor."
     )
-    st.error(active_alarm_msg)
   elif peak_gust >= 30.0:
-    st.info(f"💨 **ORTA KUVVETTE RÜZGÂR:** Pik hamle {peak_gust:.1f} km/s.")
+    st.info(
+        f"💨 **ORTA KUVVETTE RÜZGÂR - [{peak_time}]:** Beklenen pik hamle"
+        f" {peak_gust:.1f} km/s seviyesindedir. Fırtına eşiğinin altındadır."
+    )
   else:
-    st.success(f"✅ **STABİL ATMOSFER KOŞULLARI ({date_display})**")
-
-# --- RESMİ WHATSAPP BAĞLANTI ÜRETECİ (wa.me) ---
-wa_msg_text = (
-    f"🚨 *METACAST MALATYA ERKEN UYARI RAPORU*\n\n"
-    f"📅 *Tarih:* {date_display}\n"
-    f"📍 *Durum:* {active_alarm_msg if active_alarm_msg else 'Atmosfer Stabil.'}\n"
-    f"💨 *Pik Rüzgâr Hamlesi:* {peak_gust:.1f} km/s\n"
-    f"🌡️ *Gece Min Sıcaklık:* {night_min_temp:.1f}°C\n"
-    f"🔍 *Model Güvenilirliği:* %{model_reliability_score:.0f}\n\n"
-    f"🌐 _MetaCast Havza Karar Destek Platformu_"
-)
-encoded_wa_msg = urllib.parse.quote(wa_msg_text)
-clean_target = re.sub(r"[^\d]", "", wa_target_phone) if wa_target_phone else ""
-wa_url = (
-    f"https://wa.me/{clean_target}?text={encoded_wa_msg}"
-    if clean_target
-    else f"https://wa.me/?text={encoded_wa_msg}"
-)
-
-st.sidebar.markdown(
-    f"""
-    <a href="{wa_url}" target="_blank" class="wa-btn">
-        📲 WhatsApp ile Afet Alarmı Gönder
-    </a>
-    """,
-    unsafe_allow_html=True,
-)
+    st.success(
+        f"✅ **STABİL ATMOSFER KOŞULLARI ({date_display}):** Malatya havzası"
+        " için kritik bir afet anomalisi tespit edilmemiştir."
+    )
 
 # --- İNTERAKTİF COĞRAFİ RİSK HARİTASI (PLOTLY V6+ VE ESKİ SÜRÜM UYUMLU) ---
 st.markdown("### 🗺️ Malatya Havzası İnteraktif Coğrafi Risk Haritası")
