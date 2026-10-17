@@ -1,5 +1,6 @@
 from datetime import datetime
 import json
+import re
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -46,6 +47,41 @@ def sigmoid(z):
   return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
 
 
+def parse_metar_clouds(raw_metar: str) -> str:
+  """METAR kodundaki bulut katmanlarını (FEW, SCT, BKN, OVC, CB, TCU) çözer."""
+  raw_upper = raw_metar.upper()
+  if any(k in raw_upper for k in ["CAVOK", "SKC", "CLR", "NSC"]):
+    return "Açık / Bulutsuz (Görüş Tam)"
+
+  matches = re.findall(
+      r"\b(FEW|SCT|BKN|OVC|VV)(\d{3})(CB|TCU)?\b", raw_upper
+  )
+  if not matches:
+    return "Bulut Kaydı Yok / Açık"
+
+  desc_map = {
+      "FEW": "Az Bulutlu (1-2/8)",
+      "SCT": "Parçalı Bulutlu (3-4/8)",
+      "BKN": "Çok Bulutlu (5-7/8)",
+      "OVC": "Kapalı (8/8)",
+      "VV": "Dikey Görüş Kısıtlı (Sis)",
+  }
+
+  parts = []
+  for coverage, alt_hundreds, modifier in matches:
+    alt_ft = int(alt_hundreds) * 100
+    alt_m = round(alt_ft * 0.3048)
+    c_text = desc_map.get(coverage, coverage)
+    mod_text = ""
+    if modifier == "CB":
+      mod_text = " [⚡ Oraj/Fırtına Bulutu]"
+    elif modifier == "TCU":
+      mod_text = " [Gelişen Kümülüs]"
+    parts.append(f"{c_text} ~{alt_m}m{mod_text}")
+
+  return " | ".join(parts)
+
+
 @st.cache_data(ttl=300)
 def fetch_live_metar():
   url = "https://aviationweather.gov/api/data/metar?ids=LTAT&format=json"
@@ -90,6 +126,8 @@ def fetch_live_metar():
           or "DZ" in raw_upper
       )
 
+      cloud_desc = parse_metar_clouds(raw_metar)
+
       return {
           "status": "online",
           "speed_kmh": round(speed_kmh, 1),
@@ -102,6 +140,7 @@ def fetch_live_metar():
           "is_fog": is_fog,
           "is_snow": is_snow,
           "is_rain": is_rain,
+          "cloud_desc": cloud_desc,
           "raw": raw_metar,
           "time": obs_time,
       }
@@ -119,6 +158,7 @@ def fetch_live_metar():
       "is_fog": False,
       "is_snow": False,
       "is_rain": False,
+      "cloud_desc": "Açık / Bulutsuz",
       "raw": "LTAT İstasyonu Çevrimdışı (Simülasyon Modu)",
       "time": datetime.now().strftime("%H:%M"),
   }
@@ -138,6 +178,7 @@ def fetch_live_forecast():
           "temperature_2m",
           "relative_humidity_2m",
           "precipitation",
+          "cloud_cover",
       ],
       "models": ["ecmwf_ifs", "gfs_seamless", "icon_seamless"],
       "forecast_days": 2,
@@ -158,6 +199,7 @@ def generate_scenario(name: str):
     icon = ecmwf * 0.90
     temp = np.full(24, 18.0)
     precip = np.full(24, 0.0)
+    cloud = np.full(24, 25.0)
     wind_dir = np.full(24, 215.0)
     pressure = np.full(24, 1018.0)
     date_display = "12 Nisan 2024"
@@ -170,6 +212,9 @@ def generate_scenario(name: str):
     icon = ecmwf * 1.0
     temp = np.full(24, 28.0)
     precip = np.array([0 if i < 14 or i > 17 else 8.5 for i in range(24)])
+    cloud = np.array(
+        [20 if i < 11 else 95 if 12 <= i <= 17 else 35 for i in range(24)]
+    )
     wind_dir = np.full(24, 45.0)
     pressure = np.linspace(1015, 1006, 24)
     date_display = "05 Haziran 2024"
@@ -182,6 +227,7 @@ def generate_scenario(name: str):
     icon = np.full(24, 24.0)
     temp = np.linspace(3.0, -2.0, 24)
     precip = np.array([1.5 if 10 <= i <= 20 else 0.0 for i in range(24)])
+    cloud = np.full(24, 90.0)
     wind_dir = np.full(24, 15.0)
     pressure = np.full(24, 1012.0)
     date_display = "20 Ocak 2024"
@@ -197,6 +243,7 @@ def generate_scenario(name: str):
       "surface_pressure_ecmwf_ifs": pressure,
       "temperature_2m_ecmwf_ifs": temp,
       "precipitation_ecmwf_ifs": precip,
+      "cloud_cover_ecmwf_ifs": cloud,
   })
   return df_sim, date_display, tag_sub
 
@@ -288,6 +335,10 @@ gust_factor = (
 
 temp = df["temperature_2m_ecmwf_ifs"]
 precip = df["precipitation_ecmwf_ifs"]
+cloud_cover = df.get(
+    "cloud_cover_ecmwf_ifs",
+    df.get("cloud_cover", pd.Series(np.zeros(len(df)))),
+)
 
 # Yağış türü dağılımı
 precip_types = []
@@ -343,7 +394,7 @@ col3.caption("Fizik Destekli ML Olasılığı")
 col4.metric("Kar Fazı / Donma Saati", f"{int(is_snow_phase.sum())} saat")
 col4.caption(f"Min Sıcaklık: {temp.min():.1f}°C | Yağış: {precip.sum():.1f} mm")
 
-# --- KISA ATMOSFERİK PARAMETRE ÖZETİ ---
+# --- KISA ATMOSFERİK PARAMETRE ÖZETİ HESAPLAMALARI ---
 total_precip = precip.sum()
 if total_precip <= 0.05:
   precip_prob_str = "%5 (Çok Düşük)"
@@ -358,6 +409,17 @@ else:
   else:
     dom_type = "💧 Sıvı Yağmur"
 
+avg_cloud = cloud_cover.mean()
+if avg_cloud <= 20:
+  cloud_desc_summary = f"%{avg_cloud:.0f} (Açık)"
+  frost_shield = "⚠️ Açık Gece / Don Riski Yüksek"
+elif avg_cloud <= 60:
+  cloud_desc_summary = f"%{avg_cloud:.0f} (Parçalı)"
+  frost_shield = "Kısmi Bulut Örtüsü"
+else:
+  cloud_desc_summary = f"%{avg_cloud:.0f} (Kapalı)"
+  frost_shield = "🛡️ Bulut Kalkanı Aktif"
+
 avg_wind = df["wind_speed_10m_ecmwf_ifs"].mean()
 avg_pressure = df["surface_pressure_ecmwf_ifs"].mean()
 pres_diff_val = pressure_diff.iloc[peak_idx]
@@ -368,23 +430,27 @@ pres_trend_str = (
 )
 
 st.markdown("##### 📌 Günlük Kritik Atmosfer Parametreleri Özeti")
-s1, s2, s3, s4 = st.columns(4)
+s1, s2, s3, s4, s5 = st.columns(5)
 s1.metric("Yağış İhtimali", precip_prob_str)
-s1.caption(f"Toplam Birikim: **{total_precip:.1f} mm**")
+s1.caption(f"Toplam: **{total_precip:.1f} mm**")
 
 s2.metric("Baskın Yağış Türü", dom_type)
-s2.caption(f"Termik Aralık: {temp.min():.1f}°C / {temp.max():.1f}°C")
+s2.caption(f"{temp.min():.1f}°C / {temp.max():.1f}°C")
 
-s3.metric("Rüzgâr Hızı", f"{avg_wind:.1f} km/s")
-s3.caption(f"Pik Hamle: **{peak_gust:.1f} km/s**")
+s3.metric("Bulutluluk", cloud_desc_summary)
+s3.caption(frost_shield)
 
-s4.metric("Zemin Basıncı", f"{avg_pressure:.1f} hPa")
-s4.caption(f"3s Eğilim: {pres_diff_val:+.1f} hPa ({pres_trend_str})")
+s4.metric("Rüzgâr Hızı", f"{avg_wind:.1f} km/s")
+s4.caption(f"Pik: **{peak_gust:.1f} km/s**")
+
+s5.metric("Zemin Basıncı", f"{avg_pressure:.1f} hPa")
+s5.caption(f"3s Eğilim: {pres_diff_val:+.1f} hPa")
 
 # --- ERHAÇ HAVALİMANI (LTAT) GELİŞMİŞ İSTASYON BANDI ---
 st.markdown("---")
 m1, m2, m3, m4, m5 = st.columns([2.0, 0.75, 0.85, 0.95, 1.45])
 m1.markdown(f"📡 **Erhaç (LTAT) Canlı METAR:** `{metar['raw']}`")
+m1.caption(f"☁️ **Bulut Katmanları:** {metar['cloud_desc']}")
 m2.metric(
     "Termometre",
     f"{metar['temp_c']}°C" if metar["temp_c"] is not None else "--",
@@ -464,7 +530,6 @@ with m5:
 st.markdown("---")
 
 # --- ZAMAN PENCERESİ VE SÜRE HESAPLAMA MOTORU (IMPACT WINDOW) ---
-# Hadise eşiği: Rüzgar >= 30 km/s VEYA Yağış >= 0.5 mm VEYA Kar/Donma
 active_indices = df.index[
     (gust_mean >= 30.0) | (precip >= 0.5) | (is_snow_phase == 1)
 ].tolist()
@@ -473,7 +538,6 @@ if active_indices:
   start_idx = active_indices[0]
   end_idx = active_indices[-1]
   start_time_str = df["time"].iloc[start_idx].strftime("%H:00")
-  # Bitiş saati için sonraki saati alıyoruz
   end_time_str = (
       (df["time"].iloc[end_idx] + pd.Timedelta(hours=1)).strftime("%H:00")
       if end_idx < len(df) - 1
@@ -696,6 +760,7 @@ with st.expander("📋 Saat Saat Tüm Meteorolojik Değerler Tablosu (Tıkla ve 
       "ICON Rüzgâr (km/s)": icon.round(1),
       "Model Ortalaması (km/s)": gust_mean.round(1),
       "Sıcaklık (°C)": temp.round(1),
+      "Bulutluluk (%)": cloud_cover.round(0).astype(int),
       "Yağış (mm)": precip.round(1),
       "Yağış Türü": df["precip_type"],
       "ML Risk Olasılığı (%)": probabilities.round(1),
