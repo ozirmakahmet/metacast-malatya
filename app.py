@@ -311,7 +311,7 @@ def fetch_live_metar():
   }
 
 
-# --- GERÇEK MODEL TAHMİNİ (OPEN-METEO) ---
+# --- GERÇEK MODEL TAHMİNİ (OPEN-METEO / 3 GÜN GEÇMİŞ + 7 GÜN GELECEK) ---
 @st.cache_data(ttl=600)
 def fetch_live_forecast():
   url = "https://api.open-meteo.com/v1/forecast"
@@ -331,7 +331,8 @@ def fetch_live_forecast():
           "cape",
       ],
       "models": ["ecmwf_ifs", "gfs_seamless", "icon_seamless"],
-      "forecast_days": 2,
+      "past_days": 3,
+      "forecast_days": 7,
       "timezone": "Europe/Istanbul",
   }
   response = requests.get(url, params=params, timeout=8)
@@ -556,30 +557,6 @@ if mode == "Akademik Doğrulama Modu":
   b4.metric("Kritik Başarı İndeksi (CSI)", "0.774")
   b4.caption("Threat Score (Genel Tehdit Başarı Puanı - 2024 Yılı)")
 
-  st.markdown("---")
-  st.markdown("#### 🗺️ Bölgesel Doğrulama ve İstasyonlar Arası Mekânsal Temsil")
-  spatial_df = pd.DataFrame({
-      "Segment / Temsili Bölge": [
-          "Erhaç Düzlüğü (LTAT)",
-          "Battalgazi / Şehir Çanağı",
-          "Yeşilyurt Yamaç / Beydağları Etek",
-          "Doğanşehir Dağ Geçidi",
-      ],
-      "Rakım (DEM)": ["862 m", "948 m", "1.010 m", "1.220 m"],
-      "Orografik Karakter": [
-          "Açık Vadi Tabanı",
-          "Isı Adası / Enverziyon Çukuru",
-          "Dağ Duvarı Yamaç Yükselimi",
-          "Rüzgâr Tüneli Koridoru",
-      ],
-      "Zirai Don Riski (21:00-07:00)": [
-          "Orta Düzey",
-          "En Yüksek (Enverziyon Tabanı)",
-          "Düşük (Termal Kemer)",
-          "Düşük (Rüzgâr Karışımı)",
-      ],
-  })
-  st.dataframe(spatial_df, use_container_width=True)
   st.stop()
 
 # --- 2. "WHAT-IF" SİMÜLASYON LABORATUVARI ---
@@ -758,8 +735,55 @@ if mode == "Canlı Operasyonel":
     df_raw, last_update = fetch_live_forecast()
   st.sidebar.caption(f"🕒 Son Model Güncellemesi: **{last_update}**")
 
-  default_date = df_raw["time"].dt.date.iloc[24]
-  df = df_raw[df_raw["time"].dt.date == default_date].reset_index(drop=True)
+  # Mevcut tarihler ve gün gezgini (Navigasyon)
+  available_dates = sorted(df_raw["time"].dt.date.unique())
+  min_date = available_dates[0]
+  max_date = available_dates[-1]
+  today_date = datetime.now().date()
+
+  if "current_date" not in st.session_state:
+    st.session_state.current_date = (
+        today_date if today_date in available_dates else available_dates[0]
+    )
+
+  st.sidebar.markdown("---")
+  st.sidebar.subheader("📅 Tarih Seçimi")
+
+  # Takvimden Tarih Seçici
+  picked_date = st.sidebar.date_input(
+      "İncelenecek Tarih:",
+      value=st.session_state.current_date,
+      min_value=min_date,
+      max_value=max_date,
+  )
+  if picked_date != st.session_state.current_date:
+    st.session_state.current_date = picked_date
+    st.rerun()
+
+  # Sol (Önceki Gün) ve Sağ (Sonraki Gün) Navigasyon Okları
+  col_prev, col_next = st.sidebar.columns(2)
+  with col_prev:
+    if st.button("⬅️ Önceki Gün", use_container_width=True):
+      prev_d = st.session_state.current_date - pd.Timedelta(days=1)
+      if prev_d >= min_date:
+        st.session_state.current_date = prev_d
+        st.rerun()
+
+  with col_next:
+    if st.button("Sonraki Gün ➡️", use_container_width=True):
+      next_d = st.session_state.current_date + pd.Timedelta(days=1)
+      if next_d <= max_date:
+        st.session_state.current_date = next_d
+        st.rerun()
+
+  # Seçilen güne göre veri filtreleme
+  df = df_raw[
+      df_raw["time"].dt.date == st.session_state.current_date
+  ].reset_index(drop=True)
+  if df.empty:
+    st.session_state.current_date = min_date
+    df = df_raw[df_raw["time"].dt.date == min_date].reset_index(drop=True)
+
   date_display = df["time"].iloc[0].strftime("%d %B %Y")
   tag_sub = "Canlı Sayısal Model Tahmini (Otomatik Akış)"
 else:
@@ -1547,7 +1571,7 @@ with r_col4:
 st.markdown("---")
 
 # --- SAATLİK SAYISAL MODEL GRAFİKLERİ ---
-st.markdown(f"### 📊 Saatlik Sayısal Rüzgâr Hamlesi Kıyası ({date_display})")
+st.markdown(f"### 📊 Erhaç Üssü Saatlik Sayısal Rüzgâr Hamlesi Kıyası ({date_display})")
 fig_wind = go.Figure()
 fig_wind.add_trace(
     go.Scatter(
@@ -1637,7 +1661,7 @@ fig_weather.update_layout(
     height=370,
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
 )
-st.plotly_chart(fig_weather, use_container_width=True)
+st.plotly_chart(fig_weather, width="stretch")
 
 with st.expander("📋 Saat Saat Tüm Meteorolojik Değerler Tablosu"):
   display_df = pd.DataFrame({
