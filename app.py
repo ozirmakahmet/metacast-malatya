@@ -1624,62 +1624,65 @@ with r_col4:
   )
 
 st.markdown("---")
-# --- MEKÂNSAL FARKINDALIK (HARİTA & OROGRAFİ) ---
-st.markdown("### 🧭 Mekânsal Rüzgâr Dinamikleri & Orografik Etkileşim")
-
-c_map1, c_map2 = st.columns([1.5, 1.5])
 with c_map1:
     # Malatya Merkezi
     center_lat, center_lon = 38.3552, 38.3095
     
+    # Oku daha belirgin yapmak için mesafeyi biraz uzattık
     wind_rad = np.radians(live_wind_deg)
-    start_lat = center_lat + (0.15 * np.cos(wind_rad))
-    start_lon = center_lon + (0.15 * np.sin(wind_rad))
+    start_lat = center_lat + (0.3 * np.cos(wind_rad))
+    start_lon = center_lon + (0.3 * np.sin(wind_rad))
 
     fig_map = go.Figure()
 
-    # Beydağları Bölgesi (Güneybatı)
+    # Beydağları Bölgesi (Güneybatı) - Kalkan/Poligon Şeklinde
     fig_map.add_trace(go.Scattermap(
-        lat=[38.15, 38.20, 38.25],
-        lon=[38.00, 38.10, 38.20],
-        mode='markers+lines',
-        marker=dict(size=15, color='rgba(121, 85, 72, 0.8)'),
-        line=dict(width=4, color='rgba(121, 85, 72, 0.8)'),
+        lat=[38.10, 38.25, 38.20, 38.05, 38.10], # Kapalı alan (Poligon)
+        lon=[38.00, 38.10, 38.25, 38.15, 38.00],
+        mode='lines',
+        fill='toself',
+        fillcolor='rgba(121, 85, 72, 0.4)',
+        line=dict(width=2, color='rgba(121, 85, 72, 0.9)'),
         name="Beydağları (Orografik Bariyer)",
         hoverinfo="name"
     ))
 
-    # Karakaya Barajı Bölgesi (Doğu)
+    # Karakaya Barajı Bölgesi (Doğu) - Havza Şeklinde
     fig_map.add_trace(go.Scattermap(
-        lat=[38.35, 38.45, 38.55],
-        lon=[38.70, 38.80, 38.75],
-        mode='markers+lines',
-        marker=dict(size=15, color='rgba(3, 169, 244, 0.8)'),
-        line=dict(width=4, color='rgba(3, 169, 244, 0.8)'),
+        lat=[38.35, 38.55, 38.60, 38.40, 38.35],
+        lon=[38.65, 38.70, 38.85, 38.80, 38.65],
+        mode='lines',
+        fill='toself',
+        fillcolor='rgba(3, 169, 244, 0.4)',
+        line=dict(width=2, color='rgba(3, 169, 244, 0.9)'),
         name="Karakaya Barajı (Nem Kaynağı)",
         hoverinfo="name"
     ))
 
-    # Erhaç İstasyonu
+    # Erhaç İstasyonu (Doğrudan Harita Üzerinde Yazı)
     fig_map.add_trace(go.Scattermap(
         lat=[38.4312],
         lon=[38.0898],
-        mode='markers',
-        marker=dict(size=12, color='orange'),
+        mode='markers+text',
+        marker=dict(size=14, color='orange'),
+        text=["Erhaç (LTAT)"],
+        textposition="top right",
+        textfont=dict(color="orange", size=13, family="Arial Black"),
         name="Erhaç (LTAT)",
-        text="Erhaç İstasyonu",
-        hoverinfo="text"
+        hoverinfo="name"
     ))
 
-    # Şehir Merkezi
+    # Şehir Merkezi (Doğrudan Harita Üzerinde Yazı)
     fig_map.add_trace(go.Scattermap(
         lat=[center_lat],
         lon=[center_lon],
-        mode='markers',
-        marker=dict(size=12, color='black'),
+        mode='markers+text',
+        marker=dict(size=14, color='black'),
+        text=["Malatya Merkez"],
+        textposition="bottom right",
+        textfont=dict(color="black", size=13, family="Arial Black"),
         name="Malatya Merkez",
-        text="Şehir Merkezi",
-        hoverinfo="text"
+        hoverinfo="name"
     ))
 
     # Rüzgar Oku (Başlangıç noktasından merkeze)
@@ -1687,20 +1690,28 @@ with c_map1:
         lat=[start_lat, center_lat],
         lon=[start_lon, center_lon],
         mode='lines+markers',
-        line=dict(width=5, color='red'),
-        marker=dict(size=10, color='red'), 
+        line=dict(width=4, color='red'),
+        marker=dict(size=12, color='red'), 
         name=f"Anlık Rüzgar ({live_wind_deg:.0f}°)",
         hoverinfo="name"
     ))
 
     fig_map.update_layout(
         map=dict(
-            style="carto-positron", 
+            style="white-bg", 
             center=dict(lat=38.35, lon=38.35),
-            zoom=8.5
+            zoom=8.0,
+            layers=[
+                dict(
+                    sourcetype="raster",
+                    # Yükseklik ve kabartmaları gösteren OpenTopoMap sunucusu
+                    source=["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"],
+                    below="traces"
+                )
+            ]
         ),
         showlegend=False,
-        height=320,
+        height=340,
         margin=dict(l=0, r=0, t=0, b=0)
     )
     st.plotly_chart(fig_map, use_container_width=True)
