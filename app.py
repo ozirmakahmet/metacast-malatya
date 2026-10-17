@@ -43,9 +43,12 @@ div[data-testid="stMetricValue"] > div {
     padding: 14px 16px;
     margin-bottom: 15px;
 }
-.metric-sub {
-    font-size: 0.82rem;
-    color: #9aa0a6;
+.benchmark-box {
+    background-color: rgba(33, 150, 243, 0.08);
+    border: 1px solid rgba(33, 150, 243, 0.3);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
 }
 </style>
 """,
@@ -57,7 +60,6 @@ def sigmoid(z):
   return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
 
 
-# --- 1. FİZİKSEL MANTIK VE TELEMETRİ GÜVENLİK DENETİMİ ---
 def validate_telemetry(temp, speed_kmh, gust_kmh, altim_hpa):
   warnings = []
   is_valid = True
@@ -211,7 +213,6 @@ def fetch_live_metar():
   }
 
 
-# --- 2. TERMODİNAMİK VE FİZİKSEL PARAMETRELİ MODEL ÇAĞRISI (CAPE & DEW POINT) ---
 @st.cache_data(ttl=600)
 def fetch_live_forecast():
   url = "https://api.open-meteo.com/v1/forecast"
@@ -416,29 +417,42 @@ elif metar["status"] == "degraded" and metar["warnings"]:
       f" {' | '.join(metar['warnings'])}"
   )
 
-# --- 3. AKADEMİK BENCHMARK VE ZAMANSAL AYRILMIŞ TEST KÜMESİ SEKRESİ ---
+# --- AKADEMİK BENCHMARK VE ZAMANSAL AYRILMIŞ TEST KÜMESİ SEKRESİ ---
 if mode == "Akademik Doğrulama Modu":
   st.subheader(
-      "📈 Zamana Göre Ayrılmış Test Kümesi Doğrulama Raporu (Temporal Split"
-      " 2024)"
+      "📈 Bağımsız Test Kümesi Doğrulama Raporu (Out-of-Time Benchmark)"
   )
-  st.markdown("""
-    **Bilimsel Tasarım Kuralı:** Veri sızıntısını (*lookahead bias*) önlemek amacıyla, model **2023 Yılı (8.760 saat)** geçmiş verisiyle eğitilmiş; 
-    aşağıdaki metrikler ise modelin eğitim sırasında **hiç görmediği 2024 Yılı (8.784 saat)** bağımsız test kümesi üzerinde hesaplanmıştır.
-    """)
+
+  # Net tarih aralığı ve eğitim/test ayrımı bilgilendirme kutusu
+  st.markdown(
+      """
+    <div class="benchmark-box">
+        <h5 style="margin: 0 0 8px 0; color: #90caf9;">🗓️ Veri Kümeleri Zamansal Ayrım Protokolü (Temporal Train/Test Split)</h5>
+        <div style="font-size: 0.92rem; line-height: 1.6; color: #e0e0e0;">
+            • <strong>Eğitim Dönemi (Train Set):</strong> <code>01.01.2023 – 31.12.2023</code> (Tam 1 Yıl / 8.760 Saatlik Geçmiş Veri)<br>
+            • <strong>Bağımsız Test Dönemi (Out-of-Time Test Set):</strong> <span style="background-color: rgba(255,152,0,0.25); border: 1px solid #ff9800; padding: 2px 6px; border-radius: 4px; font-weight: 700; color: #ffb74d;">01.01.2024 – 31.12.2024</span> (Tam 1 Yıl / 8.784 Saatlik Test Verisi)<br>
+            • <strong>Bilimsel Geçerlilik:</strong> Veri sızıntısını (<em>lookahead bias</em>) tamamen engellemek amacıyla model ağırlıkları 2023 verisiyle dondurulmuş; aşağıdaki tüm istatistiksel metrikler modelin <u>daha önce hiç görmediği 2024 yılının 365 günü</u> boyunca Erhaç yer istasyonu ölçümleriyle kör testte (blind validation) karşılaştırılması sonucu elde edilmiştir.
+        </div>
+    </div>
+    """,
+      unsafe_allow_html=True,
+  )
 
   b1, b2, b3, b4 = st.columns(4)
   b1.metric("Brier Skoru (BS)", "0.084")
-  b1.caption("Karesel Olasılık Hatası (0: Mükemmel, Ref: 0.180)")
+  b1.caption(
+      "Karesel Olasılık Hatası (0: Mükemmel, Ref Sayısal Model: 0.180) | 2024"
+      " Test Verisi"
+  )
 
-  b2.metric("Yakalama Oranı (POD / Hit Rate)", "%88.6")
-  b2.caption("Kritik Afetleri Önceden Yakalama Başarısı")
+  b2.metric("Yakalama Oranı (POD)", "%88.6")
+  b2.caption("2024 Yılındaki Kritik Afetleri Önceden Yakalama Başarısı")
 
   b3.metric("Yanlış Alarm Oranı (FAR)", "%14.2")
-  b3.caption("De-Warning Sayesinde Boşa Çıkan Alarm Oranı")
+  b3.caption("De-Warning Mekanizmasıyla Gereksiz Alarmları Filtreleme")
 
   b4.metric("Kritik Başarı İndeksi (CSI)", "0.774")
-  b4.caption("Threat Score (Tehdit Başarı Puanı)")
+  b4.caption("Threat Score (Genel Tehdit Başarı Puanı - 2024 Yılı)")
 
   st.markdown("---")
   st.markdown("#### 🗺️ Bölgesel Doğrulama ve İstasyonlar Arası Mekânsal Temsil")
@@ -518,12 +532,10 @@ cloud_cover = df.get(
     df.get("cloud_cover", pd.Series(np.zeros(len(df)))),
 )
 
-# Termodinamik CAPE ve Nem Parametreleri
 cape_series = df.get("cape", pd.Series(np.zeros(len(df))))
 dew_point_series = df.get("dew_point_2m_ecmwf_ifs", temp - 4.0)
-dew_point_depression = temp - dew_point_series  # Doygunluk açığı
+dew_point_depression = temp - dew_point_series
 
-# Gece Zirai Don Taraması
 night_mask = (df["time"].dt.hour >= 21) | (df["time"].dt.hour <= 7)
 night_temps = temp[night_mask]
 night_clouds = cloud_cover[night_mask]
@@ -540,7 +552,6 @@ else:
 
 is_radiation_frost_danger = night_min_temp <= 2.0 and night_avg_cloud <= 35.0
 
-# Yağış Türü ve Termodinamik Dolu Kesişimi
 precip_types = []
 precip_colors = []
 for t_val, p_val, g_val, c_val in zip(temp, precip, gust_mean, cape_series):
@@ -561,7 +572,6 @@ df["precip_type"] = precip_types
 is_snow_phase = (df["precip_type"] == "❄️ Kar / Sulu Kar").astype(int)
 hail_potential = (df["precip_type"] == "⚡ Dolu / Süper Hücre").astype(int)
 
-# ML İnference Vektörü
 X_input = np.column_stack([
     df["wind_speed_10m_ecmwf_ifs"].values,
     pressure_diff.values,
@@ -796,8 +806,9 @@ if obs_gust >= 50.0:
   indep_badge_color = "#f44336"
 elif obs_gust >= 35.0:
   indep_hazards.append(f"Kuvvetli Yer Hamlesi ({obs_gust:.1f} km/s)")
-  indep_level = "🟡 DİKKAT"
-  indep_badge_color = "#ff9800"
+  if indep_level != "🔴 KRİTİK TEHLİKE":
+    indep_level = "🟡 DİKKAT"
+    indep_badge_color = "#ff9800"
 
 if obs_temp is not None and obs_temp <= 0.0:
   indep_hazards.append(f"Aktif Zirai Don ({obs_temp:.1f}°C)")
@@ -805,8 +816,9 @@ if obs_temp is not None and obs_temp <= 0.0:
   indep_badge_color = "#f44336"
 elif obs_temp is not None and obs_temp <= 2.0:
   indep_hazards.append(f"Zirai Don Eşiği ({obs_temp:.1f}°C)")
-  indep_level = "🟡 DİKKAT"
-  indep_badge_color = "#ff9800"
+  if indep_level != "🔴 KRİTİK TEHLİKE":
+    indep_level = "🟡 DİKKAT"
+    indep_badge_color = "#ff9800"
 
 if metar["is_hail"]:
   indep_hazards.append("Dolu Yağışı (GR/GS)")
