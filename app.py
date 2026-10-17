@@ -1622,7 +1622,7 @@ with r_col4:
     """,
       unsafe_allow_html=True,
   )
-
+# --- MEKÂNSAL FARKINDALIK (HARİTA & OROGRAFİ) ---
 st.markdown("---")
 with c_map1:
     # Malatya Merkezi
