@@ -1624,63 +1624,101 @@ with r_col4:
   )
 
 st.markdown("---")
-# --- MEKÂNSAL FARKINDALIK (RÜZGÂR PUSULASI & OROGRAFİ) ---
+# --- MEKÂNSAL FARKINDALIK (HARİTA & OROGRAFİ) ---
 st.markdown("### 🧭 Mekânsal Rüzgâr Dinamikleri & Orografik Etkileşim")
 
-c_map1, c_map2 = st.columns([1.2, 2])
+c_map1, c_map2 = st.columns([1.5, 1.5])
 with c_map1:
-    # Rüzgâr Pusulası (Polar Chart)
-    fig_compass = go.Figure()
+    # Malatya Merkezi
+    center_lat, center_lon = 38.3552, 38.3095
     
-    # Beydağları Blokaj Alanı (Güneybatı - ~190° ile 240° arası)
-    fig_compass.add_trace(go.Barpolar(
-        r=[100], theta=[215], width=[50],
-        marker_color="rgba(121, 85, 72, 0.4)",
-        name="Beydağları Bariyeri (215°)",
+    # Rüzgar yönüne göre ok bitiş noktasını hesapla (rüzgarın GELDİĞİ yön)
+    # Rüzgar yönü (azimut), kuzeyden saat yönündedir.
+    # Haritada göstermek için rüzgarın estiği yönden merkeze doğru bir çizgi çizeceğiz.
+    wind_rad = np.radians(live_wind_deg)
+    # Basit bir ölçekleme (yaklaşık 0.15 derece uzaklıktan merkeze gelsin)
+    start_lat = center_lat + (0.15 * np.cos(wind_rad))
+    start_lon = center_lon + (0.15 * np.sin(wind_rad))
+
+    fig_map = go.Figure()
+
+    # Beydağları Bölgesi (Güneybatı)
+    fig_map.add_trace(go.Scattermapbox(
+        lat=[38.15, 38.20, 38.25],
+        lon=[38.00, 38.10, 38.20],
+        mode='markers+lines',
+        marker=dict(size=15, color='rgba(121, 85, 72, 0.8)'),
+        line=dict(width=4, color='rgba(121, 85, 72, 0.8)'),
+        name="Beydağları (Orografik Bariyer)",
         hoverinfo="name"
     ))
-    
-    # Karakaya Barajı Etkisi (Doğu - ~45° ile 135° arası)
-    fig_compass.add_trace(go.Barpolar(
-        r=[100], theta=[90], width=[90],
-        marker_color="rgba(3, 169, 244, 0.3)",
+
+    # Karakaya Barajı Bölgesi (Doğu)
+    fig_map.add_trace(go.Scattermapbox(
+        lat=[38.35, 38.45, 38.55],
+        lon=[38.70, 38.80, 38.75],
+        mode='markers+lines',
+        marker=dict(size=15, color='rgba(3, 169, 244, 0.8)'),
+        line=dict(width=4, color='rgba(3, 169, 244, 0.8)'),
         name="Karakaya Barajı (Nem Kaynağı)",
         hoverinfo="name"
     ))
-    
-    # Mevcut Rüzgâr Yönü Ok Çizimi
-    fig_compass.add_trace(go.Scatterpolar(
-        r=[0, 85], theta=[live_wind_deg, live_wind_deg],
-        mode="lines+markers",
-        line=dict(color="#f44336", width=4),
-        marker=dict(size=[0, 10], color="#f44336"),
-        name=f"Anlık Rüzgâr ({live_wind_deg:.0f}°)",
+
+    # Erhaç İstasyonu
+    fig_map.add_trace(go.Scattermapbox(
+        lat=[38.4312],
+        lon=[38.0898],
+        mode='markers',
+        marker=dict(size=12, color='orange', symbol='airport'),
+        name="Erhaç (LTAT)",
+        text="Erhaç İstasyonu",
+        hoverinfo="text"
     ))
-    
-    fig_compass.update_layout(
-        polar=dict(
-            angularaxis=dict(direction="clockwise", rotation=90, tickvals=[0, 45, 90, 135, 180, 225, 270, 315], ticktext=['K', 'KD', 'D', 'GD', 'G', 'GB', 'B', 'KB']),
-            radialaxis=dict(visible=False, range=[0, 100])
+
+    # Şehir Merkezi
+    fig_map.add_trace(go.Scattermapbox(
+        lat=[center_lat],
+        lon=[center_lon],
+        mode='markers',
+        marker=dict(size=12, color='black'),
+        name="Malatya Merkez",
+        text="Şehir Merkezi",
+        hoverinfo="text"
+    ))
+
+    # Rüzgar Oku (Başlangıç noktasından merkeze)
+    fig_map.add_trace(go.Scattermapbox(
+        lat=[start_lat, center_lat],
+        lon=[start_lon, center_lon],
+        mode='lines+markers',
+        line=dict(width=5, color='red'),
+        marker=dict(size=[0, 10], color='red'), # Sadece merkezde ok ucu gibi görünsün
+        name=f"Anlık Rüzgar ({live_wind_deg:.0f}°)",
+        hoverinfo="name"
+    ))
+
+    fig_map.update_layout(
+        mapbox=dict(
+            style="carto-positron", # Harita stili
+            center=dict(lat=38.35, lon=38.35),
+            zoom=8.5
         ),
-        showlegend=True,
-        legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
+        showlegend=False,
         height=320,
-        margin=dict(t=20, b=20, l=20, r=20),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)"
+        margin=dict(l=0, r=0, t=0, b=0)
     )
-    st.plotly_chart(fig_compass, use_container_width=True)
-    
+    st.plotly_chart(fig_map, use_container_width=True)
+
 with c_map2:
     st.markdown(
         f"""
-        <div class="benchmark-box" style="height: 90%; display: flex; flex-direction: column; justify-content: center; margin-top: 10px;">
+        <div class="benchmark-box" style="height: 100%; display: flex; flex-direction: column; justify-content: center; margin-top: 0;">
             <h5 style="margin: 0 0 10px 0; color: #ffb74d;">⛰️ Bölgesel Etki Analizi & De-Warning</h5>
             <p style="font-size: 0.95rem; line-height: 1.6; color: #eceff1; margin-bottom: 8px;">
                 <strong>Mevcut Rüzgâr Yönü:</strong> <span style="color: #f44336; font-weight: bold;">{live_wind_deg:.0f}°</span>
             </p>
             <p style="font-size: 0.9rem; line-height: 1.5; color: #cfd8dc; margin-bottom:0;">
-                MetaCast karar motoru, Malatya'nın topoğrafik yapısını aktif kısıt olarak kullanır. Rüzgâr güneybatı sektöründen (<strong>215° - Beydağları bariyeri</strong>) estiğinde orografik sürtünme nedeniyle vadi içinde şiddet kaybeder ve yapay zeka gereksiz fırtına alarmlarını iptal eder (<em>De-Warning</em>). Doğu yönünden estiğinde ise <strong>Karakaya Barajı</strong> üzerinden geçerek Malatya Çanağı'na nem taşır; bu durum zirai don parametrelerini doğrudan değiştirir.
+                MetaCast karar motoru, Malatya'nın topoğrafik yapısını aktif kısıt olarak kullanır. Rüzgâr haritada işaretli <strong>Beydağları bariyerinden (Güneybatı)</strong> estiğinde, orografik sürtünme nedeniyle vadi içinde şiddet kaybeder ve yapay zeka gereksiz fırtına alarmlarını iptal eder (<em>De-Warning</em>). Rüzgâr <strong>Karakaya Barajı (Doğu)</strong> üzerinden estiğinde ise Malatya Çanağı'na nem taşır; bu durum zirai don riskini doğrudan değiştirir.
             </p>
         </div>
         """, unsafe_allow_html=True
