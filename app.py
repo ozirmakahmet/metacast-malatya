@@ -1632,18 +1632,14 @@ with c_map1:
     # Malatya Merkezi
     center_lat, center_lon = 38.3552, 38.3095
     
-    # Rüzgar yönüne göre ok bitiş noktasını hesapla (rüzgarın GELDİĞİ yön)
-    # Rüzgar yönü (azimut), kuzeyden saat yönündedir.
-    # Haritada göstermek için rüzgarın estiği yönden merkeze doğru bir çizgi çizeceğiz.
     wind_rad = np.radians(live_wind_deg)
-    # Basit bir ölçekleme (yaklaşık 0.15 derece uzaklıktan merkeze gelsin)
     start_lat = center_lat + (0.15 * np.cos(wind_rad))
     start_lon = center_lon + (0.15 * np.sin(wind_rad))
 
     fig_map = go.Figure()
 
     # Beydağları Bölgesi (Güneybatı)
-    fig_map.add_trace(go.Scattermapbox(
+    fig_map.add_trace(go.Scattermap(
         lat=[38.15, 38.20, 38.25],
         lon=[38.00, 38.10, 38.20],
         mode='markers+lines',
@@ -1654,7 +1650,7 @@ with c_map1:
     ))
 
     # Karakaya Barajı Bölgesi (Doğu)
-    fig_map.add_trace(go.Scattermapbox(
+    fig_map.add_trace(go.Scattermap(
         lat=[38.35, 38.45, 38.55],
         lon=[38.70, 38.80, 38.75],
         mode='markers+lines',
@@ -1665,18 +1661,18 @@ with c_map1:
     ))
 
     # Erhaç İstasyonu
-    fig_map.add_trace(go.Scattermapbox(
+    fig_map.add_trace(go.Scattermap(
         lat=[38.4312],
         lon=[38.0898],
         mode='markers',
-        marker=dict(size=12, color='orange', symbol='airport'),
+        marker=dict(size=12, color='orange'),
         name="Erhaç (LTAT)",
         text="Erhaç İstasyonu",
         hoverinfo="text"
     ))
 
     # Şehir Merkezi
-    fig_map.add_trace(go.Scattermapbox(
+    fig_map.add_trace(go.Scattermap(
         lat=[center_lat],
         lon=[center_lon],
         mode='markers',
@@ -1687,19 +1683,19 @@ with c_map1:
     ))
 
     # Rüzgar Oku (Başlangıç noktasından merkeze)
-    fig_map.add_trace(go.Scattermapbox(
+    fig_map.add_trace(go.Scattermap(
         lat=[start_lat, center_lat],
         lon=[start_lon, center_lon],
         mode='lines+markers',
         line=dict(width=5, color='red'),
-        marker=dict(size=[0, 10], color='red'), # Sadece merkezde ok ucu gibi görünsün
+        marker=dict(size=10, color='red'), 
         name=f"Anlık Rüzgar ({live_wind_deg:.0f}°)",
         hoverinfo="name"
     ))
 
     fig_map.update_layout(
-        mapbox=dict(
-            style="carto-positron", # Harita stili
+        map=dict(
+            style="carto-positron", 
             center=dict(lat=38.35, lon=38.35),
             zoom=8.5
         ),
