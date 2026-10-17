@@ -3,42 +3,38 @@ import os
 import numpy as np
 import pandas as pd
 
-
 def sigmoid(z):
     return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
-
 
 def train_metacast_model(data_path: str, model_output_path: str):
     print("Genişletilmiş şiddetli hava veri seti yükleniyor...")
     df = pd.read_csv(data_path)
 
-    # Modele giren fiziksel öznitelikler (Features)
+    # Malatya'nın fiziksel ve topoğrafik gerçeklerine göre güncellenmiş özellikler
     features = [
-        "wind_speed_10m",
-        "pressure_diff_3h",
-        "mountain_blockage_index",
-        "gust_factor",
-        "is_snow_phase",
-        "hail_potential",
+        "wind_u",                 # Rüzgar Doğu-Batı Vektörü
+        "wind_v",                 # Rüzgar Kuzey-Güney Vektörü
+        "pressure_diff_3h",       # Barometrik Eğilim
+        "temp_diff_3h",           # Çanak İçi Soğuma Hızı (Katabatik İnversiyon için)
+        "mountain_blockage_index",# Beydağları Blokajı
+        "gust_factor",            # Hamle Çarpanı
+        "dam_moisture_advection", # Karakaya Barajı Nem Taşınımı
+        "is_snow_phase",          # Kar/Sulu Kar Fazı
+        "hail_potential",         # Konvektif Dolu Potansiyeli
     ]
 
-    # Hedef Değişken: Genel Şiddetli Hava Olayı (Fırtına, Kar veya Dolu)
+    # Hedef Değişken: Genel Şiddetli Hava Olayı (Fırtına, Kar, Dolu VEYA Zirai Don)
     target_col = "target_severe_event"
 
     X = df[features].values
     y = df[target_col].values
 
-    # Dengeli rastgele bölme (%80 Eğitim, %20 Test)
-    np.random.seed(42)
-    indices = np.arange(len(df))
-    np.random.shuffle(indices)
-
+    # ZAMANSAL BÖLME (Temporal Split) - Data Leakage Engellendi
+    # Hava durumu verisi rastgele karıştırılamaz, kronolojik ilerlemelidir.
     split_idx = int(len(df) * 0.8)
-    train_idx = indices[:split_idx]
-    test_idx = indices[split_idx:]
-
-    X_train, y_train = X[train_idx], y[train_idx]
-    X_test, y_test = X[test_idx], y[test_idx]
+    
+    X_train, y_train = X[:split_idx], y[:split_idx]
+    X_test, y_test = X[split_idx:], y[split_idx:]
 
     # Z-Score Standardizasyonu
     mean = np.mean(X_train, axis=0)
@@ -51,20 +47,22 @@ def train_metacast_model(data_path: str, model_output_path: str):
     severe_events_test = int(np.sum(y_test))
 
     print(
-        f"Eğitim Kümesi: {len(X_train)} saat (Şiddetli Olay: {severe_events_train}) | "
-        f"Test Kümesi: {len(X_test)} saat (Şiddetli Olay: {severe_events_test})"
+        f"Eğitim Kümesi (Geçmiş): {len(X_train)} saat (Şiddetli Olay: {severe_events_train}) | "
+        f"Test Kümesi (Gelecek): {len(X_test)} saat (Şiddetli Olay: {severe_events_test})"
     )
-    print("Çok tehlikeli (Multi-Hazard) karar motoru eğitiliyor...")
+    print("Fizik kısıtlı (Physics-Informed) karar motoru eğitiliyor...")
 
     weights = np.zeros(X_train.shape[1])
     bias = 0.0
     lr = 0.05
+    # Sınıf dengesizliği (Class Imbalance) için pozitif sınıf ağırlığı
     pos_weight = (len(y_train) - np.sum(y_train)) / (np.sum(y_train) + 1e-5)
 
     for epoch in range(1500):
         linear_model = np.dot(X_train_norm, weights) + bias
         y_predicted = sigmoid(linear_model)
 
+        # Hata hesaplamasında sınıf ağırlığı uygulanıyor
         errors = (y_predicted - y_train) * np.where(y_train == 1, pos_weight, 1)
 
         dw = (1 / len(X_train)) * np.dot(X_train_norm.T, errors)
@@ -88,9 +86,7 @@ def train_metacast_model(data_path: str, model_output_path: str):
 
     print("\n--- MODEL TEST PERFORMANSI (ÇOKLU TEHLİKE TESTİ) ---")
     print(f"Test Kümesi F1-Skoru: {f1:.3f}")
-    print(
-        f"Yakalanan Şiddetli Hava Olayları (Recall): %{recall * 100:.1f}"
-    )
+    print(f"Yakalanan Şiddetli Hava Olayları (Recall): %{recall * 100:.1f}")
     print(f"Doğruluk (Precision): %{precision * 100:.1f}")
     print(f"Karmaşıklık: TP={tp}, FP={fp}, FN={fn}, TN={tn}")
 
@@ -107,7 +103,6 @@ def train_metacast_model(data_path: str, model_output_path: str):
         json.dump(model_payload, f, indent=4)
 
     print(f"\nModel başarıyla kaydedildi: {model_output_path}")
-
 
 if __name__ == "__main__":
     input_features = os.path.join("data", "features_data.csv")
