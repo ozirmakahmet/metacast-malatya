@@ -1394,14 +1394,17 @@ st.plotly_chart(fig_xai, use_container_width=True)
 st.markdown("### 📋 Sektörel Eyleme Dönüştürülebilir Operasyonel Reçeteler")
 
 if is_radiation_frost_danger or frost_override:
-  kayisi_status = "🚨 ACİL DON TEDBİRİ AKTİF"
-  kayisi_border = "#f44336"
-  kayisi_recete = (
-      f"• <strong>Kritik Eşik:</strong> Saat {night_min_time} civarında sıcaklık"
-      f" {night_min_temp:.1f}°C'ye inecektir.<br>• <strong>Eylem:</strong> Gece"
-      " 02:00 itibarıyla bahçelerde don savar pervaneleri açın veya üstten"
-      " yağmurlama sistemlerini devreye alarak tomurcuk buz kalkanı oluşturun."
-  )
+    kayisi_status = "🚨 ACİL DON / BUZLANMA TEDBİRİ"
+    kayisi_border = "#f44336"
+    
+    # Gece çiy noktası minimum değerini bulalım (Buzlanma Eşiği)
+    night_dew_min = dew_point_series[night_mask].min() if not night_temps.empty else dew_point_series.min()
+    
+    kayisi_recete = (
+        f"• <strong>Kritik Eşik:</strong> Saat {night_min_time} civarında hava sıcaklığı {night_min_temp:.1f}°C'ye inecek. "
+        f"Ancak <strong>Çiy Noktası (Buzlanma Eşiği) {night_dew_min:.1f}°C</strong> olduğu için hücre içi donma ve kırağı riski çok yüksek.<br>"
+        "• <strong>Eylem:</strong> Pervaneleri (Wind Machine) çalıştırarak inversiyon tabakasını kırın veya üstten yağmurlama ile tomurcuklarda koruyucu buz zırhı (latent ısı salınımı) oluşturun."
+    )
 elif hail_potential.sum() > 0 or (metar["is_hail"]):
   kayisi_status = "⚡ DOLU KORUMA ALARMI"
   kayisi_border = "#e91e63"
