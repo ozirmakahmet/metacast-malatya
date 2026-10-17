@@ -1623,7 +1623,8 @@ with r_col4:
       unsafe_allow_html=True,
   )
 # --- MEKÂNSAL FARKINDALIK (HARİTA & OROGRAFİ) ---
-st.markdown("---")
+st.markdown("### 🧭 Mekânsal Rüzgâr Dinamikleri & Orografik Etkileşim")
+c_map1, c_map2 = st.columns([1.5, 1.5])
 with c_map1:
     # Malatya Merkezi
     center_lat, center_lon = 38.3552, 38.3095
