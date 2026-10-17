@@ -61,6 +61,21 @@ div[data-testid="stMetricValue"] > div {
     padding: 12px 14px;
     height: 100%;
 }
+.wa-btn {
+    display: inline-block;
+    width: 100%;
+    background-color: #25D366;
+    color: white !important;
+    text-align: center;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-weight: 700;
+    text-decoration: none;
+    margin-top: 10px;
+}
+.wa-btn:hover {
+    background-color: #1ebe5d;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -147,29 +162,6 @@ def get_all_logs():
 
 
 init_logger_db()
-
-
-# --- WHATSAPP ERKEN UYARI BİLDİRİM MOTORU ---
-def send_whatsapp_alert(phone_number: str, api_key: str, message: str):
-  if not phone_number or not api_key:
-    return False, "Telefon Numarası veya API Key eksik."
-  clean_phone = (
-      phone_number.strip()
-      .replace(" ", "")
-      .replace("-", "")
-      .replace("(", "")
-      .replace(")", "")
-  )
-  encoded_msg = urllib.parse.quote(message)
-  url = f"https://api.callmebot.com/whatsapp.php?phone={clean_phone}&text={encoded_msg}&apikey={api_key}"
-  try:
-    resp = requests.get(url, timeout=8)
-    if resp.status_code == 200:
-      return True, "WhatsApp erken uyarı bildirimi başarıyla iletildi! 📲"
-    else:
-      return False, f"WhatsApp Servis Hatası: {resp.status_code} - {resp.text}"
-  except Exception as e:
-    return False, f"Bağlantı hatası: {str(e)}"
 
 
 def validate_telemetry(temp, speed_kmh, gust_kmh, altim_hpa):
@@ -504,17 +496,16 @@ elif main_category == "📂 Geçmiş Veriler & Test Senaryoları":
 else:
   mode = "Akademik Doğrulama Modu"
 
-# WHATSAPP ERKEN UYARI AYARLARI PANELİ (SIDEBAR)
+# WHATSAPP HIZLI PAYLAŞIM ALANI (SIDEBAR)
 st.sidebar.markdown("---")
-with st.sidebar.expander("📲 WhatsApp Erken Uyarı Servisi", expanded=False):
-  st.caption("Risk anında doğrudan cep telefonunuza WhatsApp uyarısı gelsin.")
-  wa_phone = st.text_input(
-      "Telefon No (+90...):", key="wa_phone", placeholder="+905xxxxxxxxx"
-  )
-  wa_apikey = st.text_input("WhatsApp API Key:", type="password", key="wa_key")
+with st.sidebar.expander("📲 WhatsApp Hızlı Alarm Hattı", expanded=True):
   st.caption(
-      "ℹ️ *Ücretsiz API Key almak için WhatsApp'tan `+34 911 06 14 62`"
-      " numarasına 'I allow callmebot to send me messages' yazın.*"
+      "API gerekmez; tek tıkla doğrudan WhatsApp Web veya uygulamanız açılır."
+  )
+  wa_target_phone = st.sidebar.text_input(
+      "Hedef Telefon (İsteğe bağlı):",
+      placeholder="905xxxxxxxxx (Boş bırakılabilir)",
+      key="wa_dest",
   )
 
 try:
@@ -1146,25 +1137,32 @@ else:
   else:
     st.success(f"✅ **STABİL ATMOSFER KOŞULLARI ({date_display})**")
 
-# WHATSAPP GÖNDERİM TETİKLEYİCİSİ (SIDEBAR BUTONU)
-if wa_phone and wa_apikey:
-  if st.sidebar.button(
-      "🚀 WhatsApp Acil Alarmı Gönder", use_container_width=True
-  ):
-    msg_to_send = (
-        f"🚨 *METACAST MALATYA ERKEN UYARI*\n\n"
-        f"📅 *Tarih:* {date_display}\n"
-        f"📍 *Durum:* {active_alarm_msg if active_alarm_msg else 'Atmosfer Stabil.'}\n"
-        f"💨 *Pik Rüzgâr:* {peak_gust:.1f} km/s\n"
-        f"🌡️ *Min Sıcaklık:* {night_min_temp:.1f}°C\n"
-        f"🔍 *Model Güvenilirliği:* %{model_reliability_score:.0f}\n\n"
-        f"_MetaCast Karar Motoru Tarafından Üretilmiştir._"
-    )
-    ok, status_text = send_whatsapp_alert(wa_phone, wa_apikey, msg_to_send)
-    if ok:
-      st.sidebar.success(status_text)
-    else:
-      st.sidebar.error(status_text)
+# --- RESMİ WHATSAPP BAĞLANTI ÜRETECİ (wa.me) ---
+wa_msg_text = (
+    f"🚨 *METACAST MALATYA ERKEN UYARI RAPORU*\n\n"
+    f"📅 *Tarih:* {date_display}\n"
+    f"📍 *Durum:* {active_alarm_msg if active_alarm_msg else 'Atmosfer Stabil.'}\n"
+    f"💨 *Pik Rüzgâr Hamlesi:* {peak_gust:.1f} km/s\n"
+    f"🌡️ *Gece Min Sıcaklık:* {night_min_temp:.1f}°C\n"
+    f"🔍 *Model Güvenilirliği:* %{model_reliability_score:.0f}\n\n"
+    f"🌐 _MetaCast Havza Karar Destek Platformu_"
+)
+encoded_wa_msg = urllib.parse.quote(wa_msg_text)
+clean_target = re.sub(r"[^\d]", "", wa_target_phone) if wa_target_phone else ""
+wa_url = (
+    f"https://wa.me/{clean_target}?text={encoded_wa_msg}"
+    if clean_target
+    else f"https://wa.me/?text={encoded_wa_msg}"
+)
+
+st.sidebar.markdown(
+    f"""
+    <a href="{wa_url}" target="_blank" class="wa-btn">
+        📲 WhatsApp ile Afet Alarmı Gönder
+    </a>
+    """,
+    unsafe_allow_html=True,
+)
 
 # --- İNTERAKTİF COĞRAFİ RİSK HARİTASI (PLOTLY V6+ VE ESKİ SÜRÜM UYUMLU) ---
 st.markdown("### 🗺️ Malatya Havzası İnteraktif Coğrafi Risk Haritası")
