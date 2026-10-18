@@ -70,6 +70,43 @@ div[data-testid="stMetricValue"] > div {
     padding: 12px 14px;
     height: 100%;
 }
+.ruler-container {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 10px 18px;
+    margin-top: 6px;
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: monospace;
+}
+.ruler-tick {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+.ruler-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #546e7a;
+    transition: all 0.3s;
+}
+.ruler-dot.active {
+    background-color: #ff9800;
+    box-shadow: 0 0 10px #ff9800;
+    transform: scale(1.35);
+}
+.ruler-line {
+    flex-grow: 1;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.15);
+    margin: 0 8px;
+    margin-bottom: 18px;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -1473,60 +1510,119 @@ st.markdown("---")
 # --- MEKÂNSAL FARKINDALIK (HARİTA & 15 DAKİKALIK ZAMAN ÖLÇEĞİ İLE ANLIK TAHMİN) ---
 st.markdown("### 🧭 Dinamik Afet Risk Haritası ve 15 Dakikalık Zaman Ölçeği")
 
-# 24 Saat İçin 15 Dakikalık Zaman Noktaları (00:00, 00:15, 00:30, ..., 23:45)
-time_slots = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
-
-# Canlı Türkiye Saati ve En Yakın 15 Dakikalık Zaman Dilimi
+# 1. Saat ve Dakika Başlatıcı Değerler
 now_dt = datetime.now(TR_TZ)
-cur_h = now_dt.hour
-cur_m = int(round(now_dt.minute / 15.0) * 15)
-if cur_m == 60:
-    cur_h = min(23, cur_h + 1)
-    cur_m = 45 if (cur_h == 23 and now_dt.hour == 23) else 0
+cur_real_h = now_dt.hour
+cur_real_m = int(round(now_dt.minute / 15.0) * 15)
+if cur_real_m == 60:
+    cur_real_h = min(23, cur_real_h + 1)
+    cur_real_m = 0
 
-live_time_str = f"{cur_h:02d}:{cur_m:02d}"
 is_viewing_today = (mode == "Canlı Operasyonel" and st.session_state.current_date == today_date)
 
-default_target_time = live_time_str if is_viewing_today else f"{peak_idx:02d}:00"
-if default_target_time not in time_slots:
-    default_target_time = time_slots[0]
+default_hour = cur_real_h if is_viewing_today else peak_idx
+default_min = cur_real_m if is_viewing_today else 0
 
-# Session State başlatma
-if "time_slider_widget" not in st.session_state or not isinstance(st.session_state.time_slider_widget, str):
-    st.session_state.time_slider_widget = default_target_time
+if "time_hour_val" not in st.session_state:
+    st.session_state.time_hour_val = default_hour
 
-# Üst Kontrol Barı (Düğme + 15 Dakikalık Zaman Kaydırıcı)
-t_btn_col, t_slider_col = st.columns([1.3, 4.7])
+if "time_min_val" not in st.session_state:
+    st.session_state.time_min_val = default_min
+
+# Üst Kontrol Barı (Düğme + Saat Kaydırıcı + 4 Parçalı Çeyrek Saat Butonları)
+t_btn_col, t_slider_col, t_quarter_col = st.columns([1.3, 3.2, 1.5])
+
 with t_btn_col:
     st.write("")
-    btn_text = f"📍 Canlı Saate Git ({live_time_str})" if is_viewing_today else f"⚡ Pik Saate Git ({peak_idx:02d}:00)"
+    btn_text = f"📍 Canlı Saate Git ({cur_real_h:02d}:{cur_real_m:02d})" if is_viewing_today else f"⚡ Pik Saate Git ({peak_idx:02d}:00)"
     if st.button(btn_text, use_container_width=True):
-        st.session_state.time_slider_widget = default_target_time
+        st.session_state.time_hour_val = default_hour
+        st.session_state.time_min_val = default_min
         st.rerun()
 
 with t_slider_col:
-    chosen_time = st.select_slider(
-        "⏱️ Zaman Penceresi (15'er Dakikalık Ölçek - 00:00'dan 23:45'e Kadar):",
-        options=time_slots,
-        key="time_slider_widget"
+    sel_h = st.slider(
+        "⏱️ Saat Başları (24 Saatlik Noktalar):",
+        min_value=0,
+        max_value=23,
+        value=st.session_state.time_hour_val,
+        format="%02d:00",
+        key="time_hour_slider"
     )
+    if sel_h != st.session_state.time_hour_val:
+        st.session_state.time_hour_val = sel_h
+        st.rerun()
 
-selected_time_str = st.session_state.time_slider_widget
-is_now_selected = (is_viewing_today and selected_time_str == live_time_str)
+with t_quarter_col:
+    quarter_opts = [0, 15, 30, 45]
+    cur_quarter_idx = quarter_opts.index(st.session_state.time_min_val) if st.session_state.time_min_val in quarter_opts else 0
+    sel_m = st.radio(
+        "⏱️ 15 Dk Ölçek (Çeyrek Saat):",
+        options=quarter_opts,
+        index=cur_quarter_idx,
+        format_func=lambda m: f":{m:02d}",
+        horizontal=True,
+        key="time_min_radio"
+    )
+    if sel_m != st.session_state.time_min_val:
+        st.session_state.time_min_val = sel_m
+        st.rerun()
+
+current_sel_h = st.session_state.time_hour_val
+current_sel_m = st.session_state.time_min_val
+next_hour_label = f"{(current_sel_h + 1) % 24:02d}:00"
+selected_time_str = f"{current_sel_h:02d}:{current_sel_m:02d}"
+
+# Görsel 4 Parçalı Cetvel (Ruler Bar)
+dot_00 = "active" if current_sel_m == 0 else ""
+dot_15 = "active" if current_sel_m == 15 else ""
+dot_30 = "active" if current_sel_m == 30 else ""
+dot_45 = "active" if current_sel_m == 45 else ""
+
+st.markdown(
+    f"""
+    <div class="ruler-container">
+        <div class="ruler-tick">
+            <span style="font-weight: 700; color: #90caf9;">{current_sel_h:02d}:00</span>
+            <div class="ruler-dot {dot_00}"></div>
+        </div>
+        <div class="ruler-line"></div>
+        <div class="ruler-tick">
+            <span style="color: #cfd8dc;">{current_sel_h:02d}:15</span>
+            <div class="ruler-dot {dot_15}"></div>
+        </div>
+        <div class="ruler-line"></div>
+        <div class="ruler-tick">
+            <span style="color: #cfd8dc;">{current_sel_h:02d}:30</span>
+            <div class="ruler-dot {dot_30}"></div>
+        </div>
+        <div class="ruler-line"></div>
+        <div class="ruler-tick">
+            <span style="color: #cfd8dc;">{current_sel_h:02d}:45</span>
+            <div class="ruler-dot {dot_45}"></div>
+        </div>
+        <div class="ruler-line"></div>
+        <div class="ruler-tick">
+            <span style="font-weight: 700; color: #78909c;">{next_hour_label}</span>
+            <div class="ruler-dot"></div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+is_now_selected = (is_viewing_today and current_sel_h == cur_real_h and current_sel_m == cur_real_m)
 
 # Seçilen 15 dakikalık zaman dilimine göre meteorolojik interpolasyon
-sel_h = int(selected_time_str.split(":")[0])
-sel_m = int(selected_time_str.split(":")[1])
-frac = sel_m / 60.0
-next_h = min(sel_h + 1, len(df) - 1)
+frac = current_sel_m / 60.0
+next_h = min(current_sel_h + 1, len(df) - 1)
 
 def interp_val(series):
-    v1 = float(series.iloc[sel_h])
+    v1 = float(series.iloc[current_sel_h])
     v2 = float(series.iloc[next_h])
     return v1 + (v2 - v1) * frac
 
-# Rüzgâr açısı interpolasyonu (Döngüsel 0-360 farkı gözetilerek)
-w_deg1 = float(df["wind_direction_10m_ecmwf_ifs"].iloc[sel_h])
+w_deg1 = float(df["wind_direction_10m_ecmwf_ifs"].iloc[current_sel_h])
 w_deg2 = float(df["wind_direction_10m_ecmwf_ifs"].iloc[next_h])
 diff_deg = (w_deg2 - w_deg1 + 180) % 360 - 180
 sel_wind_deg = (w_deg1 + diff_deg * frac) % 360
@@ -1714,7 +1810,7 @@ with c_map2:
         hazards_summary.append(f"💨 <strong>Orta Kuvvette Rüzgâr:</strong> {sel_gust:.1f} km/s hızında esiş bekleniyor, rutin önlemler yeterlidir.")
 
     # 3. Zirai Don (Gece)
-    is_sel_night = (sel_h >= 21) or (sel_h <= 7)
+    is_sel_night = (current_sel_h >= 21) or (current_sel_h <= 7)
     if is_sel_night and sel_temp <= 2.0 and sel_cloud <= 35:
         hazards_summary.append(f"❄️ <strong>Aktif Radyasyon Donu:</strong> Gökyüzü açık (%{sel_cloud:.0f} bulut). Çiy noktası {sel_dew:.1f}°C olduğundan kayısı bahçelerinde don savar pervaneler çalıştırılmalıdır.")
 
