@@ -492,7 +492,7 @@ def generate_scenario(name: str):
         hours = pd.date_range(start="2024-04-14 00:00", periods=24, freq="h")
         ecmwf = np.full(24, 8.0)
         gfs = np.full(24, 7.0)
-        icon = np.full(24, 8.0)
+        icon_model = np.full(24, 8.0)
         temp = np.array([
             4.0, 3.0, 2.0, 1.0, 0.0, -1.0, -1.5, 0.5, 5.0, 10.0, 14.0, 16.0,
             18.0, 17.5, 16.0, 14.0, 11.0, 9.0, 7.0, 5.5, 4.5, 3.5, 2.5, 1.5,
@@ -510,7 +510,7 @@ def generate_scenario(name: str):
         hours = pd.date_range(start="2024-04-12 00:00", periods=24, freq="h")
         ecmwf = np.array([25 + 40 * np.sin(i / 3.8) ** 2 for i in range(24)])
         gfs = ecmwf * 0.95
-        icon = ecmwf * 0.90
+        icon_model = ecmwf * 0.90
         temp = np.full(24, 18.0)
         precip = np.full(24, 0.0)
         cloud = np.full(24, 25.0)
@@ -525,7 +525,7 @@ def generate_scenario(name: str):
         hours = pd.date_range(start="2024-06-05 00:00", periods=24, freq="h")
         ecmwf = np.array([20 + 35 * np.sin(i / 3.8) ** 2 for i in range(24)])
         gfs = ecmwf * 1.05
-        icon = ecmwf * 1.0
+        icon_model = ecmwf * 1.0
         temp = np.full(24, 28.0)
         precip = np.array([0 if i < 14 or i > 17 else 8.5 for i in range(24)])
         cloud = np.array([20 if i < 11 else 95 if 12 <= i <= 17 else 35 for i in range(24)])
@@ -540,7 +540,7 @@ def generate_scenario(name: str):
         hours = pd.date_range(start="2024-01-20 00:00", periods=24, freq="h")
         ecmwf = np.full(24, 25.0)
         gfs = np.full(24, 28.0)
-        icon = np.full(24, 24.0)
+        icon_model = np.full(24, 24.0)
         temp = np.linspace(3.0, -2.0, 24)
         precip = np.array([1.5 if 10 <= i <= 20 else 0.0 for i in range(24)])
         cloud = np.full(24, 90.0)
@@ -555,7 +555,7 @@ def generate_scenario(name: str):
         "time": pd.to_datetime(hours),
         "wind_gusts_10m_ecmwf_ifs": ecmwf,
         "wind_gusts_10m_gfs_seamless": gfs,
-        "wind_gusts_10m_icon_seamless": icon,
+        "wind_gusts_10m_icon_seamless": icon_model,
         "wind_speed_10m_ecmwf_ifs": ecmwf * 0.45,
         "wind_direction_10m_ecmwf_ifs": wind_dir,
         "surface_pressure_ecmwf_ifs": pressure,
@@ -733,7 +733,7 @@ if mode == "Model Kıyaslama Arenası":
 
     ec_series = get_clean_series(df_arena, "wind_gusts_10m_ecmwf_ifs", 10.0)
     gfs_series = get_clean_series(df_arena, "wind_gusts_10m_gfs_seamless", 10.0, fallback_series=ec_series)
-    icon_series = get_clean_series(df_arena, "wind_gusts_10m_icon_seamless", 10.0, fallback_series=ec_series)
+    icon_model_series = get_clean_series(df_arena, "wind_gusts_10m_icon_seamless", 10.0, fallback_series=ec_series)
     wdir_series = get_clean_series(df_arena, "wind_direction_10m_ecmwf_ifs", 0.0)
 
     for h_i in range(len(df_arena)):
@@ -743,7 +743,7 @@ if mode == "Model Kıyaslama Arenası":
 
         e_g = float(ec_series.iloc[h_i])
         g_g = float(gfs_series.iloc[h_i])
-        i_g = float(icon_series.iloc[h_i])
+        i_g = float(icon_model_series.iloc[h_i])
         m_mean = (e_g + g_g + i_g) / 3.0
 
         w_dir = float(wdir_series.iloc[h_i])
@@ -944,7 +944,7 @@ if mode == "What-If Laboratuvarı":
     elif sim_temp <= 1.5 and sim_cloud <= 35:
         sim_final_risk = 94.0
         sim_banner = (
-            "❄️ KRİTİK ZİRAİ DON ALARMI: Gece açık gökyüzü nedeniyle Malatya"
+            "❄️ KRİTİK ZİRAİ DON ALARMI: Gece açık gökyüzü nedeniyle Malatya"
             " çanağında radyasyonel soğuma zemin enverziyonu donu yaratıyor!"
         )
         banner_color = "error"
@@ -1048,10 +1048,10 @@ else:
 # Sayısal modellerin serilerini df indeksine kilitleyerek temizleme
 ecmwf = get_clean_series(df, "wind_gusts_10m_ecmwf_ifs", 10.0)
 gfs = get_clean_series(df, "wind_gusts_10m_gfs_seamless", 10.0, fallback_series=ecmwf)
-icon = get_clean_series(df, "wind_gusts_10m_icon_seamless", 10.0, fallback_series=ecmwf)
+icon_gusts = get_clean_series(df, "wind_gusts_10m_icon_seamless", 10.0, fallback_series=ecmwf)
 
-gust_mean = (ecmwf + gfs + icon) / 3.0
-gust_std = np.std([ecmwf.values, gfs.values, icon.values], axis=0)
+gust_mean = (ecmwf + gfs + icon_gusts) / 3.0
+gust_std = np.std([ecmwf.values, gfs.values, icon_gusts.values], axis=0)
 
 peak_idx = int(np.argmax(gust_mean.values))
 peak_time = df["time"].iloc[peak_idx].strftime("%d.%m.%Y - Saat %H:00")
@@ -1109,7 +1109,6 @@ for t_val, p_val, g_val, c_val in zip(temp.values, precip.values, gust_mean.valu
         precip_types.append("💧 Sıvı Yağmur")
         precip_colors.append("#0288d1")
 
-# İndeks uyumu garanti edilerek DataFrame'e atanıyor
 df["precip_type"] = pd.Series(precip_types, index=df.index)
 is_snow_phase = (df["precip_type"] == "❄️ Kar / Sulu Kar").astype(int)
 hail_potential = (df["precip_type"] == "⚡ Dolu / Süper Hücre").astype(int)
@@ -1181,11 +1180,12 @@ for idx_h in range(len(df_24h)):
     cape_val = float(cape_24_clean.iloc[idx_h])
     gust_val = float(g_24_clean.iloc[idx_h])
 
-    icon, desc = get_weather_icon_and_desc(temp_val, precip_val, cloud_val, cape_val)
+    # Değişken adları w_icon ve w_desc yapılarak Almanya modelinin üzerine yazılması engellendi
+    w_icon, w_desc = get_weather_icon_and_desc(temp_val, precip_val, cloud_val, cape_val)
 
     h_label = row_t.strftime("%H:00")
     if precip_val >= 0.2:
-        rain_events.append(f"Saat <strong>{h_label}</strong> sularında {desc.lower()} ({precip_val:.1f} mm)")
+        rain_events.append(f"Saat <strong>{h_label}</strong> sularında {w_desc.lower()} ({precip_val:.1f} mm)")
     if temp_val <= 1.0 and cloud_val <= 35:
         frost_events.append(f"Saat <strong>{h_label}</strong> sularında zemin donu ({temp_val:.1f}°C)")
     if gust_val >= 45:
@@ -1197,7 +1197,7 @@ for idx_h in range(len(df_24h)):
 
     precip_label = f"<div class='hourly-precip'>💧 %{int(min(95, precip_val*25 + 10))}</div>" if precip_val > 0.05 else "<div class='hourly-precip'></div>"
 
-    card_str = f"<div class='{card_cls}'><div class='hourly-time'>{time_badge}</div><div class='hourly-icon'>{icon}</div><div class='hourly-temp'>{temp_val:.0f}°</div><div class='hourly-desc'>{desc}</div>{precip_label}</div>"
+    card_str = f"<div class='{card_cls}'><div class='hourly-time'>{time_badge}</div><div class='hourly-icon'>{w_icon}</div><div class='hourly-temp'>{temp_val:.0f}°</div><div class='hourly-desc'>{w_desc}</div>{precip_label}</div>"
     hourly_cards_list.append(card_str)
 
 all_cards_merged = "".join(hourly_cards_list)
@@ -2276,7 +2276,7 @@ fig_wind.add_trace(
 fig_wind.add_trace(
     go.Scatter(
         x=[str(x) for x in df["time"].dt.strftime("%H:00")],
-        y=[float(val) for val in icon],
+        y=[float(val) for val in icon_gusts],
         name="ICON (Almanya)",
         line=dict(color="#2ca02c", width=2),
     )
@@ -2349,7 +2349,7 @@ with st.expander("📋 Saat Saat Tüm Meteorolojik Değerler Tablosu"):
         "Saat": df["time"].dt.strftime("%H:00"),
         "ECMWF (km/s)": ecmwf.round(1),
         "GFS (km/s)": gfs.round(1),
-        "ICON (km/s)": icon.round(1),
+        "ICON (km/s)": icon_gusts.round(1),
         "Ort. Hamle (km/s)": gust_mean.round(1),
         "Sıcaklık (°C)": temp.round(1),
         "Çiy Noktası (°C)": dew_point_series.round(1),
