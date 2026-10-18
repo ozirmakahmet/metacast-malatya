@@ -1111,14 +1111,14 @@ probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 
 
 # ==============================================================================
-# YENİ EKLENEN: 📱 GELECEK 24 SAATİN SAATLİK HAVA DURUMU & BİLGİLENDİRME BÜLTENİ
+# 📱 GELECEK 24 SAATİN SAATLİK HAVA DURUMU & BİLGİLENDİRME BÜLTENİ
 # ==============================================================================
 st.markdown("### 📱 Önümüzdeki 24 Saatin Saatlik Tahmini & Hadise Özeti")
 
-# Şu anki saatten itibaren önümüzdeki 24 saati al
-now_real_dt = datetime.now(TR_TZ)
+# Zaman dilimi uyuşmazlığını önlemek için tzinfo=None yapıldı
+now_real_dt = datetime.now(TR_TZ).replace(tzinfo=None)
+
 if mode == "Canlı Operasyonel":
-    # df_raw içinden şimdiki saatten sonraki 24 kaydı al
     future_24h_mask = (df_raw["time"] >= now_real_dt - pd.Timedelta(hours=1))
     df_24h = df_raw[future_24h_mask].head(24).copy().reset_index(drop=True)
     if len(df_24h) < 12:
@@ -1146,7 +1146,6 @@ def get_weather_icon_and_desc(t, p, c, cape, code=None):
         else:
             return "☁️", "Kapalı"
 
-# Saatlik Kartlar HTML
 hourly_cards_html = []
 rain_events = []
 frost_events = []
@@ -1162,7 +1161,6 @@ for idx_h in range(len(df_24h)):
 
     icon, desc = get_weather_icon_and_desc(temp_val, precip_val, cloud_val, cape_val)
 
-    # Olayları takip et (Bilgilendirme bülteni için)
     h_label = row_t.strftime("%H:00")
     if precip_val >= 0.2:
         rain_events.append(f"Saat <strong>{h_label}</strong> sularında {desc.lower()} ({precip_val:.1f} mm)")
@@ -1193,7 +1191,6 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# Otomatik Bilgilendirme Bülteni (Metin Kutusu)
 bulletin_messages = []
 if rain_events:
     bulletin_messages.append(f"🌧️ <strong>Yağış Uyarısı:</strong> {'; '.join(rain_events[:2])}. Şemsiyenizi yanınıza almanız önerilir.")
