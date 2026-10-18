@@ -199,16 +199,16 @@ def sigmoid(z):
     return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
 
 
-def clean_float_series(series_or_val, fallback=None):
-    """Veriyi sayısal formata zorlar; boş veya hatalı değerleri güvenle temizler."""
-    if isinstance(series_or_val, (pd.Series, list, np.ndarray)):
-        s = pd.to_numeric(series_or_val, errors="coerce")
+def get_clean_series(df_source, col_name, default_val=0.0, fallback_series=None):
+    """DataFrame indeks uzunluğunu birebir koruyan ve hata vermeyen güvenli seri üretici."""
+    if col_name in df_source.columns:
+        s = pd.to_numeric(df_source[col_name], errors="coerce")
     else:
-        s = pd.Series([pd.to_numeric(series_or_val, errors="coerce")])
-    if fallback is not None:
-        fb = pd.to_numeric(fallback, errors="coerce")
-        s = s.fillna(fb)
-    return s.fillna(0.0).astype(float)
+        s = pd.Series(default_val, index=df_source.index)
+
+    if fallback_series is not None:
+        s = s.fillna(fallback_series)
+    return s.fillna(default_val).astype(float)
 
 
 # --- MLOps VERİ GÜNLÜĞÜ (SQLITE) & OTOMATİK ÖĞRENME TETİKLEYİCİSİ ---
@@ -670,12 +670,12 @@ if mode == "Model Kıyaslama Arenası":
     obs_g = float(metar["gust_kmh"]) if metar["gust_kmh"] else 0.0
     obs_t = float(metar["temp_c"]) if metar["temp_c"] is not None else 0.0
 
-    ecmwf_g_now = float(clean_float_series(df_raw.get("wind_gusts_10m_ecmwf_ifs", 0)).iloc[now_idx])
-    gfs_g_now = float(clean_float_series(df_raw.get("wind_gusts_10m_gfs_seamless", 0), fallback=ecmwf_g_now).iloc[now_idx])
-    icon_g_now = float(clean_float_series(df_raw.get("wind_gusts_10m_icon_seamless", 0), fallback=ecmwf_g_now).iloc[now_idx])
+    ecmwf_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0).iloc[now_idx])
+    gfs_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
+    icon_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
     mean_g_now = (ecmwf_g_now + gfs_g_now + icon_g_now) / 3.0
 
-    wdir_now = float(clean_float_series(df_raw.get("wind_direction_10m_ecmwf_ifs", 0)).iloc[now_idx])
+    wdir_now = float(get_clean_series(df_raw, "wind_direction_10m_ecmwf_ifs", 0.0).iloc[now_idx])
     blockage_now = float(np.abs(np.cos(np.radians(wdir_now - 215.0))))
     
     metacast_g_now = round(mean_g_now * (1.0 - 0.28 * blockage_now), 1) if (blockage_now >= 0.65 and mean_g_now >= 30) else round(mean_g_now, 1)
@@ -732,10 +732,10 @@ if mode == "Model Kıyaslama Arenası":
     win_counts = {"MetaCast": 0, "ECMWF": 0, "GFS": 0, "ICON": 0}
     gunler = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
 
-    ec_series = clean_float_series(df_arena.get("wind_gusts_10m_ecmwf_ifs", 0))
-    gfs_series = clean_float_series(df_arena.get("wind_gusts_10m_gfs_seamless", 0), fallback=ec_series)
-    icon_series = clean_float_series(df_arena.get("wind_gusts_10m_icon_seamless", 0), fallback=ec_series)
-    wdir_series = clean_float_series(df_arena.get("wind_direction_10m_ecmwf_ifs", 0))
+    ec_series = get_clean_series(df_arena, "wind_gusts_10m_ecmwf_ifs", 10.0)
+    gfs_series = get_clean_series(df_arena, "wind_gusts_10m_gfs_seamless", 10.0, fallback_series=ec_series)
+    icon_series = get_clean_series(df_arena, "wind_gusts_10m_icon_seamless", 10.0, fallback_series=ec_series)
+    wdir_series = get_clean_series(df_arena, "wind_direction_10m_ecmwf_ifs", 0.0)
 
     for h_i in range(len(df_arena)):
         dt_val = df_arena["time"].iloc[h_i]
@@ -1046,10 +1046,10 @@ if mode == "Canlı Operasyonel":
 else:
     df, date_display, tag_sub = generate_scenario(mode)
 
-# Sayısal modellerin serilerini temizleme ve güvenli listeye dönüştürme
-ecmwf = clean_float_series(df.get("wind_gusts_10m_ecmwf_ifs", 0))
-gfs = clean_float_series(df.get("wind_gusts_10m_gfs_seamless", 0), fallback=ecmwf)
-icon = clean_float_series(df.get("wind_gusts_10m_icon_seamless", 0), fallback=ecmwf)
+# Sayısal modellerin serilerini df indeksine kilitleyerek temizleme
+ecmwf = get_clean_series(df, "wind_gusts_10m_ecmwf_ifs", 10.0)
+gfs = get_clean_series(df, "wind_gusts_10m_gfs_seamless", 10.0, fallback_series=ecmwf)
+icon = get_clean_series(df, "wind_gusts_10m_icon_seamless", 10.0, fallback_series=ecmwf)
 
 gust_mean = (ecmwf + gfs + icon) / 3.0
 gust_std = np.std([ecmwf.values, gfs.values, icon.values], axis=0)
@@ -1058,23 +1058,23 @@ peak_idx = int(np.argmax(gust_mean.values))
 peak_time = df["time"].iloc[peak_idx].strftime("%d.%m.%Y - Saat %H:00")
 peak_gust = float(gust_mean.iloc[peak_idx])
 
-wind_dir_series = clean_float_series(df.get("wind_direction_10m_ecmwf_ifs", 0))
+wind_dir_series = get_clean_series(df, "wind_direction_10m_ecmwf_ifs", 0.0)
 live_wind_deg = float(wind_dir_series.iloc[peak_idx])
 
-pressure_series = clean_float_series(df.get("surface_pressure_ecmwf_ifs", 1013.25))
+pressure_series = get_clean_series(df, "surface_pressure_ecmwf_ifs", 1013.25)
 pressure_diff = pressure_series.diff(periods=3).fillna(0)
 angle_diff = np.radians(wind_dir_series - 215.0)
 mountain_blockage = np.abs(np.cos(angle_diff))
 
-w_speed_series = clean_float_series(df.get("wind_speed_10m_ecmwf_ifs", 5.0))
+w_speed_series = get_clean_series(df, "wind_speed_10m_ecmwf_ifs", 5.0)
 gust_factor = (gust_mean / (w_speed_series + 1e-5)).clip(1.0, 5.0)
 
-temp = clean_float_series(df.get("temperature_2m_ecmwf_ifs", 15.0))
-precip = clean_float_series(df.get("precipitation_ecmwf_ifs", 0.0))
-cloud_cover = clean_float_series(df.get("cloud_cover_ecmwf_ifs", df.get("cloud_cover", 20.0)), fallback=20.0)
+temp = get_clean_series(df, "temperature_2m_ecmwf_ifs", 15.0)
+precip = get_clean_series(df, "precipitation_ecmwf_ifs", 0.0)
+cloud_cover = get_clean_series(df, "cloud_cover_ecmwf_ifs", 20.0, fallback_series=get_clean_series(df, "cloud_cover", 20.0))
 
-cape_series = clean_float_series(df.get("cape", 0.0))
-dew_point_series = clean_float_series(df.get("dew_point_2m_ecmwf_ifs", temp - 4.0), fallback=temp - 4.0)
+cape_series = get_clean_series(df, "cape", 0.0)
+dew_point_series = get_clean_series(df, "dew_point_2m_ecmwf_ifs", 10.0, fallback_series=(temp - 4.0))
 dew_point_depression = temp - dew_point_series
 
 night_mask = (df["time"].dt.hour >= 21) | (df["time"].dt.hour <= 7)
@@ -1093,9 +1093,10 @@ else:
 
 is_radiation_frost_danger = night_min_temp <= 2.0 and night_avg_cloud <= 35.0
 
+# 24 elemanlı liste garantisi
 precip_types = []
 precip_colors = []
-for t_val, p_val, g_val, c_val in zip(temp, precip, gust_mean, cape_series):
+for t_val, p_val, g_val, c_val in zip(temp.values, precip.values, gust_mean.values, cape_series.values):
     if p_val <= 0.05:
         precip_types.append("Yağış Yok")
         precip_colors.append("rgba(0,0,0,0)")
@@ -1166,11 +1167,11 @@ rain_events = []
 frost_events = []
 storm_events = []
 
-t_24_clean = clean_float_series(df_24h.get("temperature_2m_ecmwf_ifs", 15.0))
-p_24_clean = clean_float_series(df_24h.get("precipitation_ecmwf_ifs", 0.0))
-c_24_clean = clean_float_series(df_24h.get("cloud_cover_ecmwf_ifs", df_24h.get("cloud_cover", 20.0)), fallback=20.0)
-cape_24_clean = clean_float_series(df_24h.get("cape", 0.0))
-g_24_clean = clean_float_series(df_24h.get("wind_gusts_10m_ecmwf_ifs", 10.0))
+t_24_clean = get_clean_series(df_24h, "temperature_2m_ecmwf_ifs", 15.0)
+p_24_clean = get_clean_series(df_24h, "precipitation_ecmwf_ifs", 0.0)
+c_24_clean = get_clean_series(df_24h, "cloud_cover_ecmwf_ifs", 20.0, fallback_series=get_clean_series(df_24h, "cloud_cover", 20.0))
+cape_24_clean = get_clean_series(df_24h, "cape", 0.0)
+g_24_clean = get_clean_series(df_24h, "wind_gusts_10m_ecmwf_ifs", 10.0)
 
 for idx_h in range(len(df_24h)):
     row_t = df_24h["time"].iloc[idx_h]
@@ -2258,24 +2259,24 @@ st.markdown(f"#### 📊 Erhaç Üssü Saatlik Sayısal Rüzgâr Hamlesi Kıyası
 fig_wind = go.Figure()
 fig_wind.add_trace(
     go.Scatter(
-        x=df["time"].tolist(),
-        y=ecmwf.tolist(),
+        x=df["time"].dt.strftime("%H:00").tolist(),
+        y=ecmwf.values.tolist(),
         name="ECMWF (Avrupa)",
         line=dict(color="#1f77b4", width=2),
     )
 )
 fig_wind.add_trace(
     go.Scatter(
-        x=df["time"].tolist(),
-        y=gfs.tolist(),
+        x=df["time"].dt.strftime("%H:00").tolist(),
+        y=gfs.values.tolist(),
         name="GFS (ABD)",
         line=dict(color="#d62728", width=2),
     )
 )
 fig_wind.add_trace(
     go.Scatter(
-        x=df["time"].tolist(),
-        y=icon.tolist(),
+        x=df["time"].dt.strftime("%H:00").tolist(),
+        y=icon.values.tolist(),
         name="ICON (Almanya)",
         line=dict(color="#2ca02c", width=2),
     )
@@ -2299,28 +2300,28 @@ st.markdown("#### 🌧️ Saatlik Sıcaklık, Çiy Noktası ve Yağış Türü D
 fig_weather = go.Figure()
 fig_weather.add_trace(
     go.Scatter(
-        x=df["time"].tolist(),
-        y=temp.tolist(),
+        x=df["time"].dt.strftime("%H:00").tolist(),
+        y=temp.values.tolist(),
         name="Sıcaklık (°C)",
         line=dict(color="#ff7f0e", width=2),
     )
 )
 fig_weather.add_trace(
     go.Scatter(
-        x=df["time"].tolist(),
-        y=dew_point_series.tolist(),
+        x=df["time"].dt.strftime("%H:00").tolist(),
+        y=dew_point_series.values.tolist(),
         name="Çiy Noktası (°C)",
         line=dict(color="#2ca02c", width=1.5, dash="dot"),
     )
 )
 fig_weather.add_trace(
     go.Bar(
-        x=df["time"].tolist(),
-        y=precip.tolist(),
+        x=df["time"].dt.strftime("%H:00").tolist(),
+        y=precip.values.tolist(),
         name="Yağış Miktarı (mm)",
         marker_color=precip_colors,
-        text=df["precip_type"].tolist(),
-        hovertemplate="<b>Saat:</b> %{x|%H:00}<br><b>Yağış:</b> %{y:.1f} mm<br><b>Tür:</b> %{text}<extra></extra>",
+        text=df["precip_type"],
+        hovertemplate="<b>Saat:</b> %{x}<br><b>Yağış:</b> %{y:.1f} mm<br><b>Tür:</b> %{text}<extra></extra>",
         yaxis="y2",
     )
 )
