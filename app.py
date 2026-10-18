@@ -1258,45 +1258,6 @@ else:
             " için kritik bir afet anomalisi tespit edilmemiştir."
         )
 
-# --- XAI NİTELİK KATKI GRAFİĞİ ---
-st.markdown("### 🧠 Açıklanabilir Yapay Zekâ (XAI): Model Kararını Gerekçelendirme")
-cur_peak_x = X_norm[peak_idx]
-feature_contributions = cur_peak_x * weights
-feature_names = [
-    "Rüzgâr Taban Hızı",
-    "3s Basınç Düşüşü (ΔP)",
-    "Beydağları Blokajı (215°)",
-    "Hamle Faktörü",
-    "Kar / Donma Fazı",
-    "Konvektif Dolu İndeksi",
-]
-
-xai_df = pd.DataFrame({
-    "Fiziksel Parametre": feature_names,
-    "Risk Katkısı": feature_contributions,
-})
-xai_df["Renk"] = np.where(xai_df["Risk Katkısı"] >= 0, "#f44336", "#4caf50")
-
-fig_xai = go.Figure()
-fig_xai.add_trace(
-    go.Bar(
-        y=xai_df["Fiziksel Parametre"],
-        x=xai_df["Risk Katkısı"],
-        orientation="h",
-        marker=dict(color=xai_df["Renk"]),
-        hovertemplate="<b>%{y}</b><br>Katkı Değeri: %{x:.2f}<extra></extra>",
-    )
-)
-fig_xai.add_vline(x=0, line_dash="solid", line_color="rgba(255,255,255,0.2)")
-fig_xai.update_layout(
-    xaxis_title="Fiziksel Karar Katkısı (Negatif: Riski Sönümler | Pozitif: Alarm Üretir)",
-    yaxis=dict(autorange="reversed"),
-    template="plotly_white",
-    height=250,
-    margin=dict(l=0, r=0, t=10, b=10),
-)
-st.plotly_chart(fig_xai, use_container_width=True)
-
 # --- SEKTÖREL OPERASYONEL REÇETELER ---
 st.markdown("### 📋 Sektörel Eyleme Dönüştürülebilir Operasyonel Reçeteler")
 
@@ -1829,6 +1790,99 @@ with c_map2:
         """,
         unsafe_allow_html=True
     )
+
+st.markdown("---")
+
+# --- XAI: AÇIKLANABİLİR YAPAY ZEKÂ / ETKİ PUSULASI ---
+st.markdown("### 🧠 Açıklanabilir Yapay Zekâ (XAI): Model Kararını Gerekçelendirme")
+st.caption(f"📍 **Seçilen Zaman Penceresi ({selected_time_str}):** Hibrit modelin bu andaki kararını hangi fiziksel faktörlerin ne yönde etkilediği aşağıda dengelenmiştir.")
+
+# Seçili saate göre XAI öznitelik vektörü
+cur_xai_vec = X_norm[current_sel_h]
+feature_contributions = cur_xai_vec * weights
+
+feature_titles = [
+    "Rüzgâr Taban Hızı",
+    "3s Basınç Düşüşü (ΔP)",
+    "Beydağları Blokajı (215°)",
+    "Hamle Faktörü",
+    "Kar / Donma Fazı",
+    "Konvektif Dolu İndeksi",
+]
+
+xai_records = []
+for f_name, f_val in zip(feature_titles, feature_contributions):
+    is_danger = (f_val >= 0)
+    category = "🔴 Riski Artıran Faktör (Tehlike Yönü)" if is_danger else "🟢 Riski Düşüren Faktör (Güvenlik Kalkanı)"
+    meaning = "Alarm Üretiyor" if is_danger else "Riski Sönümlüyor"
+    xai_records.append({
+        "Fiziksel Parametre": f_name,
+        "Katkı Değeri": f_val,
+        "Kategori": category,
+        "Anlam": meaning,
+        "Renk": "#f44336" if is_danger else "#4caf50",
+        "Etiket": f"{f_val:+.2f} ({meaning})"
+    })
+
+df_xai_plot = pd.DataFrame(xai_records)
+df_xai_plot = df_xai_plot.sort_values(by="Katkı Değeri", ascending=True)
+
+fig_xai = go.Figure()
+
+for cat, color_code in [("🟢 Riski Düşüren Faktör (Güvenlik Kalkanı)", "#4caf50"), ("🔴 Riski Artıran Faktör (Tehlike Yönü)", "#f44336")]:
+    sub_df = df_xai_plot[df_xai_plot["Kategori"] == cat]
+    if not sub_df.empty:
+        fig_xai.add_trace(
+            go.Bar(
+                y=sub_df["Fiziksel Parametre"],
+                x=sub_df["Katkı Değeri"],
+                name=cat,
+                orientation="h",
+                marker_color=color_code,
+                text=sub_df["Etiket"],
+                textposition="outside",
+                textfont=dict(size=11, color="#e0e0e0"),
+                hovertemplate="<b>%{y}</b><br>Karar Etkisi: %{x:+.2f}<extra></extra>"
+            )
+        )
+
+fig_xai.add_vline(x=0, line_width=2, line_color="rgba(255,255,255,0.4)")
+
+fig_xai.update_layout(
+    xaxis=dict(
+        title="Fiziksel Karar Katkısı (Sol: Riski Azaltan Kalkan | Sağ: Afet Alarmı Üreten Baskı)",
+        zeroline=False,
+        showgrid=True,
+        gridcolor="rgba(255,255,255,0.08)",
+    ),
+    yaxis=dict(title="", autorange="reversed"),
+    template="plotly_white",
+    height=320,
+    margin=dict(l=10, r=60, t=30, b=30),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)"
+)
+
+st.plotly_chart(fig_xai, use_container_width=True)
+
+# Otomatik Dinamik XAI Yorumu
+dominant_danger = df_xai_plot[df_xai_plot["Katkı Değeri"] > 0].sort_values("Katkı Değeri", ascending=False)
+dominant_shield = df_xai_plot[df_xai_plot["Katkı Değeri"] < 0].sort_values("Katkı Değeri", ascending=True)
+
+danger_text = f"**{dominant_danger.iloc[0]['Fiziksel Parametre']}** (+{dominant_danger.iloc[0]['Katkı Değeri']:.2f})" if not dominant_danger.empty else "Belirgin bir tehlike baskısı yok"
+shield_text = f"**{dominant_shield.iloc[0]['Fiziksel Parametre']}** ({dominant_shield.iloc[0]['Katkı Değeri']:.2f})" if not dominant_shield.empty else "Belirgin bir sönümleme engeli yok"
+
+st.markdown(
+    f"""
+    <div class="benchmark-box" style="padding: 10px 16px; font-size: 0.88rem; line-height: 1.5;">
+        💡 <strong>Nasıl Okunmalı?</strong> Grafiğin sağındaki <span style="color: #f44336; font-weight: 700;">kırmızı çubuklar</span> hava olayını afete sürükleyen unsurları; solundaki <span style="color: #4caf50; font-weight: 700;">yeşil çubuklar</span> ise Malatya coğrafyasının riski düşüren kalkanlarını temsil eder.<br>
+        • Saat {selected_time_str} itibarıyla en büyük afet baskısı: {danger_text}<br>
+        • Saat {selected_time_str} itibarıyla en güçlü hafifletici kalkan: {shield_text}
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 st.markdown("---")
 
