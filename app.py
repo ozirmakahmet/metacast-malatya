@@ -57,7 +57,7 @@ div[data-testid="stMetricValue"] > div {
     background-color: rgba(33, 150, 243, 0.08);
     border: 1px solid rgba(33, 150, 243, 0.3);
     border-radius: 8px;
-    padding: 12px 16px;
+    padding: 14px 18px;
     margin-bottom: 20px;
 }
 .region-card {
@@ -623,7 +623,6 @@ if mode == "What-If Laboratuvarı":
     sim_is_snow = 1.0 if sim_temp <= 1.5 else 0.0
     sim_hail_pot = 1.0 if (sim_cape >= 900.0 or sim_temp >= 24.0) else 0.0
 
-    # --- FİZİKSEL TUTARLILIK DENETİMİ ---
     physics_warnings = []
     if sim_cape > 1000 and sim_temp < 10.0:
         physics_warnings.append("⚠️ **Termodinamik Çelişki:** Soğuk havada (<10°C) yüksek konvektif enerji (CAPE >1000) oluşması fiziksel olarak zordur.")
@@ -1468,10 +1467,58 @@ with r_col4:
 
 st.markdown("---")
 
-# --- MEKÂNSAL FARKINDALIK (HARİTA & OROGRAFİ & ANİMASYONLU ZAMAN ÇİZELGESİ) ---
-st.markdown("### 🧭 24 Saatlik Dinamik Afet Risk Haritası & Animasyonlu Zaman Çizelgesi")
+# --- MEKÂNSAL FARKINDALIK (HARİTA & CANLI / SEÇİLEN SAAT TAHMİN KUTUSU) ---
+st.markdown("### 🧭 Dinamik Afet Risk Haritası ve Saatlik Hadise Tahmini")
 
-c_map1, c_map2 = st.columns([1.75, 1.25])
+# 1. Saat Senkronizasyonu (Canlı vs Seçilen Saat)
+current_real_hour = datetime.now().hour
+is_viewing_today = (mode == "Canlı Operasyonel" and st.session_state.current_date == today_date)
+
+default_target_hour = current_real_hour if is_viewing_today else peak_idx
+default_target_hour = max(0, min(default_target_hour, len(df) - 1))
+
+if "active_hour_val" not in st.session_state:
+    st.session_state.active_hour_val = default_target_hour
+
+# Üst Kontrol Barı (Düğme + Zaman Kaydırıcı)
+t_btn_col, t_slider_col = st.columns([1.3, 4.7])
+with t_btn_col:
+    st.write("")
+    btn_text = f"📍 Canlı Saate Git ({current_real_hour:02d}:00)" if is_viewing_today else f"⚡ Pik Saate Git ({peak_idx:02d}:00)"
+    if st.button(btn_text, use_container_width=True):
+        st.session_state.active_hour_val = default_target_hour
+        st.rerun()
+
+with t_slider_col:
+    chosen_hour = st.slider(
+        "⏱️ Zaman Penceresi (Saat Seçin - Harita ve Sağdaki Tahmin Kutusu Eş Zamanlı Güncellenir):",
+        min_value=0,
+        max_value=len(df) - 1,
+        value=st.session_state.active_hour_val,
+        format="%02d:00",
+        key="time_slider_widget"
+    )
+    if chosen_hour != st.session_state.active_hour_val:
+        st.session_state.active_hour_val = chosen_hour
+        st.rerun()
+
+sel_idx = st.session_state.active_hour_val
+sel_time_str = df["time"].iloc[sel_idx].strftime("%H:00")
+is_now_selected = (is_viewing_today and sel_idx == current_real_hour)
+
+# Seçilen saate ait meteorolojik değişkenler
+sel_wind_deg = float(df["wind_direction_10m_ecmwf_ifs"].iloc[sel_idx])
+sel_gust = float(gust_mean.iloc[sel_idx])
+sel_speed = float(df["wind_speed_10m_ecmwf_ifs"].iloc[sel_idx])
+sel_temp = float(temp.iloc[sel_idx])
+sel_dew = float(dew_point_series.iloc[sel_idx])
+sel_precip = float(precip.iloc[sel_idx])
+sel_cape = float(cape_series.iloc[sel_idx]) if not cape_series.empty else 0.0
+sel_risk = float(probabilities[sel_idx])
+sel_precip_name = df["precip_type"].iloc[sel_idx]
+sel_cloud = float(cloud_cover.iloc[sel_idx])
+
+c_map1, c_map2 = st.columns([1.65, 1.35])
 
 with c_map1:
     center_lat, center_lon = 38.3552, 38.3095
@@ -1506,108 +1553,72 @@ with c_map1:
         hoverinfo="name"
     )
 
-    frames = []
-    frame_names = []
+    # Seçili saate göre istasyon renk ve metinleri
+    lats, lons, hover_texts, pt_colors = [], [], [], []
+    for st_info in stations:
+        lats.append(st_info["lat"])
+        lons.append(st_info["lon"])
 
-    for i in range(len(df)):
-        t_str = df["time"].iloc[i].strftime("%H:00")
-        frame_names.append(t_str)
+        loc_r = sel_risk
+        loc_t = sel_temp
+        loc_g = sel_gust
 
-        w_deg = float(df["wind_direction_10m_ecmwf_ifs"].iloc[i])
-        w_gust = float(gust_mean.iloc[i])
-        w_temp = float(temp.iloc[i])
-        w_risk = float(probabilities[i])
+        if st_info["type"] == "dogansehir":
+            loc_g += 12.0
+            loc_t -= 1.8
+            if loc_g >= 45: loc_r = max(loc_r, 75.0)
+        elif st_info["type"] == "battalgazi":
+            loc_t -= 0.8
+            if loc_t <= 1.0 and is_radiation_frost_danger: loc_r = max(loc_r, 88.0)
+        elif st_info["type"] == "yesilyurt":
+            loc_g += 5.0
+            loc_t += 0.9
+        elif st_info["type"] == "erhac":
+            if loc_g >= 50: loc_r = max(loc_r, 80.0)
 
-        w_rad = np.radians(w_deg)
-        s_lat = center_lat + (0.22 * np.cos(w_rad))
-        s_lon = center_lon + (0.22 * np.sin(w_rad))
+        if loc_r >= 65.0:
+            pt_colors.append("#f44336")
+        elif loc_r >= 35.0:
+            pt_colors.append("#ff9800")
+        else:
+            pt_colors.append("#4caf50")
 
-        lats, lons, texts, colors = [], [], [], []
-        for st_info in stations:
-            lats.append(st_info["lat"])
-            lons.append(st_info["lon"])
-
-            loc_risk = w_risk
-            loc_temp = w_temp
-            loc_gust = w_gust
-
-            if st_info["type"] == "dogansehir":
-                loc_gust += 12.0
-                loc_temp -= 1.8
-                if loc_gust >= 45: loc_risk = max(loc_risk, 75.0)
-            elif st_info["type"] == "battalgazi":
-                loc_temp -= 0.8
-                if loc_temp <= 1.0 and is_radiation_frost_danger: loc_risk = max(loc_risk, 88.0)
-            elif st_info["type"] == "yesilyurt":
-                loc_gust += 5.0
-                loc_temp += 0.9
-            elif st_info["type"] == "erhac":
-                if loc_gust >= 50: loc_risk = max(loc_risk, 80.0)
-
-            if loc_risk >= 65.0:
-                c = "#f44336"
-            elif loc_risk >= 35.0:
-                c = "#ff9800"
-            else:
-                c = "#4caf50"
-
-            colors.append(c)
-            texts.append(
-                f"<b>{st_info['name']}</b> ({t_str})<br>"
-                f"Risk: <b>%{loc_risk:.0f}</b><br>"
-                f"Sıcaklık: {loc_temp:.1f}°C<br>"
-                f"Hamle: {loc_gust:.1f} km/s"
-            )
-
-        frame_pts = go.Scattermap(
-            lat=lats,
-            lon=lons,
-            mode='markers+text',
-            marker=dict(size=14, color=colors),
-            text=[s["name"] for s in stations],
-            textposition="top right",
-            textfont=dict(color="#ffffff", size=12, family="Arial Black"),
-            hovertext=texts,
-            hoverinfo="text",
-            name="İstasyonlar"
+        hover_texts.append(
+            f"<b>{st_info['name']}</b> ({sel_time_str})<br>"
+            f"Risk: <b>%{loc_r:.0f}</b><br>"
+            f"Sıcaklık: {loc_t:.1f}°C<br>"
+            f"Hamle: {loc_g:.1f} km/s"
         )
 
-        frame_arrow = go.Scattermap(
-            lat=[s_lat, center_lat],
-            lon=[s_lon, center_lon],
-            mode='lines+markers',
-            line=dict(width=5, color='#ff1744'),
-            marker=dict(size=[6, 14], color='#ff1744'),
-            name="Rüzgâr Vektörü",
-            hoverinfo="skip"
-        )
-
-        frames.append(
-            go.Frame(
-                name=t_str,
-                data=[trace_beydaglari, trace_baraj, frame_pts, frame_arrow]
-            )
-        )
-
-    initial_pts = frames[0].data[2]
-    initial_arrow = frames[0].data[3]
-
-    fig_map = go.Figure(
-        data=[trace_beydaglari, trace_baraj, initial_pts, initial_arrow],
-        frames=frames
+    trace_points = go.Scattermap(
+        lat=lats,
+        lon=lons,
+        mode='markers+text',
+        marker=dict(size=14, color=pt_colors),
+        text=[s["name"] for s in stations],
+        textposition="top right",
+        textfont=dict(color="#ffffff", size=12, family="Arial Black"),
+        hovertext=hover_texts,
+        hoverinfo="text",
+        name="İstasyonlar"
     )
 
-    slider_steps = [
-        dict(
-            method="animate",
-            args=[
-                [fn],
-                dict(mode="immediate", frame=dict(duration=400, redraw=True), transition=dict(duration=150))
-            ],
-            label=fn
-        )
-        for fn in frame_names
-    ]
+    # Seçili saatin rüzgâr oku
+    w_rad = np.radians(sel_wind_deg)
+    s_lat = center_lat + (0.24 * np.cos(w_rad))
+    s_lon = center_lon + (0.24 * np.sin(w_rad))
+
+    trace_arrow = go.Scattermap(
+        lat=[s_lat, center_lat],
+        lon=[s_lon, center_lon],
+        mode='lines+markers',
+        line=dict(width=5, color='#ff1744'),
+        marker=dict(size=[6, 14], color='#ff1744'),
+        name=f"Rüzgâr ({sel_wind_deg:.0f}°)",
+        hoverinfo="skip"
+    )
+
+    fig_map = go.Figure(data=[trace_beydaglari, trace_baraj, trace_points, trace_arrow])
 
     fig_map.update_layout(
         map=dict(
@@ -1622,43 +1633,8 @@ with c_map1:
                 )
             ]
         ),
-        updatemenus=[
-            dict(
-                type="buttons",
-                showactive=False,
-                x=0.01,
-                y=1.16,
-                xanchor="left",
-                yanchor="top",
-                direction="left",
-                pad=dict(r=8, t=5),
-                buttons=[
-                    dict(
-                        label="▶️ 24 Saati Oynat",
-                        method="animate",
-                        args=[None, dict(frame=dict(duration=550, redraw=True), fromcurrent=True, transition=dict(duration=200))]
-                    ),
-                    dict(
-                        label="⏸️ Durdur",
-                        method="animate",
-                        args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate", transition=dict(duration=0))]
-                    )
-                ]
-            )
-        ],
-        sliders=[
-            dict(
-                active=0,
-                currentvalue=dict(prefix="⏰ Zaman Penceresi: ", font=dict(color="#ff9800", size=13)),
-                pad=dict(t=30),
-                steps=slider_steps,
-                x=0.03,
-                len=0.94,
-                font=dict(color="#ffffff")
-            )
-        ],
         showlegend=False,
-        height=460,
+        height=400,
         margin=dict(l=0, r=0, t=10, b=0)
     )
 
@@ -1677,36 +1653,68 @@ with c_map1:
     )
 
 with c_map2:
-    st.markdown("#### ⏱️ Havza Afet Zaman Çizelgesi & Karar Rehberi")
-    
+    # Durum Başlığı & Zaman Rozeti
+    time_badge_text = "🟢 CANLI / ŞU ANKİ SAAT" if is_now_selected else "⏱️ SEÇİLEN ZAMAN DİLİMİ"
+    time_badge_color = "#4caf50" if is_now_selected else "#ff9800"
+
     st.markdown(
         f"""
-        <div class="benchmark-box" style="margin-top: 6px; padding: 14px;">
-            <p style="margin: 0 0 6px 0; font-size: 0.95rem;">
-                <strong>⚡ Günün En Kritik Saati:</strong> <span style="color: #ff9800; font-weight: bold;">{df['time'].iloc[peak_idx].strftime('%H:00')}</span>
-            </p>
-            <p style="margin: 0; font-size: 0.9rem; color: #cfd8dc;">
-                Pik hamle <strong>{peak_gust:.1f} km/s</strong> ile rüzgâr açısı <strong>{live_wind_deg:.0f}°</strong> olarak hesaplanmıştır.
-            </p>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h4 style="margin: 0; color: #90caf9;">📋 Saat {sel_time_str} Tahmin & Hadiseler</h4>
+            <span style="background-color: {time_badge_color}; color: #000; font-size: 0.76rem; font-weight: 800; padding: 2px 8px; border-radius: 6px;">{time_badge_text}</span>
         </div>
-        """, unsafe_allow_html=True
+        """,
+        unsafe_allow_html=True
     )
 
-    st.markdown("##### 🔍 Zamansal Simülasyon Nasıl Çalışır?")
-    st.markdown(
-        """
-        * **▶️ Oynat Tuşu:** Malatya havzası boyunca gece don çöküşünü ve gündüz konvektif rüzgâr dalgalanmalarını 24 saatlik döngüde otomatik simüle eder.
-        * **Zaman Çizelgesi Şeridi:** İlgilendiğiniz saatin üzerine tıklayarak ilçelerdeki anlık mikroklima durumunu görebilirsiniz.
-        * **Noktaların Üzerine Gelin:** Her ilçenin o saatteki tahmini sıcaklık, rüzgâr hamlesi ve yapay zekâ bileşik risk puanı balon içinde görünür.
-        """
-    )
+    # 4 Temel Gösterge Kartı
+    h_c1, h_c2 = st.columns(2)
+    h_c1.metric("Beklenen Sıcaklık", f"{sel_temp:.1f}°C", delta=f"Çiy: {sel_dew:.1f}°C")
+    h_c2.metric("Rüzgâr Hamlesi", f"{sel_gust:.1f} km/s", delta=f"Yön: {sel_wind_deg:.0f}°")
 
-    st.markdown("##### ⛰️ Orografi ve Su Kütlesi Etkisi")
+    # Hadiselerin Yapay Zekâ Analizi ve Tahmin Metni
+    hazards_summary = []
+    
+    # 1. Yağış & Faz
+    if sel_precip > 0.05:
+        if sel_temp <= 1.5:
+            hazards_summary.append(f"❄️ <strong>Kar / Sulu Kar Hadisesi:</strong> Yağış miktarı {sel_precip:.1f} mm. Zemin sıcaklığı düşük, yollarda gizli buzlanma bekleniyor.")
+        elif sel_cape >= 900 or (sel_temp >= 22 and sel_gust >= 35):
+            hazards_summary.append(f"⚡ <strong>Konvektif Dolu / Oraj:</strong> Yüksek termodinamik enerji ({sel_cape:.0f} J/kg). Ani sağanak ve dolu fırtınası riski yüksek.")
+        else:
+            hazards_summary.append(f"💧 <strong>Sıvı Yağış (Yağmur):</strong> Saatlik birikim {sel_precip:.1f} mm seviyesinde normal yağış bekleniyor.")
+    else:
+        hazards_summary.append("☀️ <strong>Yağış Hadisesi:</strong> Yağış beklenmiyor, zemin kuru.")
+
+    # 2. Rüzgar & Orografi
+    angle_diff_sel = np.radians(sel_wind_deg - 215.0)
+    blockage_sel = float(np.abs(np.cos(angle_diff_sel)))
+    if blockage_sel >= 0.70 and sel_gust >= 40.0:
+        hazards_summary.append(f"⛰️ <strong>Beydağları Blokajı (De-Warning):</strong> Rüzgâr ({sel_wind_deg:.0f}°) Beydağları kalkanına çarpıyor. Şehir merkezinde beklenen fırtına etkisi sönümlenecek.")
+    elif sel_gust >= 50.0:
+        hazards_summary.append(f"🚨 <strong>Şiddetli Fırtına:</strong> Açık rüzgâr koridoru! {sel_gust:.1f} km/s hamle ile çatı uçması ve kule vinç devrilme riski mevcut.")
+    elif sel_gust >= 30.0:
+        hazards_summary.append(f"💨 <strong>Orta Kuvvette Rüzgâr:</strong> {sel_gust:.1f} km/s hızında esiş bekleniyor, rutin önlemler yeterlidir.")
+
+    # 3. Zirai Don (Gece)
+    is_sel_night = (df["time"].iloc[sel_idx].hour >= 21) or (df["time"].iloc[sel_idx].hour <= 7)
+    if is_sel_night and sel_temp <= 2.0 and sel_cloud <= 35:
+        hazards_summary.append(f"❄️ <strong>Aktif Radyasyon Donu:</strong> Gökyüzü açık (%{sel_cloud:.0f} bulut), ısı uzaya kaçıyor. Çiy noktası {sel_dew:.1f}°C olduğundan kayısı bahçelerinde buz kalkanı açılmalıdır.")
+
+    # 4. Göl Etkisi
+    if (45 <= sel_wind_deg <= 135) and sel_speed >= 8.0:
+        hazards_summary.append("🌊 <strong>Karakaya Göl Nem Taşınımı:</strong> Rüzgâr baraj gölü üzerinden estiği için Malatya çanağında havadaki bağıl nem oranını artırmaktadır.")
+
+    hazards_html = "<br>• ".join(hazards_summary)
+
     st.markdown(
-        """
-        * **Beydağları Silsilesi:** Rüzgâr Güneybatı (~215°) sektöründen estiğinde sürtünme artar, fırtına riski merkezde sönümlenir (*De-Warning*).
-        * **Karakaya Barajı:** Doğu yönlü esişlerde havzaya giren nem oranı artar, gece saatlerinde çiğ noktası dengesini doğrudan etkiler.
-        """
+        f"""
+        <div class="benchmark-box" style="margin-top: 8px; padding: 12px; font-size: 0.88rem; line-height: 1.5; color: #eceff1;">
+            <strong style="color: #ffb74d;">🔍 Saat {sel_time_str} İçin Öngörülen Hadiseler:</strong><br>
+            • {hazards_html}
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
 st.markdown("---")
