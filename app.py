@@ -1111,7 +1111,7 @@ probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 
 
 # ==============================================================================
-# 📱 GELECEK 24 SAATİN SAATLİK HAVA DURUMU & BİLGİLENDİRME BÜLTENİ
+# 📱 GELECEK 24 SAATİN SAATLİK HAVA DURUMU & BİLGİLENDİRME BÜLTENİ (DÜZELTİLDİ)
 # ==============================================================================
 st.markdown("### 📱 Önümüzdeki 24 Saatin Saatlik Tahmini & Hadise Özeti")
 
@@ -1126,7 +1126,7 @@ if mode == "Canlı Operasyonel":
 else:
     df_24h = df.copy().reset_index(drop=True)
 
-def get_weather_icon_and_desc(t, p, c, cape, code=None):
+def get_weather_icon_and_desc(t, p, c, cape):
     if p > 0.1:
         if t <= 1.5:
             return "❄️", "Kar Yağışlı"
@@ -1155,8 +1155,10 @@ for idx_h in range(len(df_24h)):
     row_t = df_24h["time"].iloc[idx_h]
     temp_val = float(df_24h["temperature_2m_ecmwf_ifs"].iloc[idx_h])
     precip_val = float(df_24h["precipitation_ecmwf_ifs"].iloc[idx_h])
-    cloud_val = float(df_24h.get("cloud_cover_ecmwf_ifs", pd.Series([20])).iloc[idx_h])
-    cape_val = float(df_24h.get("cape", pd.Series([0])).iloc[idx_h])
+    
+    # Sütun yoksa IndexError vermeden güvenle 0 veya 20 al
+    cloud_val = float(df_24h["cloud_cover_ecmwf_ifs"].iloc[idx_h]) if "cloud_cover_ecmwf_ifs" in df_24h.columns else (float(df_24h["cloud_cover"].iloc[idx_h]) if "cloud_cover" in df_24h.columns else 20.0)
+    cape_val = float(df_24h["cape"].iloc[idx_h]) if "cape" in df_24h.columns else 0.0
     gust_val = float(df_24h["wind_gusts_10m_ecmwf_ifs"].iloc[idx_h])
 
     icon, desc = get_weather_icon_and_desc(temp_val, precip_val, cloud_val, cape_val)
