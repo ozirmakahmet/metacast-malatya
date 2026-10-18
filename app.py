@@ -30,6 +30,72 @@ div[data-testid="stMetricValue"] > div {
     white-space: nowrap !important;
     text-overflow: clip !important;
 }
+.hourly-scroll-container {
+    display: flex;
+    overflow-x: auto;
+    gap: 12px;
+    padding: 10px 4px 16px 4px;
+    margin-bottom: 12px;
+}
+.hourly-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 12px 14px;
+    min-width: 105px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.2s ease-in-out;
+}
+.hourly-card:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: #90caf9;
+    transform: translateY(-2px);
+}
+.hourly-card.active-now {
+    border: 1.5px solid #2196f3;
+    background: rgba(33, 150, 243, 0.12);
+}
+.hourly-time {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #90caf9;
+    margin-bottom: 4px;
+}
+.hourly-icon {
+    font-size: 1.7rem;
+    margin: 6px 0;
+}
+.hourly-temp {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #ffffff;
+}
+.hourly-desc {
+    font-size: 0.72rem;
+    color: #b0bec5;
+    margin-top: 4px;
+    line-height: 1.2;
+}
+.hourly-precip {
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: #29b6f6;
+    margin-top: 4px;
+}
+.future-summary-box {
+    background: linear-gradient(90deg, rgba(33, 150, 243, 0.12), rgba(0, 230, 118, 0.08));
+    border-left: 5px solid #00e676;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 22px;
+    font-size: 0.92rem;
+    line-height: 1.5;
+    color: #eceff1;
+}
 .section-banner-metacast {
     background: linear-gradient(90deg, rgba(33, 150, 243, 0.22), rgba(156, 39, 176, 0.22));
     border-left: 6px solid #2196f3;
@@ -395,6 +461,7 @@ def fetch_live_forecast():
             "precipitation",
             "cloud_cover",
             "cape",
+            "weather_code",
         ],
         "models": ["ecmwf_ifs", "gfs_seamless", "icon_seamless"],
         "past_days": 3,
@@ -565,7 +632,7 @@ elif metar["status"] == "degraded" and metar["warnings"]:
         f" {' | '.join(metar['warnings'])}"
     )
 
-# --- 🥊 MODEL KIYASLAMA ARENASI (KİM TUTTURDU? - TARİH VE GÜN NETLEŞTİRİLMİŞ) ---
+# --- 🥊 MODEL KIYASLAMA ARENASI (KİM TUTTURDU?) ---
 if mode == "Model Kıyaslama Arenası":
     st.subheader("🥊 Model Kıyaslama Arenası: Kim Daha İyi Tutturdu?")
     st.markdown(
@@ -585,7 +652,6 @@ if mode == "Model Kıyaslama Arenası":
     with st.spinner("Modeller ve yer telemetrisi karşılaştırılıyor..."):
         df_raw, last_update = fetch_live_forecast()
 
-    # Anlık Hakem Maçı
     cur_h = datetime.now(TR_TZ).hour
     now_idx = cur_h if cur_h < len(df_raw) else 0
 
@@ -630,10 +696,7 @@ if mode == "Model Kıyaslama Arenası":
 
     st.markdown("---")
     
-    # Gün Seçimi (Tarih netleştirme)
     available_arena_dates = sorted(df_raw["time"].dt.date.unique())
-    today_arena_date = datetime.now(TR_TZ).date()
-    
     date_options = ["Tüm 7 Günlük Dönem"] + [d.strftime("%d %B %Y") for d in available_arena_dates]
     
     col_filter_title, col_filter_select = st.columns([1.5, 2.5])
@@ -647,7 +710,6 @@ if mode == "Model Kıyaslama Arenası":
             help="İstediğiniz güne filtreleyerek o günün 24 saatlik maç sonucunu görebilirsiniz."
         )
 
-    # Filtreleme
     if selected_date_filter == "Tüm 7 Günlük Dönem":
         df_arena = df_raw.copy().reset_index(drop=True)
     else:
@@ -656,14 +718,11 @@ if mode == "Model Kıyaslama Arenası":
 
     table_records = []
     win_counts = {"MetaCast": 0, "ECMWF": 0, "GFS": 0, "ICON": 0}
-
-    # Türkçe gün adları sözlüğü
     gunler = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
 
     for h_i in range(len(df_arena)):
         dt_val = df_arena["time"].iloc[h_i]
         gun_adi = gunler[dt_val.weekday()]
-        # Tarih ve saat tam formatta (örn: 18 Eki Paz • 14:00)
         row_time_display = f"{dt_val.strftime('%d.%m')} {gun_adi} • {dt_val.strftime('%H:00')}"
 
         e_g = float(df_arena["wind_gusts_10m_ecmwf_ifs"].iloc[h_i])
@@ -675,8 +734,6 @@ if mode == "Model Kıyaslama Arenası":
         blk = float(np.abs(np.cos(np.radians(w_dir - 215.0))))
 
         mc_g = round(m_mean * (1.0 - 0.28 * blk), 1) if (blk >= 0.65 and m_mean >= 30) else round(m_mean, 1)
-
-        # Simüle edilen yer ölçümü
         ref_obs = round(mc_g + (np.sin(h_i * 0.7) * 1.8), 1)
 
         diffs = {
@@ -1051,6 +1108,113 @@ X_input = np.column_stack([
 
 X_norm = (X_input - mean) / std
 probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
+
+
+# ==============================================================================
+# YENİ EKLENEN: 📱 GELECEK 24 SAATİN SAATLİK HAVA DURUMU & BİLGİLENDİRME BÜLTENİ
+# ==============================================================================
+st.markdown("### 📱 Önümüzdeki 24 Saatin Saatlik Tahmini & Hadise Özeti")
+
+# Şu anki saatten itibaren önümüzdeki 24 saati al
+now_real_dt = datetime.now(TR_TZ)
+if mode == "Canlı Operasyonel":
+    # df_raw içinden şimdiki saatten sonraki 24 kaydı al
+    future_24h_mask = (df_raw["time"] >= now_real_dt - pd.Timedelta(hours=1))
+    df_24h = df_raw[future_24h_mask].head(24).copy().reset_index(drop=True)
+    if len(df_24h) < 12:
+        df_24h = df_raw.tail(24).copy().reset_index(drop=True)
+else:
+    df_24h = df.copy().reset_index(drop=True)
+
+def get_weather_icon_and_desc(t, p, c, cape, code=None):
+    if p > 0.1:
+        if t <= 1.5:
+            return "❄️", "Kar Yağışlı"
+        elif cape >= 900 or (t >= 22 and p >= 2.0):
+            return "⚡", "Dolu / Oraj"
+        elif p >= 4.0:
+            return "🌧️", "Kuvvetli Yağmur"
+        else:
+            return "🌦️", "Hafif Yağmurlu"
+    else:
+        if c <= 20:
+            return "☀️", "Açık / Güneşli"
+        elif c <= 55:
+            return "⛅", "Parçalı Bulutlu"
+        elif c <= 80:
+            return "🌥️", "Çok Bulutlu"
+        else:
+            return "☁️", "Kapalı"
+
+# Saatlik Kartlar HTML
+hourly_cards_html = []
+rain_events = []
+frost_events = []
+storm_events = []
+
+for idx_h in range(len(df_24h)):
+    row_t = df_24h["time"].iloc[idx_h]
+    temp_val = float(df_24h["temperature_2m_ecmwf_ifs"].iloc[idx_h])
+    precip_val = float(df_24h["precipitation_ecmwf_ifs"].iloc[idx_h])
+    cloud_val = float(df_24h.get("cloud_cover_ecmwf_ifs", pd.Series([20])).iloc[idx_h])
+    cape_val = float(df_24h.get("cape", pd.Series([0])).iloc[idx_h])
+    gust_val = float(df_24h["wind_gusts_10m_ecmwf_ifs"].iloc[idx_h])
+
+    icon, desc = get_weather_icon_and_desc(temp_val, precip_val, cloud_val, cape_val)
+
+    # Olayları takip et (Bilgilendirme bülteni için)
+    h_label = row_t.strftime("%H:00")
+    if precip_val >= 0.2:
+        rain_events.append(f"Saat <strong>{h_label}</strong> sularında {desc.lower()} ({precip_val:.1f} mm)")
+    if temp_val <= 1.0 and cloud_val <= 35:
+        frost_events.append(f"Saat <strong>{h_label}</strong> sularında zemin donu ({temp_val:.1f}°C)")
+    if gust_val >= 45:
+        storm_events.append(f"Saat <strong>{h_label}</strong> civarında kuvvetli rüzgâr ({gust_val:.1f} km/s)")
+
+    is_first = (idx_h == 0)
+    card_cls = "hourly-card active-now" if is_first else "hourly-card"
+    time_badge = "Şimdi" if is_first else h_label
+
+    precip_label = f"💧 %{int(min(95, precip_val*25 + 10))}" if precip_val > 0.05 else ""
+
+    hourly_cards_html.append(f"""
+        <div class="{card_cls}">
+            <div class="hourly-time">{time_badge}</div>
+            <div class="hourly-icon">{icon}</div>
+            <div class="hourly-temp">{temp_val:.0f}°</div>
+            <div class="hourly-desc">{desc}</div>
+            <div class="hourly-precip">{precip_label}</div>
+        </div>
+    """)
+
+st.markdown(f"""
+<div class="hourly-scroll-container">
+    {''.join(hourly_cards_html)}
+</div>
+""", unsafe_allow_html=True)
+
+# Otomatik Bilgilendirme Bülteni (Metin Kutusu)
+bulletin_messages = []
+if rain_events:
+    bulletin_messages.append(f"🌧️ <strong>Yağış Uyarısı:</strong> {'; '.join(rain_events[:2])}. Şemsiyenizi yanınıza almanız önerilir.")
+if frost_events:
+    bulletin_messages.append(f"❄️ <strong>Zirai Don Riski:</strong> {'; '.join(frost_events[:2])}. Kayısı ve hassas bitkiler için tedbir alınız.")
+if storm_events:
+    bulletin_messages.append(f"💨 <strong>Kuvvetli Hamle:</strong> {'; '.join(storm_events[:2])}.")
+if not bulletin_messages:
+    bulletin_messages.append("☀️ <strong>Atmosferik Denge:</strong> Önümüzdeki saatlerde Malatya genelinde yağış, don veya fırtına riski beklenmiyor. Açık ve stabil bir hava hâkim olacak.")
+
+bulletin_html = "<br>• ".join(bulletin_messages)
+
+st.markdown(
+    f"""
+    <div class="future-summary-box">
+        <strong>📋 Önümüzdeki Saatler İçin Bilgilendirme Bülteni:</strong><br>
+        • {bulletin_html}
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 
 # ==============================================================================
