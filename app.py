@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import json
 import os
 import re
@@ -9,6 +9,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+
+# Türkiye Zaman Dilimi (UTC+3) Sabiti
+TR_TZ = timezone(timedelta(hours=3))
 
 st.set_page_config(
     page_title="MetaCast Malatya - Bilimsel Karar ve Doğrulama Platformu",
@@ -122,7 +125,7 @@ def log_validation_entry(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                datetime.now(TR_TZ).strftime("%Y-%m-%d %H:%M:%S"),
                 mode,
                 round(m_gust, 1),
                 round(o_gust, 1) if o_gust is not None else None,
@@ -307,7 +310,7 @@ def fetch_live_metar():
         "cloud_desc": "İstasyon Bağlantısı Yok",
         "warnings": ["NOAA İstasyon verisi çevrimdışı."],
         "raw": "LTAT İstasyonu Çevrimdışı (Fail-Safe Modu)",
-        "time": datetime.now().strftime("%H:%M"),
+        "time": datetime.now(TR_TZ).strftime("%H:%M"),
     }
 
 
@@ -339,7 +342,7 @@ def fetch_live_forecast():
     response.raise_for_status()
     df = pd.DataFrame(response.json()["hourly"])
     df["time"] = pd.to_datetime(df["time"])
-    return df, datetime.now().strftime("%H:%M:%S")
+    return df, datetime.now(TR_TZ).strftime("%H:%M:%S")
 
 
 # --- GEÇMİŞ SENARYO ÜRETECİ ---
@@ -712,7 +715,7 @@ if mode == "Canlı Operasyonel":
     available_dates = sorted(df_raw["time"].dt.date.unique())
     min_date = available_dates[0]
     max_date = available_dates[-1]
-    today_date = datetime.now().date()
+    today_date = datetime.now(TR_TZ).date()
 
     if "current_date" not in st.session_state:
         st.session_state.current_date = (
@@ -951,7 +954,7 @@ with m5:
 st.markdown("---")
 
 # --- MODEL GÜVENİLİRLİĞİ VE İSTASYON BAZLI BAĞIMSIZ TEHLİKE TESPİTİ ---
-now_hour = datetime.now().hour
+now_hour = datetime.now(TR_TZ).hour
 cur_idx = (
     now_hour
     if now_hour < len(df)
@@ -1470,15 +1473,16 @@ st.markdown("---")
 # --- MEKÂNSAL FARKINDALIK (HARİTA & CANLI / SEÇİLEN SAAT TAHMİN KUTUSU) ---
 st.markdown("### 🧭 Dinamik Afet Risk Haritası ve Saatlik Hadise Tahmini")
 
-# 1. Saat Senkronizasyonu (Canlı vs Seçilen Saat)
-current_real_hour = datetime.now().hour
+# Canlı Türkiye Saati
+current_real_hour = datetime.now(TR_TZ).hour
 is_viewing_today = (mode == "Canlı Operasyonel" and st.session_state.current_date == today_date)
 
 default_target_hour = current_real_hour if is_viewing_today else peak_idx
 default_target_hour = max(0, min(default_target_hour, len(df) - 1))
 
-if "active_hour_val" not in st.session_state:
-    st.session_state.active_hour_val = default_target_hour
+# Widget State Başlatma
+if "time_slider_widget" not in st.session_state:
+    st.session_state.time_slider_widget = default_target_hour
 
 # Üst Kontrol Barı (Düğme + Zaman Kaydırıcı)
 t_btn_col, t_slider_col = st.columns([1.3, 4.7])
@@ -1486,7 +1490,7 @@ with t_btn_col:
     st.write("")
     btn_text = f"📍 Canlı Saate Git ({current_real_hour:02d}:00)" if is_viewing_today else f"⚡ Pik Saate Git ({peak_idx:02d}:00)"
     if st.button(btn_text, use_container_width=True):
-        st.session_state.active_hour_val = default_target_hour
+        st.session_state.time_slider_widget = default_target_hour
         st.rerun()
 
 with t_slider_col:
@@ -1494,15 +1498,11 @@ with t_slider_col:
         "⏱️ Zaman Penceresi (Saat Seçin - Harita ve Sağdaki Tahmin Kutusu Eş Zamanlı Güncellenir):",
         min_value=0,
         max_value=len(df) - 1,
-        value=st.session_state.active_hour_val,
         format="%02d:00",
         key="time_slider_widget"
     )
-    if chosen_hour != st.session_state.active_hour_val:
-        st.session_state.active_hour_val = chosen_hour
-        st.rerun()
 
-sel_idx = st.session_state.active_hour_val
+sel_idx = st.session_state.time_slider_widget
 sel_time_str = df["time"].iloc[sel_idx].strftime("%H:00")
 is_now_selected = (is_viewing_today and sel_idx == current_real_hour)
 
@@ -1653,7 +1653,6 @@ with c_map1:
     )
 
 with c_map2:
-    # Durum Başlığı & Zaman Rozeti
     time_badge_text = "🟢 CANLI / ŞU ANKİ SAAT" if is_now_selected else "⏱️ SEÇİLEN ZAMAN DİLİMİ"
     time_badge_color = "#4caf50" if is_now_selected else "#ff9800"
 
@@ -1667,12 +1666,10 @@ with c_map2:
         unsafe_allow_html=True
     )
 
-    # 4 Temel Gösterge Kartı
     h_c1, h_c2 = st.columns(2)
     h_c1.metric("Beklenen Sıcaklık", f"{sel_temp:.1f}°C", delta=f"Çiy: {sel_dew:.1f}°C")
     h_c2.metric("Rüzgâr Hamlesi", f"{sel_gust:.1f} km/s", delta=f"Yön: {sel_wind_deg:.0f}°")
 
-    # Hadiselerin Yapay Zekâ Analizi ve Tahmin Metni
     hazards_summary = []
     
     # 1. Yağış & Faz
