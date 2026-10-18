@@ -200,7 +200,6 @@ def sigmoid(z):
 
 
 def get_clean_series(df_source, col_name, default_val=0.0, fallback_series=None):
-    """DataFrame indeks uzunluğunu birebir koruyan ve hata vermeyen güvenli seri üretici."""
     if col_name in df_source.columns:
         s = pd.to_numeric(df_source[col_name], errors="coerce")
     else:
@@ -945,7 +944,7 @@ if mode == "What-If Laboratuvarı":
     elif sim_temp <= 1.5 and sim_cloud <= 35:
         sim_final_risk = 94.0
         sim_banner = (
-            "❄️ KRİTİK ZİRAİ DON ALARMI: Gece açık gökyüzü nedeniyle Malatya"
+            "❄️ KRİTİK ZİRAİ DON ALARMI: Gece açık gökyüzü nedeniyle Malatya"
             " çanağında radyasyonel soğuma zemin enverziyonu donu yaratıyor!"
         )
         banner_color = "error"
@@ -959,7 +958,7 @@ if mode == "What-If Laboratuvarı":
     elif sim_gust >= 50.0:
         sim_final_risk = sim_prob
         sim_banner = (
-            f"🚨 DOĞRULANMIŞ FIRTINA: Hava koridoru açık ({sim_dir:.0f}°), Malatya"
+            f"🚨 DOĞRULANMIŞ ŞİDDETLİ FIRTINA: Hava koridoru açık ({sim_dir:.0f}°), Malatya"
             f" havzasında {sim_gust:.1f} km/s şiddetli hamle!"
         )
         banner_color = "error"
@@ -1110,7 +1109,8 @@ for t_val, p_val, g_val, c_val in zip(temp.values, precip.values, gust_mean.valu
         precip_types.append("💧 Sıvı Yağmur")
         precip_colors.append("#0288d1")
 
-df["precip_type"] = precip_types
+# İndeks uyumu garanti edilerek DataFrame'e atanıyor
+df["precip_type"] = pd.Series(precip_types, index=df.index)
 is_snow_phase = (df["precip_type"] == "❄️ Kar / Sulu Kar").astype(int)
 hail_potential = (df["precip_type"] == "⚡ Dolu / Süper Hücre").astype(int)
 
@@ -2259,24 +2259,24 @@ st.markdown(f"#### 📊 Erhaç Üssü Saatlik Sayısal Rüzgâr Hamlesi Kıyası
 fig_wind = go.Figure()
 fig_wind.add_trace(
     go.Scatter(
-        x=df["time"].dt.strftime("%H:00").tolist(),
-        y=ecmwf.values.tolist(),
+        x=[str(x) for x in df["time"].dt.strftime("%H:00")],
+        y=[float(val) for val in ecmwf],
         name="ECMWF (Avrupa)",
         line=dict(color="#1f77b4", width=2),
     )
 )
 fig_wind.add_trace(
     go.Scatter(
-        x=df["time"].dt.strftime("%H:00").tolist(),
-        y=gfs.values.tolist(),
+        x=[str(x) for x in df["time"].dt.strftime("%H:00")],
+        y=[float(val) for val in gfs],
         name="GFS (ABD)",
         line=dict(color="#d62728", width=2),
     )
 )
 fig_wind.add_trace(
     go.Scatter(
-        x=df["time"].dt.strftime("%H:00").tolist(),
-        y=icon.values.tolist(),
+        x=[str(x) for x in df["time"].dt.strftime("%H:00")],
+        y=[float(val) for val in icon],
         name="ICON (Almanya)",
         line=dict(color="#2ca02c", width=2),
     )
@@ -2300,27 +2300,27 @@ st.markdown("#### 🌧️ Saatlik Sıcaklık, Çiy Noktası ve Yağış Türü D
 fig_weather = go.Figure()
 fig_weather.add_trace(
     go.Scatter(
-        x=df["time"].dt.strftime("%H:00").tolist(),
-        y=temp.values.tolist(),
+        x=[str(x) for x in df["time"].dt.strftime("%H:00")],
+        y=[float(val) for val in temp],
         name="Sıcaklık (°C)",
         line=dict(color="#ff7f0e", width=2),
     )
 )
 fig_weather.add_trace(
     go.Scatter(
-        x=df["time"].dt.strftime("%H:00").tolist(),
-        y=dew_point_series.values.tolist(),
+        x=[str(x) for x in df["time"].dt.strftime("%H:00")],
+        y=[float(val) for val in dew_point_series],
         name="Çiy Noktası (°C)",
         line=dict(color="#2ca02c", width=1.5, dash="dot"),
     )
 )
 fig_weather.add_trace(
     go.Bar(
-        x=df["time"].dt.strftime("%H:00").tolist(),
-        y=precip.values.tolist(),
+        x=[str(x) for x in df["time"].dt.strftime("%H:00")],
+        y=[float(val) for val in precip],
         name="Yağış Miktarı (mm)",
         marker_color=precip_colors,
-        text=df["precip_type"],
+        text=df["precip_type"].tolist(),
         hovertemplate="<b>Saat:</b> %{x}<br><b>Yağış:</b> %{y:.1f} mm<br><b>Tür:</b> %{text}<extra></extra>",
         yaxis="y2",
     )
