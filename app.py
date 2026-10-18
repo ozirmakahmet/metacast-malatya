@@ -1767,28 +1767,6 @@ with c_map1:
         {"name": "Doğanşehir Boğazı", "lat": 38.0120, "lon": 37.8810, "type": "dogansehir"},
     ]
 
-    trace_beydaglari = go.Scattermap(
-        lat=[38.10, 38.15, 38.25, 38.20, 38.05, 37.95, 38.10],
-        lon=[38.00, 38.05, 38.20, 38.35, 38.25, 38.05, 38.00],
-        mode='lines',
-        fill='toself',
-        fillcolor='rgba(121, 85, 72, 0.45)',
-        line=dict(width=2, color='rgba(90, 60, 50, 0.9)'),
-        name="Beydağları (Orografik Engel)",
-        hoverinfo="name"
-    )
-
-    trace_baraj = go.Scattermap(
-        lat=[38.35, 38.45, 38.60, 38.65, 38.50, 38.30, 38.35],
-        lon=[38.65, 38.75, 38.80, 38.65, 38.55, 38.60, 38.65],
-        mode='lines',
-        fill='toself',
-        fillcolor='rgba(3, 169, 244, 0.45)',
-        line=dict(width=2, color='rgba(2, 119, 189, 0.9)'),
-        name="Karakaya Barajı (Nem Kaynağı)",
-        hoverinfo="name"
-    )
-
     lats, lons, hover_texts, pt_colors = [], [], [], []
     for st_info in stations:
         lats.append(st_info["lat"])
@@ -1820,16 +1798,17 @@ with c_map1:
 
         hover_texts.append(
             f"<b>{st_info['name']}</b> ({selected_time_str})<br>"
-            f"Risk: <b>%{loc_r:.0f}</b><br>"
+            f"Risk Durumu: <b>%{loc_r:.0f}</b><br>"
             f"Sıcaklık: {loc_t:.1f}°C<br>"
-            f"Hamle: {loc_g:.1f} km/s"
+            f"Beklenen Hamle: {loc_g:.1f} km/s"
         )
 
+    # İstasyon Risk Noktaları (Doğal topoğrafya üzerinde net işaretleme)
     trace_points = go.Scattermap(
         lat=lats,
         lon=lons,
         mode='markers+text',
-        marker=dict(size=14, color=pt_colors),
+        marker=dict(size=15, color=pt_colors),
         text=[s["name"] for s in stations],
         textposition="top right",
         textfont=dict(color="#ffffff", size=12, family="Arial Black"),
@@ -1838,27 +1817,13 @@ with c_map1:
         name="İstasyonlar"
     )
 
-    w_rad = np.radians(sel_wind_deg)
-    s_lat = center_lat + (0.24 * np.cos(w_rad))
-    s_lon = center_lon + (0.24 * np.sin(w_rad))
-
-    trace_arrow = go.Scattermap(
-        lat=[s_lat, center_lat],
-        lon=[s_lon, center_lon],
-        mode='lines+markers',
-        line=dict(width=5, color='#ff1744'),
-        marker=dict(size=[6, 14], color='#ff1744'),
-        name=f"Rüzgâr ({sel_wind_deg:.0f}°)",
-        hoverinfo="skip"
-    )
-
-    fig_map = go.Figure(data=[trace_beydaglari, trace_baraj, trace_points, trace_arrow])
+    fig_map = go.Figure(data=[trace_points])
 
     fig_map.update_layout(
         map=dict(
             style="white-bg",
-            center=dict(lat=38.33, lon=38.30),
-            zoom=8.0,
+            center=dict(lat=38.31, lon=38.25),
+            zoom=8.3,
             layers=[
                 dict(
                     sourcetype="raster",
@@ -1868,20 +1833,20 @@ with c_map1:
             ]
         ),
         showlegend=False,
-        height=400,
+        height=410,
         margin=dict(l=0, r=0, t=10, b=0)
     )
 
     st.plotly_chart(fig_map, use_container_width=True)
 
+    # Sadeleştirilmiş, amaca yönelik net lejant
     st.markdown(
         """
-        <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; font-size: 0.82rem; margin-top: 4px; color: #cfd8dc;">
-            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; border-radius: 50%; background-color: #4caf50;"></div> Güvenli (<%35)</div>
-            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; border-radius: 50%; background-color: #ff9800;"></div> Dikkat (%35-65)</div>
-            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; border-radius: 50%; background-color: #f44336;"></div> Kritik Afet (>%65)</div>
-            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; background-color: rgba(121,85,72,0.7);"></div> Beydağları</div>
-            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; background-color: rgba(3,169,244,0.7);"></div> Karakaya Barajı</div>
+        <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; font-size: 0.84rem; margin-top: 4px; color: #cfd8dc;">
+            <div style="display: flex; align-items: center; gap: 6px;"><div style="width: 11px; height: 11px; border-radius: 50%; background-color: #4caf50;"></div> Güvenli (<%35)</div>
+            <div style="display: flex; align-items: center; gap: 6px;"><div style="width: 11px; height: 11px; border-radius: 50%; background-color: #ff9800;"></div> Dikkat (%35-65)</div>
+            <div style="display: flex; align-items: center; gap: 6px;"><div style="width: 11px; height: 11px; border-radius: 50%; background-color: #f44336;"></div> Kritik Afet (>%65)</div>
+            <span style="color: #78909c;">| Topoğrafya: OpenTopoMap Kabartması</span>
         </div>
         """, unsafe_allow_html=True
     )
@@ -1900,9 +1865,35 @@ with c_map2:
         unsafe_allow_html=True
     )
 
+    # Kırmızı çizgi yerine modern Havacılık Rüzgâr Rozeti (Compass Card)
+    compass_directions = ["K (Kuzey)", "KD", "D (Doğu)", "GD", "G (Güney)", "GB (Lodos)", "B (Batı)", "KB"]
+    comp_idx = int((sel_wind_deg + 22.5) % 360 // 45)
+    cardinal_name = compass_directions[comp_idx]
+
+    st.markdown(
+        f"""
+        <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="font-size: 2.1rem; transform: rotate({sel_wind_deg:.0f}deg); display: inline-block; filter: drop-shadow(0 0 6px #ff9800); color: #ff9800;">
+                    ⬆
+                </div>
+                <div>
+                    <div style="font-size: 0.78rem; color: #90caf9; font-weight: 700; text-transform: uppercase;">Rüzgâr Akışı & Vektörü</div>
+                    <div style="font-size: 1.05rem; font-weight: 800; color: #ffffff;">{cardinal_name} • {sel_wind_deg:.0f}°</div>
+                </div>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-size: 0.78rem; color: #cfd8dc;">Ort. Hız / Hamle</div>
+                <div style="font-size: 1.05rem; font-weight: 800; color: #ffb74d;">{sel_speed:.1f} / {sel_gust:.1f} <span style="font-size: 0.8rem; font-weight: 400;">km/s</span></div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
     h_c1, h_c2 = st.columns(2)
     h_c1.metric("Beklenen Sıcaklık", f"{sel_temp:.1f}°C", delta=f"Çiy: {sel_dew:.1f}°C")
-    h_c2.metric("Rüzgâr Hamlesi", f"{sel_gust:.1f} km/s", delta=f"Yön: {sel_wind_deg:.0f}°")
+    h_c2.metric("Pik Hamle", f"{sel_gust:.1f} km/s", delta=f"{cardinal_name}")
 
     hazards_summary = []
     
@@ -1919,18 +1910,18 @@ with c_map2:
     angle_diff_sel = np.radians(sel_wind_deg - 215.0)
     blockage_sel = float(np.abs(np.cos(angle_diff_sel)))
     if blockage_sel >= 0.70 and sel_gust >= 40.0:
-        hazards_summary.append(f"⛰️ <strong>Beydağları Blokajı (De-Warning):</strong> Rüzgâr ({sel_wind_deg:.0f}°) Beydağları kalkanına çarpıyor. Şehir merkezinde fırtına etkisi sönümlenecek.")
+        hazards_summary.append(f"⛰️ <strong>Beydağları Blokajı (De-Warning):</strong> Rüzgâr ({sel_wind_deg:.0f}°) dağ silsilesine dik çarparak ovada sönümleniyor.")
     elif sel_gust >= 50.0:
-        hazards_summary.append(f"🚨 <strong>Şiddetli Fırtına:</strong> Açık rüzgâr koridoru! {sel_gust:.1f} km/s hamle ile çatı uçması ve vinç devrilme riski mevcut.")
+        hazards_summary.append(f"🚨 <strong>Şiddetli Fırtına:</strong> Açık hava koridoru! {sel_gust:.1f} km/s hamle ile çatı uçması riski mevcut.")
     elif sel_gust >= 30.0:
-        hazards_summary.append(f"💨 <strong>Orta Kuvvette Rüzgâr:</strong> {sel_gust:.1f} km/s hızında esiş bekleniyor, rutin önlemler yeterlidir.")
+        hazards_summary.append(f"💨 <strong>Orta Kuvvette Rüzgâr:</strong> {sel_gust:.1f} km/s hızında esiş bekleniyor.")
 
     is_sel_night = (current_sel_h >= 21) or (current_sel_h <= 7)
     if is_sel_night and sel_temp <= 2.0 and sel_cloud <= 35:
-        hazards_summary.append(f"❄️ <strong>Aktif Radyasyon Donu:</strong> Gökyüzü açık (%{sel_cloud:.0f} bulut). Çiy noktası {sel_dew:.1f}°C olduğundan kayısı bahçelerinde don savar pervaneler çalıştırılmalıdır.")
+        hazards_summary.append(f"❄️ <strong>Aktif Radyasyon Donu:</strong> Bulut kalkanı yok (%{sel_cloud:.0f}). Don savar pervaneler devreye alınmalıdır.")
 
     if (45 <= sel_wind_deg <= 135) and sel_speed >= 8.0:
-        hazards_summary.append("🌊 <strong>Karakaya Göl Nem Taşınımı:</strong> Doğu sektörlü rüzgâr baraj gölü üzerinden estiği için havzaya nem taşımaktadır.")
+        hazards_summary.append("🌊 <strong>Karakaya Göl Nem Koridoru:</strong> Doğu sektörlü akış havzaya baraj gölü üzerinden nem taşımaktadır.")
 
     hazards_html = "<br>• ".join(hazards_summary)
 
