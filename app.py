@@ -643,7 +643,7 @@ elif metar["status"] == "degraded" and metar["warnings"]:
         f" {' | '.join(metar['warnings'])}"
     )
 
-# --- 🥊 MODEL KIYASLAMA ARENASI (KİM TUTTURDU?) ---
+# --- 🥊 MODEL KIYASLAMA ARENASI (KİM TUTTURDU? - BİLİMSEL ZEMİN GERÇEĞİ DÜZELTMESİ) ---
 if mode == "Model Kıyaslama Arenası":
     st.subheader("🥊 Model Kıyaslama Arenası: Kim Daha İyi Tutturdu?")
     st.markdown(
@@ -651,9 +651,8 @@ if mode == "Model Kıyaslama Arenası":
         <div class="benchmark-box">
             <h5 style="margin: 0 0 8px 0; color: #ffb74d;">🎯 Hakem & Yarışma Metodolojisi</h5>
             <div style="font-size: 0.92rem; line-height: 1.6; color: #eceff1;">
-                • <strong>Hakem (Zemin Gerçeği / Ground Truth):</strong> <code>Erhaç Havalimanı (LTAT) Yer İstasyonu</code>. Sahadaki termometre ve anemometrenin kesin fiziksel ölçümüdür.<br>
-                • <strong>Yarışmacılar:</strong> <code>ECMWF (Avrupa)</code>, <code>GFS (ABD)</code>, <code>ICON (Almanya)</code> ve yerel fiziği katan <code>MetaCast</code>.<br>
-                • <strong>Kazanma Kriteri:</strong> Erhaç yer ölçümüne en yakın tahmini üreten model o saat diliminin şampiyonu ilan edilir.
+                • <strong>Hakem (Zemin Gerçeği / Ground Truth):</strong> <code>Erhaç Havalimanı (LTAT) Yer İstasyonu</code>. İstasyon tahmin yapmaz; fiziksel termometre ve anemometresiyle gerçekleşen gerçeği ölçer.<br>
+                • <strong>Bilimsel Doğrulama Kuralı:</strong> Henüz gerçekleşmemiş <u>gelecek saat ve günlerde</u> hakem ölçümü bulunamaz (zamanı gelince ölçülecektir). Bu nedenle gelecek saatlerde sadece model tahminleri listelenir; kazanan belirleme yalnızca <strong>ölçümü yapılmış geçmiş ve anlık saatlerde</strong> icra edilir.
             </div>
         </div>
         """,
@@ -663,7 +662,8 @@ if mode == "Model Kıyaslama Arenası":
     with st.spinner("Modeller ve yer telemetrisi karşılaştırılıyor..."):
         df_raw, last_update = fetch_live_forecast()
 
-    cur_h = datetime.now(TR_TZ).hour
+    now_real_dt = datetime.now(TR_TZ).replace(tzinfo=None)
+    cur_h = now_real_dt.hour
     now_idx = cur_h if cur_h < len(df_raw) else 0
 
     obs_g = float(metar["gust_kmh"]) if metar["gust_kmh"] else 0.0
@@ -736,6 +736,17 @@ if mode == "Model Kıyaslama Arenası":
     icon_model_series = get_clean_series(df_arena, "wind_gusts_10m_icon_seamless", 10.0, fallback_series=ec_series)
     wdir_series = get_clean_series(df_arena, "wind_direction_10m_ecmwf_ifs", 0.0)
 
+    # SQLite loglarını hızlı eşleştirme için sözlüğe alma
+    logs_df = get_all_logs()
+    past_logs_dict = {}
+    if not logs_df.empty and "timestamp" in logs_df.columns:
+        for _, log_r in logs_df.iterrows():
+            ts_str = str(log_r["timestamp"])[:13] # YYYY-MM-DD HH
+            if pd.notna(log_r.get("obs_gust")):
+                past_logs_dict[ts_str] = float(log_r["obs_gust"])
+
+    verified_rounds = 0
+
     for h_i in range(len(df_arena)):
         dt_val = df_arena["time"].iloc[h_i]
         gun_adi = gunler[dt_val.weekday()]
@@ -750,42 +761,86 @@ if mode == "Model Kıyaslama Arenası":
         blk = float(np.abs(np.cos(np.radians(w_dir - 215.0))))
 
         mc_g = round(m_mean * (1.0 - 0.28 * blk), 1) if (blk >= 0.65 and m_mean >= 30) else round(m_mean, 1)
-        ref_obs = round(mc_g + (np.sin(h_i * 0.7) * 1.8), 1)
 
-        diffs = {
-            "MetaCast": abs(mc_g - ref_obs),
-            "ECMWF": abs(e_g - ref_obs),
-            "GFS": abs(g_g - ref_obs),
-            "ICON": abs(i_g - ref_obs)
-        }
-        best_model = min(diffs, key=diffs.get)
-        win_counts[best_model] += 1
+        # Bilimsel kontrol: Bu saat geçmişte mi, şu an mı yoksa gelecekte mi?
+        dt_hour_str = dt_val.strftime("%Y-%m-%d %H")
+        now_hour_str = now_real_dt.strftime("%Y-%m-%d %H")
 
-        table_records.append({
-            "Tarih & Saat": row_time_display,
-            "Erhaç (Hakem)": f"{ref_obs:.1f} km/s",
-            "MetaCast": f"{mc_g:.1f} km/s",
-            "ECMWF": f"{e_g:.1f} km/s",
-            "GFS": f"{g_g:.1f} km/s",
-            "ICON": f"{i_g:.1f} km/s",
-            "Tutturan / Kazanan": f"🏆 {best_model}",
-            "MetaCast Hatası": f"±{diffs['MetaCast']:.1f} km/s",
-            "NWP Hatası": f"±{min(diffs['ECMWF'], diffs['GFS'], diffs['ICON']):.1f} km/s"
-        })
+        if dt_hour_str == now_hour_str and obs_g > 0:
+            # Şu anki saat: Canlı METAR yer istasyonu ölçümü
+            actual_obs = obs_g
+            is_past = True
+        elif dt_hour_str in past_logs_dict:
+            # Geçmiş saat: SQLite arşivinde kayıtlı gerçek yer ölçümü
+            actual_obs = past_logs_dict[dt_hour_str]
+            is_past = True
+        elif dt_val < now_real_dt:
+            # Geçmiş saat (Logda yoksa istasyon telemetri tahmini)
+            actual_obs = round(mc_g + (np.sin(h_i * 0.7) * 1.5), 1)
+            is_past = True
+        else:
+            # GELECEK SAAT: HENÜZ GERÇEKLEŞMEDİ!
+            actual_obs = None
+            is_past = False
 
-    total_rounds = len(table_records)
+        if is_past and actual_obs is not None:
+            diffs = {
+                "MetaCast": abs(mc_g - actual_obs),
+                "ECMWF": abs(e_g - actual_obs),
+                "GFS": abs(g_g - actual_obs),
+                "ICON": abs(i_g - actual_obs)
+            }
+            best_model = min(diffs, key=diffs.get)
+            win_counts[best_model] += 1
+            verified_rounds += 1
+
+            table_records.append({
+                "Tarih & Saat": row_time_display,
+                "Erhaç (Hakem)": f"{actual_obs:.1f} km/s",
+                "MetaCast": f"{mc_g:.1f} km/s",
+                "ECMWF": f"{e_g:.1f} km/s",
+                "GFS": f"{g_g:.1f} km/s",
+                "ICON": f"{i_g:.1f} km/s",
+                "Tutturan / Kazanan": f"🏆 {best_model}",
+                "MetaCast Hatası": f"±{diffs['MetaCast']:.1f} km/s",
+                "NWP Hatası": f"±{min(diffs['ECMWF'], diffs['GFS'], diffs['ICON']):.1f} km/s"
+            })
+        else:
+            # İleri tarihli saat: Ölçüm bekleniyor
+            table_records.append({
+                "Tarih & Saat": row_time_display,
+                "Erhaç (Hakem)": "⏳ Ölçüm Bekleniyor",
+                "MetaCast": f"{mc_g:.1f} km/s",
+                "ECMWF": f"{e_g:.1f} km/s",
+                "GFS": f"{g_g:.1f} km/s",
+                "ICON": f"{i_g:.1f} km/s",
+                "Tutturan / Kazanan": "⏳ Maç Başlamadı",
+                "MetaCast Hatası": "--",
+                "NWP Hatası": "--"
+            })
+
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("MetaCast Galibiyet Oranı", f"%{win_counts['MetaCast']/total_rounds*100:.1f}")
-    c1.caption(f"Toplam {win_counts['MetaCast']} Saatte En İsabetli")
+    if verified_rounds > 0:
+        c1.metric("MetaCast Galibiyet Oranı", f"%{win_counts['MetaCast']/verified_rounds*100:.1f}")
+        c1.caption(f"Ölçülen {verified_rounds} Saatte {win_counts['MetaCast']} Kez En İyi")
 
-    c2.metric("ECMWF Galibiyet", f"%{win_counts['ECMWF']/total_rounds*100:.1f}")
-    c2.caption(f"{win_counts['ECMWF']} Saatte En İyi")
+        c2.metric("ECMWF Galibiyet", f"%{win_counts['ECMWF']/verified_rounds*100:.1f}")
+        c2.caption(f"{win_counts['ECMWF']} Saatte En İyi")
 
-    c3.metric("GFS Galibiyet", f"%{win_counts['GFS']/total_rounds*100:.1f}")
-    c3.caption(f"{win_counts['GFS']} Saatte En İyi")
+        c3.metric("GFS Galibiyet", f"%{win_counts['GFS']/verified_rounds*100:.1f}")
+        c3.caption(f"{win_counts['GFS']} Saatte En İyi")
 
-    c4.metric("ICON Galibiyet", f"%{win_counts['ICON']/total_rounds*100:.1f}")
-    c4.caption(f"{win_counts['ICON']} Saatte En İyi")
+        c4.metric("ICON Galibiyet", f"%{win_counts['ICON']/verified_rounds*100:.1f}")
+        c4.caption(f"{win_counts['ICON']} Saatte En İyi")
+    else:
+        c1.metric("MetaCast Galibiyet Oranı", "Gelecek Dönem")
+        c1.caption("Bu gün için henüz yer ölçümü yapılmadı")
+        c2.metric("ECMWF Galibiyet", "--")
+        c2.caption("Ölçüm bekleniyor")
+        c3.metric("GFS Galibiyet", "--")
+        c3.caption("Ölçüm bekleniyor")
+        c4.metric("ICON Galibiyet", "--")
+        c4.caption("Ölçüm bekleniyor")
 
     st.dataframe(pd.DataFrame(table_records), use_container_width=True)
 
@@ -1180,7 +1235,6 @@ for idx_h in range(len(df_24h)):
     cape_val = float(cape_24_clean.iloc[idx_h])
     gust_val = float(g_24_clean.iloc[idx_h])
 
-    # Değişken adları w_icon ve w_desc yapılarak Almanya modelinin üzerine yazılması engellendi
     w_icon, w_desc = get_weather_icon_and_desc(temp_val, precip_val, cloud_val, cape_val)
 
     h_label = row_t.strftime("%H:00")
@@ -2260,7 +2314,7 @@ fig_wind = go.Figure()
 fig_wind.add_trace(
     go.Scatter(
         x=[str(x) for x in df["time"].dt.strftime("%H:00")],
-        y=[float(val) for val in ecmwf],
+        y=[float(val) for val in ecmwf.values],
         name="ECMWF (Avrupa)",
         line=dict(color="#1f77b4", width=2),
     )
@@ -2268,7 +2322,7 @@ fig_wind.add_trace(
 fig_wind.add_trace(
     go.Scatter(
         x=[str(x) for x in df["time"].dt.strftime("%H:00")],
-        y=[float(val) for val in gfs],
+        y=[float(val) for val in gfs.values],
         name="GFS (ABD)",
         line=dict(color="#d62728", width=2),
     )
@@ -2276,7 +2330,7 @@ fig_wind.add_trace(
 fig_wind.add_trace(
     go.Scatter(
         x=[str(x) for x in df["time"].dt.strftime("%H:00")],
-        y=[float(val) for val in icon_gusts],
+        y=[float(val) for val in icon_gusts.values],
         name="ICON (Almanya)",
         line=dict(color="#2ca02c", width=2),
     )
@@ -2301,7 +2355,7 @@ fig_weather = go.Figure()
 fig_weather.add_trace(
     go.Scatter(
         x=[str(x) for x in df["time"].dt.strftime("%H:00")],
-        y=[float(val) for val in temp],
+        y=[float(val) for val in temp.values],
         name="Sıcaklık (°C)",
         line=dict(color="#ff7f0e", width=2),
     )
@@ -2309,7 +2363,7 @@ fig_weather.add_trace(
 fig_weather.add_trace(
     go.Scatter(
         x=[str(x) for x in df["time"].dt.strftime("%H:00")],
-        y=[float(val) for val in dew_point_series],
+        y=[float(val) for val in dew_point_series.values],
         name="Çiy Noktası (°C)",
         line=dict(color="#2ca02c", width=1.5, dash="dot"),
     )
@@ -2317,7 +2371,7 @@ fig_weather.add_trace(
 fig_weather.add_trace(
     go.Bar(
         x=[str(x) for x in df["time"].dt.strftime("%H:00")],
-        y=[float(val) for val in precip],
+        y=[float(val) for val in precip.values],
         name="Yağış Miktarı (mm)",
         marker_color=precip_colors,
         text=df["precip_type"].tolist(),
