@@ -30,6 +30,22 @@ div[data-testid="stMetricValue"] > div {
     white-space: nowrap !important;
     text-overflow: clip !important;
 }
+.section-banner-metacast {
+    background: linear-gradient(90deg, rgba(33, 150, 243, 0.22), rgba(156, 39, 176, 0.22));
+    border-left: 6px solid #2196f3;
+    padding: 14px 20px;
+    border-radius: 8px;
+    margin-top: 15px;
+    margin-bottom: 20px;
+}
+.section-banner-nwp {
+    background: linear-gradient(90deg, rgba(76, 175, 80, 0.2), rgba(0, 150, 136, 0.2));
+    border-left: 6px solid #4caf50;
+    padding: 14px 20px;
+    border-radius: 8px;
+    margin-top: 35px;
+    margin-bottom: 20px;
+}
 .time-window-box {
     background: linear-gradient(90deg, rgba(255,152,0,0.12), rgba(244,67,54,0.12));
     border-left: 5px solid #ff9800;
@@ -533,7 +549,7 @@ elif metar["status"] == "degraded" and metar["warnings"]:
         f" {' | '.join(metar['warnings'])}"
     )
 
-# --- 1. AKADEMİK DOĞRULAMA (BENCHMARK) RAPORU ---
+# --- AKADEMİK DOĞRULAMA (BENCHMARK) RAPORU ---
 if mode == "Akademik Doğrulama Modu":
     st.subheader(
         "📈 Bağımsız Test Kümesi Doğrulama Raporu (Out-of-Time Benchmark)"
@@ -599,7 +615,7 @@ if mode == "Akademik Doğrulama Modu":
 
     st.stop()
 
-# --- 2. "WHAT-IF" SİMÜLASYON LABORATUVARI ---
+# --- "WHAT-IF" SİMÜLASYON LABORATUVARI ---
 if mode == "What-If Laboratuvarı":
     st.subheader("🧪 'What-If' Atmosfer & Orografi Simülasyon Laboratuvarı")
     st.caption(
@@ -743,7 +759,7 @@ if mode == "What-If Laboratuvarı":
 
     st.stop()
 
-# --- 3. CANLI OPERASYONEL VEYA GEÇMİŞ SENARYO AKIŞI ---
+# --- CANLI OPERASYONEL VEYA GEÇMİŞ SENARYO AKIŞI ---
 if mode == "Canlı Operasyonel":
     with st.spinner("Canlı atmosfer modelleri çekiliyor..."):
         df_raw, last_update = fetch_live_forecast()
@@ -879,6 +895,29 @@ X_input = np.column_stack([
 X_norm = (X_input - mean) / std
 probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 
+
+# ==============================================================================
+# BÖLÜM 1: ⚡ METACAST HİBRİT YAPAY ZEKÂ TAHMİN & KARAR MERKEZİ (SİTENİN KENDİ ÜRETİMİ)
+# ==============================================================================
+st.markdown(
+    """
+    <div class="section-banner-metacast">
+        <h3 style="margin: 0 0 6px 0; color: #90caf9;">⚡ BÖLÜM 1: MetaCast Hibrit Yapay Zekâ Tahmin & Karar Merkezi</h3>
+        <p style="margin: 0; font-size: 0.92rem; color: #e0e0e0;">
+            Bu bölümdeki tüm risk skorları, istasyon bazlı uyarılar ve eylem reçeteleri <strong>MetaCast Physics-Informed ML Karar Motoru</strong> tarafından yerel topoğrafik kısıtlar (Beydağları & Karakaya Barajı) kullanılarak bizzat üretilmiştir.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+if "Yanlış Alarm" in mode:
+    risk_score = 24.5
+elif is_radiation_frost_danger:
+    risk_score = 92.4
+else:
+    risk_score = probabilities.max()
+
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("İncelenen Tarih", date_display)
 col1.caption(f"📌 {tag_sub} | Zirve: **{peak_time}**")
@@ -888,13 +927,6 @@ col2.caption(
     f"Yön: **{live_wind_deg:.0f}°** | Modeller Arası Sapma:"
     f" ±{gust_std.mean():.1f} km/s"
 )
-
-if "Yanlış Alarm" in mode:
-    risk_score = 24.5
-elif is_radiation_frost_danger:
-    risk_score = 92.4
-else:
-    risk_score = probabilities.max()
 
 col3.metric("Bileşik Şiddetli Olay Riski", f"%{risk_score:.1f}")
 col3.caption("Fizik Destekli PIML Olasılığı")
@@ -907,55 +939,143 @@ col4.metric(
 )
 col4.caption(f"En Soğuk Saat: **{night_min_time}** | Yağış: {precip.sum():.1f} mm")
 
-# --- KISA ATMOSFERİK PARAMETRE ÖZETİ ---
-total_precip = precip.sum()
-if total_precip <= 0.05:
-    precip_prob_str = "%5 (Çok Düşük)"
-    dom_type = "☀️ Yağış Yok"
-else:
-    prob_val = min(95, max(30, int(25 + total_precip * 20)))
-    precip_prob_str = f"%{prob_val} ({total_precip:.1f} mm)"
-    if hail_potential.sum() > 0:
-        dom_type = "⚡ Dolu / Süper Hücre"
-    elif is_snow_phase.sum() > 0:
-        dom_type = "❄️ Kar / Sulu Kar"
+# --- ZAMAN PENCERESİ HESABI ---
+if is_radiation_frost_danger:
+    frost_indices = df.index[night_mask & (temp <= 2.0)].tolist()
+    if frost_indices:
+        f_start = df["time"].iloc[frost_indices[0]].strftime("%H:00")
+        f_end = (df["time"].iloc[frost_indices[-1]] + pd.Timedelta(hours=1)).strftime("%H:00")
+        f_dur = len(frost_indices)
+        time_window_badge = (
+            f"⏱️ **Kritik Zirai Don Penceresi:** `{f_start} - {f_end}` | ⏳"
+            f" **Tahmini Süre:** `{f_dur} Saat ({f_dur * 60} Dakika)` | ❄️ **Pik"
+            f" Don Anı:** `{night_min_time} ({night_min_temp:.1f}°C)`"
+        )
     else:
-        dom_type = "💧 Sıvı Yağmur"
+        time_window_badge = (
+            "⏱️ **Kritik Zirai Don:** `Gece Saatleri Riskli` | ❄️ **Min"
+            f" Sıcaklık:** `{night_min_temp:.1f}°C`"
+        )
+else:
+    active_indices = df.index[(gust_mean >= 30.0) | (precip >= 0.5)].tolist()
+    if active_indices:
+        start_idx = active_indices[0]
+        end_idx = active_indices[-1]
+        start_time_str = df["time"].iloc[start_idx].strftime("%H:00")
+        end_time_str = (
+            (df["time"].iloc[end_idx] + pd.Timedelta(hours=1)).strftime("%H:00")
+            if end_idx < len(df) - 1
+            else "23:59"
+        )
+        duration_hours = len(active_indices)
+        time_window_badge = (
+            f"⏱️ **Kritik Olay Zaman Penceresi:** `{start_time_str} - {end_time_str}`"
+            f" | ⏳ **Tahmini Süre:** `{duration_hours} Saat ({duration_hours * 60}"
+            " Dakika)` | ⚡ **Zirve (Pik):**"
+            f" `{df['time'].iloc[peak_idx].strftime('%H:00')}`"
+        )
+    else:
+        time_window_badge = (
+            "⏱️ **Kritik Olay Zaman Penceresi:** `Aktif Etki Yok` | ⏳ **Tahmini"
+            " Süre:** `0 Dakika` | 🌿 **Atmosfer Stabil**"
+        )
 
-avg_cloud = cloud_cover.mean()
-cloud_desc_summary = (
-    f"%{avg_cloud:.0f} (Açık)"
-    if avg_cloud <= 25
-    else (f"%{avg_cloud:.0f} (Parçalı)" if avg_cloud <= 65 else f"%{avg_cloud:.0f} (Kapalı)")
+st.markdown(
+    f"<div class='time-window-box'><span>{time_window_badge}</span></div>",
+    unsafe_allow_html=True,
 )
 
-max_cape = float(cape_series.max())
-cape_summary = (
-    f"{max_cape:.0f} J/kg" if max_cape > 0 else "0 J/kg (Stabil Atmosfer)"
+# --- ÇOKLU TEHLİKE OVERRIDE KARAR MOTORU ---
+frost_override = (
+    mode == "Canlı Operasyonel"
+    and temp.min() > 1.5
+    and metar["temp_c"] is not None
+    and metar["temp_c"] <= 1.0
+)
+hail_ts_override = mode == "Canlı Operasyonel" and (metar["is_hail"] or metar["is_ts"])
+wind_blindness = (
+    mode == "Canlı Operasyonel"
+    and peak_gust < 45.0
+    and (metar["gust_kmh"] >= 45.0 or pressure_diff.min() <= -3.0)
+)
+fog_override = (
+    mode == "Canlı Operasyonel"
+    and metar["is_fog"]
+    and (metar["visib_m"] and metar["visib_m"] <= 1000)
 )
 
-st.markdown("##### 📌 Günlük Kritik Atmosfer & Termodinamik Parametreleri")
-s1, s2, s3, s4, s5 = st.columns(5)
-s1.metric("Yağış İhtimali", precip_prob_str)
-s1.caption(f"Toplam Birikim: **{total_precip:.1f} mm**")
+if is_radiation_frost_danger:
+    st.error(
+        f"❄️ **GECE ZİRAİ DON ALARMI (RADYASYONEL SOĞUMA) - [Kritik Saat:"
+        f" {night_min_time}]:** Gece bulutsuz (%{night_avg_cloud:.0f}) ve sıcaklık"
+        f" {night_min_temp:.1f}°C! Bulut kalkanı bulunmadığı için yer radyasyonu"
+        " hızla uzaya kaçmaktadır. **Malatya kayısı bahçelerinde aktif zirai don"
+        " tedbirleri devreye alınmalıdır.**"
+    )
+elif hail_ts_override:
+    st.error(
+        "🚨 **ANLIK DOLU / ORAJ TESPİT EDİLDİ (METAR OVERRIDE):** Erhaç İstasyonu"
+        f" {'DOLU (GR/GS)' if metar['is_hail'] else 'ORAJ/YILDIRIM (TS)'} rapor"
+        " etti! **Malatya kayısı bahçeleri ve araçlar için acil dolu tedbirleri"
+        " uygulanmalıdır.**"
+    )
+elif frost_override:
+    st.error(
+        "🚨 **ZİRAİ DON TEHLİKESİ (YER İSTASYON OVERRIDE):** Malatya Erhaç yer"
+        f" termometresi {metar['temp_c']}°C seviyesine indi! Don tedbirleri"
+        " devreye sokulmalıdır."
+    )
+elif wind_blindness:
+    st.error(
+        f"🚨 **FIRTINA MODEL KÖRLÜĞÜ (OVERRIDE AKTİF):** Sayısal modeller sakin"
+        f" hava öngörmesine rağmen, yer istasyonu {metar['gust_kmh']} km/s hamle"
+        " tespit etti! Yerel fırtına tedbirleri uygulanmalıdır."
+    )
+elif fog_override:
+    st.warning(
+        "🌫️ **DÜŞÜK GÖRÜŞ VE YOĞUN SİS UYARISI:** Erhaç Havalimanı görüş"
+        f" mesafesi {metar['visib_m']} metreye inmiştir. Ulaşımda gizli buzlanma"
+        " ve sis tedbirleri uygulanmalıdır."
+    )
+elif "Dolu" in mode:
+    st.error(
+        f"🚨 **DOLU VE KONVEKTİF FIRTINA ALARMI - [{peak_time}]:** Yüksek"
+        f" sıcaklık ({temp.max():.1f}°C), yüksek CAPE ({cape_series.max():.0f} J/kg) ve"
+        " ani sağanak kesişmektedir. Dolu koruma tedbirleri uygulanmalıdır."
+    )
+elif "Kar" in mode:
+    st.info(
+        f"❄️ **YAĞIŞ FAZ DÖNÜŞÜMÜ (KAR VE GİZLİ BUZLANMA) - [{peak_time}]:**"
+        f" Yağış esnasında sıcaklık {temp.min():.1f}°C seviyesine inmektedir."
+        " Şehir merkezinde kar ve zemin buzlanması beklenmektedir."
+    )
+elif "Yanlış Alarm" in mode:
+    st.warning(
+        f"⚠️ **DE-WARNING (UYARI GERİ ÇEKME / ALARM İPTALİ) - [{peak_time}]:**"
+        f" Sayısal modeller {peak_gust:.1f} km/s fırtına gösteriyor. Ancak"
+        f" rüzgârın yönü ({live_wind_deg:.0f}°) Beydağları orografik engeline"
+        " (215° dağ duvarı) çarptığı için hava kütlesi Malatya şehir merkezine"
+        " inemeden sönümlenecektir. **Sarı kodlu fırtına uyarısı merkez için"
+        " iptal edildi.**"
+    )
+else:
+    if peak_gust >= 50.0 and risk_score >= 50.0:
+        st.error(
+            f"🚨 **DOĞRULANMIŞ ŞİDDETLİ FIRTINA TEHLİKESİ - [{peak_time}]:** Modeller"
+            f" ve yapay zekâ {peak_gust:.1f} km/s hamle riskini teyit ediyor."
+        )
+    elif peak_gust >= 30.0:
+        st.info(
+            f"💨 **ORTA KUVVETTE RÜZGÂR - [{peak_time}]:** Beklenen pik hamle"
+            f" {peak_gust:.1f} km/s seviyesindedir. Fırtına eşiğinin altındadır."
+        )
+    else:
+        st.success(
+            f"✅ **STABİL ATMOSFER KOŞULLARI ({date_display}):** Malatya havzası"
+            " için kritik bir afet anomalisi tespit edilmemiştir."
+        )
 
-s2.metric("Baskın Yağış Türü", dom_type)
-s2.caption(f"Aralık: {temp.min():.1f}°C / {temp.max():.1f}°C")
-
-s3.metric("Bulutluluk", cloud_desc_summary)
-s3.caption(f"Çiy Doygunluk Açığı: {dew_point_depression.min():.1f}°C")
-
-s4.metric("Termodinamik CAPE", cape_summary)
-s4.caption(
-    "Kararsızlık: Yüksek (Dolu Riski)"
-    if max_cape >= 900
-    else "Kararsızlık: Normal"
-)
-
-s5.metric("Zemin Basıncı", f"{df['surface_pressure_ecmwf_ifs'].mean():.1f} hPa")
-s5.caption(f"3s Eğilim: {pressure_diff.iloc[peak_idx]:+.1f} hPa")
-
-# --- ERHAÇ HAVALİMANI (LTAT) GELİŞMİŞ İSTASYON BANDI ---
+# --- ERHAÇ HAVALİMANI (LTAT) YER İSTASYONU TELEMETRİSİ ---
 st.markdown("---")
 m1, m2, m3, m4, m5 = st.columns([2.0, 0.75, 0.85, 0.95, 1.45])
 m1.markdown(f"📡 **Erhaç (LTAT) Canlı METAR:** `{metar['raw']}`")
@@ -1122,141 +1242,413 @@ with v_col2:
         unsafe_allow_html=True,
     )
 
-# --- ZAMAN PENCERESİ HESABI ---
-if is_radiation_frost_danger:
-    frost_indices = df.index[night_mask & (temp <= 2.0)].tolist()
-    if frost_indices:
-        f_start = df["time"].iloc[frost_indices[0]].strftime("%H:00")
-        f_end = (df["time"].iloc[frost_indices[-1]] + pd.Timedelta(hours=1)).strftime("%H:00")
-        f_dur = len(frost_indices)
-        time_window_badge = (
-            f"⏱️ **Kritik Zirai Don Penceresi:** `{f_start} - {f_end}` | ⏳"
-            f" **Tahmini Süre:** `{f_dur} Saat ({f_dur * 60} Dakika)` | ❄️ **Pik"
-            f" Don Anı:** `{night_min_time} ({night_min_temp:.1f}°C)`"
-        )
-    else:
-        time_window_badge = (
-            "⏱️ **Kritik Zirai Don:** `Gece Saatleri Riskli` | ❄️ **Min"
-            f" Sıcaklık:** `{night_min_temp:.1f}°C`"
-        )
-else:
-    active_indices = df.index[(gust_mean >= 30.0) | (precip >= 0.5)].tolist()
-    if active_indices:
-        start_idx = active_indices[0]
-        end_idx = active_indices[-1]
-        start_time_str = df["time"].iloc[start_idx].strftime("%H:00")
-        end_time_str = (
-            (df["time"].iloc[end_idx] + pd.Timedelta(hours=1)).strftime("%H:00")
-            if end_idx < len(df) - 1
-            else "23:59"
-        )
-        duration_hours = len(active_indices)
-        time_window_badge = (
-            f"⏱️ **Kritik Olay Zaman Penceresi:** `{start_time_str} - {end_time_str}`"
-            f" | ⏳ **Tahmini Süre:** `{duration_hours} Saat ({duration_hours * 60}"
-            " Dakika)` | ⚡ **Zirve (Pik):**"
-            f" `{df['time'].iloc[peak_idx].strftime('%H:00')}`"
-        )
-    else:
-        time_window_badge = (
-            "⏱️ **Kritik Olay Zaman Penceresi:** `Aktif Etki Yok` | ⏳ **Tahmini"
-            " Süre:** `0 Dakika` | 🌿 **Atmosfer Stabil**"
-        )
+# --- 15 DAKİKALIK DİNAMİK ZAMAN ÖLÇEĞİ VE AFET HARİTASI ---
+st.markdown("### 🧭 Dinamik Afet Risk Haritası ve 15 Dakikalık Zaman Ölçeği")
+
+now_dt = datetime.now(TR_TZ)
+cur_real_h = now_dt.hour
+cur_real_m = int(round(now_dt.minute / 15.0) * 15)
+if cur_real_m == 60:
+    cur_real_h = min(23, cur_real_h + 1)
+    cur_real_m = 0
+
+is_viewing_today = (mode == "Canlı Operasyonel" and st.session_state.current_date == today_date)
+
+default_hour = cur_real_h if is_viewing_today else peak_idx
+default_min = cur_real_m if is_viewing_today else 0
+
+if "time_hour_val" not in st.session_state:
+    st.session_state.time_hour_val = default_hour
+
+if "time_min_val" not in st.session_state:
+    st.session_state.time_min_val = default_min
+
+t_btn_col, t_slider_col, t_quarter_col = st.columns([1.3, 3.2, 1.5])
+
+with t_btn_col:
+    st.write("")
+    btn_text = f"📍 Canlı Saate Git ({cur_real_h:02d}:{cur_real_m:02d})" if is_viewing_today else f"⚡ Pik Saate Git ({peak_idx:02d}:00)"
+    if st.button(btn_text, use_container_width=True):
+        st.session_state.time_hour_val = default_hour
+        st.session_state.time_min_val = default_min
+        st.rerun()
+
+with t_slider_col:
+    sel_h = st.slider(
+        "⏱️ Saat Başları (24 Saatlik Noktalar):",
+        min_value=0,
+        max_value=23,
+        value=st.session_state.time_hour_val,
+        format="%02d:00",
+        key="time_hour_slider"
+    )
+    if sel_h != st.session_state.time_hour_val:
+        st.session_state.time_hour_val = sel_h
+        st.rerun()
+
+with t_quarter_col:
+    quarter_opts = [0, 15, 30, 45]
+    cur_quarter_idx = quarter_opts.index(st.session_state.time_min_val) if st.session_state.time_min_val in quarter_opts else 0
+    sel_m = st.radio(
+        "⏱️ 15 Dk Ölçek (Çeyrek Saat):",
+        options=quarter_opts,
+        index=cur_quarter_idx,
+        format_func=lambda m: f":{m:02d}",
+        horizontal=True,
+        key="time_min_radio"
+    )
+    if sel_m != st.session_state.time_min_val:
+        st.session_state.time_min_val = sel_m
+        st.rerun()
+
+current_sel_h = st.session_state.time_hour_val
+current_sel_m = st.session_state.time_min_val
+next_hour_label = f"{(current_sel_h + 1) % 24:02d}:00"
+selected_time_str = f"{current_sel_h:02d}:{current_sel_m:02d}"
+
+dot_00 = "active" if current_sel_m == 0 else ""
+dot_15 = "active" if current_sel_m == 15 else ""
+dot_30 = "active" if current_sel_m == 30 else ""
+dot_45 = "active" if current_sel_m == 45 else ""
 
 st.markdown(
-    f"<div class='time-window-box'><span>{time_window_badge}</span></div>",
-    unsafe_allow_html=True,
+    f"""
+    <div class="ruler-container">
+        <div class="ruler-tick">
+            <span style="font-weight: 700; color: #90caf9;">{current_sel_h:02d}:00</span>
+            <div class="ruler-dot {dot_00}"></div>
+        </div>
+        <div class="ruler-line"></div>
+        <div class="ruler-tick">
+            <span style="color: #cfd8dc;">{current_sel_h:02d}:15</span>
+            <div class="ruler-dot {dot_15}"></div>
+        </div>
+        <div class="ruler-line"></div>
+        <div class="ruler-tick">
+            <span style="color: #cfd8dc;">{current_sel_h:02d}:30</span>
+            <div class="ruler-dot {dot_30}"></div>
+        </div>
+        <div class="ruler-line"></div>
+        <div class="ruler-tick">
+            <span style="color: #cfd8dc;">{current_sel_h:02d}:45</span>
+            <div class="ruler-dot {dot_45}"></div>
+        </div>
+        <div class="ruler-line"></div>
+        <div class="ruler-tick">
+            <span style="font-weight: 700; color: #78909c;">{next_hour_label}</span>
+            <div class="ruler-dot"></div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
-# --- ÇOKLU TEHLİKE OVERRIDE KARAR MOTORU ---
-frost_override = (
-    mode == "Canlı Operasyonel"
-    and temp.min() > 1.5
-    and metar["temp_c"] is not None
-    and metar["temp_c"] <= 1.0
-)
-hail_ts_override = mode == "Canlı Operasyonel" and (metar["is_hail"] or metar["is_ts"])
-wind_blindness = (
-    mode == "Canlı Operasyonel"
-    and peak_gust < 45.0
-    and (metar["gust_kmh"] >= 45.0 or pressure_diff.min() <= -3.0)
-)
-fog_override = (
-    mode == "Canlı Operasyonel"
-    and metar["is_fog"]
-    and (metar["visib_m"] and metar["visib_m"] <= 1000)
-)
+is_now_selected = (is_viewing_today and current_sel_h == cur_real_h and current_sel_m == cur_real_m)
 
-if is_radiation_frost_danger:
-    st.error(
-        f"❄️ **GECE ZİRAİ DON ALARMI (RADYASYONEL SOĞUMA) - [Kritik Saat:"
-        f" {night_min_time}]:** Gece bulutsuz (%{night_avg_cloud:.0f}) ve sıcaklık"
-        f" {night_min_temp:.1f}°C! Bulut kalkanı bulunmadığı için yer radyasyonu"
-        " hızla uzaya kaçmaktadır. **Malatya kayısı bahçelerinde aktif zirai don"
-        " tedbirleri devreye alınmalıdır.**"
+frac = current_sel_m / 60.0
+next_h = min(current_sel_h + 1, len(df) - 1)
+
+def interp_val(series):
+    v1 = float(series.iloc[current_sel_h])
+    v2 = float(series.iloc[next_h])
+    return v1 + (v2 - v1) * frac
+
+w_deg1 = float(df["wind_direction_10m_ecmwf_ifs"].iloc[current_sel_h])
+w_deg2 = float(df["wind_direction_10m_ecmwf_ifs"].iloc[next_h])
+diff_deg = (w_deg2 - w_deg1 + 180) % 360 - 180
+sel_wind_deg = (w_deg1 + diff_deg * frac) % 360
+
+sel_gust = interp_val(gust_mean)
+sel_speed = interp_val(df["wind_speed_10m_ecmwf_ifs"])
+sel_temp = interp_val(temp)
+sel_dew = interp_val(dew_point_series)
+sel_precip = interp_val(precip)
+sel_cape = interp_val(cape_series) if not cape_series.empty else 0.0
+sel_cloud = interp_val(cloud_cover)
+sel_risk = interp_val(pd.Series(probabilities))
+
+c_map1, c_map2 = st.columns([1.65, 1.35])
+
+with c_map1:
+    center_lat, center_lon = 38.3552, 38.3095
+
+    stations = [
+        {"name": "Malatya Merkez", "lat": 38.3552, "lon": 38.3095, "type": "merkez"},
+        {"name": "Erhaç (LTAT)", "lat": 38.4312, "lon": 38.0898, "type": "erhac"},
+        {"name": "Battalgazi", "lat": 38.4215, "lon": 38.3650, "type": "battalgazi"},
+        {"name": "Yeşilyurt", "lat": 38.2950, "lon": 38.2450, "type": "yesilyurt"},
+        {"name": "Doğanşehir Boğazı", "lat": 38.0120, "lon": 37.8810, "type": "dogansehir"},
+    ]
+
+    trace_beydaglari = go.Scattermap(
+        lat=[38.10, 38.15, 38.25, 38.20, 38.05, 37.95, 38.10],
+        lon=[38.00, 38.05, 38.20, 38.35, 38.25, 38.05, 38.00],
+        mode='lines',
+        fill='toself',
+        fillcolor='rgba(121, 85, 72, 0.45)',
+        line=dict(width=2, color='rgba(90, 60, 50, 0.9)'),
+        name="Beydağları (Orografik Engel)",
+        hoverinfo="name"
     )
-elif hail_ts_override:
-    st.error(
-        "🚨 **ANLIK DOLU / ORAJ TESPİT EDİLDİ (METAR OVERRIDE):** Erhaç İstasyonu"
-        f" {'DOLU (GR/GS)' if metar['is_hail'] else 'ORAJ/YILDIRIM (TS)'} rapor"
-        " etti! **Malatya kayısı bahçeleri ve araçlar için acil dolu tedbirleri"
-        " uygulanmalıdır.**"
+
+    trace_baraj = go.Scattermap(
+        lat=[38.35, 38.45, 38.60, 38.65, 38.50, 38.30, 38.35],
+        lon=[38.65, 38.75, 38.80, 38.65, 38.55, 38.60, 38.65],
+        mode='lines',
+        fill='toself',
+        fillcolor='rgba(3, 169, 244, 0.45)',
+        line=dict(width=2, color='rgba(2, 119, 189, 0.9)'),
+        name="Karakaya Barajı (Nem Kaynağı)",
+        hoverinfo="name"
     )
-elif frost_override:
-    st.error(
-        "🚨 **ZİRAİ DON TEHLİKESİ (YER İSTASYON OVERRIDE):** Malatya Erhaç yer"
-        f" termometresi {metar['temp_c']}°C seviyesine indi! Don tedbirleri"
-        " devreye sokulmalıdır."
-    )
-elif wind_blindness:
-    st.error(
-        f"🚨 **FIRTINA MODEL KÖRLÜĞÜ (OVERRIDE AKTİF):** Sayısal modeller sakin"
-        f" hava öngörmesine rağmen, yer istasyonu {metar['gust_kmh']} km/s hamle"
-        " tespit etti! Yerel fırtına tedbirleri uygulanmalıdır."
-    )
-elif fog_override:
-    st.warning(
-        "🌫️ **DÜŞÜK GÖRÜŞ VE YOĞUN SİS UYARISI:** Erhaç Havalimanı görüş"
-        f" mesafesi {metar['visib_m']} metreye inmiştir. Ulaşımda gizli buzlanma"
-        " ve sis tedbirleri uygulanmalıdır."
-    )
-elif "Dolu" in mode:
-    st.error(
-        f"🚨 **DOLU VE KONVEKTİF FIRTINA ALARMI - [{peak_time}]:** Yüksek"
-        f" sıcaklık ({temp.max():.1f}°C), yüksek CAPE ({max_cape:.0f} J/kg) ve"
-        " ani sağanak kesişmektedir. Dolu koruma tedbirleri uygulanmalıdır."
-    )
-elif "Kar" in mode:
-    st.info(
-        f"❄️ **YAĞIŞ FAZ DÖNÜŞÜMÜ (KAR VE GİZLİ BUZLANMA) - [{peak_time}]:**"
-        f" Yağış esnasında sıcaklık {temp.min():.1f}°C seviyesine inmektedir."
-        " Şehir merkezinde kar ve zemin buzlanması beklenmektedir."
-    )
-elif "Yanlış Alarm" in mode:
-    st.warning(
-        f"⚠️ **DE-WARNING (UYARI GERİ ÇEKME / ALARM İPTALİ) - [{peak_time}]:**"
-        f" Sayısal modeller {peak_gust:.1f} km/s fırtına gösteriyor. Ancak"
-        f" rüzgârın yönü ({live_wind_deg:.0f}°) Beydağları orografik engeline"
-        " (215° dağ duvarı) çarptığı için hava kütlesi Malatya şehir merkezine"
-        " inemeden sönümlenecektir. **Sarı kodlu fırtına uyarısı merkez için"
-        " iptal edildi.**"
-    )
-else:
-    if peak_gust >= 50.0 and risk_score >= 50.0:
-        st.error(
-            f"🚨 **DOĞRULANMIŞ ŞİDDETLİ FIRTINA TEHLİKESİ - [{peak_time}]:** Modeller"
-            f" ve yapay zekâ {peak_gust:.1f} km/s hamle riskini teyit ediyor."
+
+    lats, lons, hover_texts, pt_colors = [], [], [], []
+    for st_info in stations:
+        lats.append(st_info["lat"])
+        lons.append(st_info["lon"])
+
+        loc_r = sel_risk
+        loc_t = sel_temp
+        loc_g = sel_gust
+
+        if st_info["type"] == "dogansehir":
+            loc_g += 12.0
+            loc_t -= 1.8
+            if loc_g >= 45: loc_r = max(loc_r, 75.0)
+        elif st_info["type"] == "battalgazi":
+            loc_t -= 0.8
+            if loc_t <= 1.0 and is_radiation_frost_danger: loc_r = max(loc_r, 88.0)
+        elif st_info["type"] == "yesilyurt":
+            loc_g += 5.0
+            loc_t += 0.9
+        elif st_info["type"] == "erhac":
+            if loc_g >= 50: loc_r = max(loc_r, 80.0)
+
+        if loc_r >= 65.0:
+            pt_colors.append("#f44336")
+        elif loc_r >= 35.0:
+            pt_colors.append("#ff9800")
+        else:
+            pt_colors.append("#4caf50")
+
+        hover_texts.append(
+            f"<b>{st_info['name']}</b> ({selected_time_str})<br>"
+            f"Risk: <b>%{loc_r:.0f}</b><br>"
+            f"Sıcaklık: {loc_t:.1f}°C<br>"
+            f"Hamle: {loc_g:.1f} km/s"
         )
-    elif peak_gust >= 30.0:
-        st.info(
-            f"💨 **ORTA KUVVETTE RÜZGÂR - [{peak_time}]:** Beklenen pik hamle"
-            f" {peak_gust:.1f} km/s seviyesindedir. Fırtına eşiğinin altındadır."
-        )
+
+    trace_points = go.Scattermap(
+        lat=lats,
+        lon=lons,
+        mode='markers+text',
+        marker=dict(size=14, color=pt_colors),
+        text=[s["name"] for s in stations],
+        textposition="top right",
+        textfont=dict(color="#ffffff", size=12, family="Arial Black"),
+        hovertext=hover_texts,
+        hoverinfo="text",
+        name="İstasyonlar"
+    )
+
+    w_rad = np.radians(sel_wind_deg)
+    s_lat = center_lat + (0.24 * np.cos(w_rad))
+    s_lon = center_lon + (0.24 * np.sin(w_rad))
+
+    trace_arrow = go.Scattermap(
+        lat=[s_lat, center_lat],
+        lon=[s_lon, center_lon],
+        mode='lines+markers',
+        line=dict(width=5, color='#ff1744'),
+        marker=dict(size=[6, 14], color='#ff1744'),
+        name=f"Rüzgâr ({sel_wind_deg:.0f}°)",
+        hoverinfo="skip"
+    )
+
+    fig_map = go.Figure(data=[trace_beydaglari, trace_baraj, trace_points, trace_arrow])
+
+    fig_map.update_layout(
+        map=dict(
+            style="white-bg",
+            center=dict(lat=38.33, lon=38.30),
+            zoom=8.0,
+            layers=[
+                dict(
+                    sourcetype="raster",
+                    source=["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"],
+                    below="traces"
+                )
+            ]
+        ),
+        showlegend=False,
+        height=400,
+        margin=dict(l=0, r=0, t=10, b=0)
+    )
+
+    st.plotly_chart(fig_map, use_container_width=True)
+
+    st.markdown(
+        """
+        <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; font-size: 0.82rem; margin-top: 4px; color: #cfd8dc;">
+            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; border-radius: 50%; background-color: #4caf50;"></div> Güvenli (<%35)</div>
+            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; border-radius: 50%; background-color: #ff9800;"></div> Dikkat (%35-65)</div>
+            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; border-radius: 50%; background-color: #f44336;"></div> Kritik Afet (>%65)</div>
+            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; background-color: rgba(121,85,72,0.7);"></div> Beydağları</div>
+            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; background-color: rgba(3,169,244,0.7);"></div> Karakaya Barajı</div>
+        </div>
+        """, unsafe_allow_html=True
+    )
+
+with c_map2:
+    time_badge_text = "🟢 CANLI / ŞU ANKİ ZAMAN" if is_now_selected else "⏱️ SEÇİLEN ZAMAN DİLİMİ"
+    time_badge_color = "#4caf50" if is_now_selected else "#ff9800"
+
+    st.markdown(
+        f"""
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h4 style="margin: 0; color: #90caf9;">📋 Saat {selected_time_str} Tahmin & Hadiseler</h4>
+            <span style="background-color: {time_badge_color}; color: #000; font-size: 0.76rem; font-weight: 800; padding: 2px 8px; border-radius: 6px;">{time_badge_text}</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    h_c1, h_c2 = st.columns(2)
+    h_c1.metric("Beklenen Sıcaklık", f"{sel_temp:.1f}°C", delta=f"Çiy: {sel_dew:.1f}°C")
+    h_c2.metric("Rüzgâr Hamlesi", f"{sel_gust:.1f} km/s", delta=f"Yön: {sel_wind_deg:.0f}°")
+
+    hazards_summary = []
+    
+    if sel_precip > 0.05:
+        if sel_temp <= 1.5:
+            hazards_summary.append(f"❄️ <strong>Kar / Sulu Kar Hadisesi:</strong> Yağış hızı {sel_precip:.1f} mm/saat. Zemin sıcaklığı düşük, yollarda gizli buzlanma bekleniyor.")
+        elif sel_cape >= 900 or (sel_temp >= 22 and sel_gust >= 35):
+            hazards_summary.append(f"⚡ <strong>Konvektif Dolu / Oraj:</strong> Yüksek termodinamik enerji ({sel_cape:.0f} J/kg). Ani sağanak ve dolu fırtınası riski yüksek.")
+        else:
+            hazards_summary.append(f"💧 <strong>Sıvı Yağış (Yağmur):</strong> {sel_precip:.1f} mm birikimle normal yağış geçişi bekleniyor.")
     else:
-        st.success(
-            f"✅ **STABİL ATMOSFER KOŞULLARI ({date_display}):** Malatya havzası"
-            " için kritik bir afet anomalisi tespit edilmemiştir."
+        hazards_summary.append("☀️ <strong>Yağış Hadisesi:</strong> Yağış beklenmiyor, zemin kuru.")
+
+    angle_diff_sel = np.radians(sel_wind_deg - 215.0)
+    blockage_sel = float(np.abs(np.cos(angle_diff_sel)))
+    if blockage_sel >= 0.70 and sel_gust >= 40.0:
+        hazards_summary.append(f"⛰️ <strong>Beydağları Blokajı (De-Warning):</strong> Rüzgâr ({sel_wind_deg:.0f}°) Beydağları kalkanına çarpıyor. Şehir merkezinde fırtına etkisi sönümlenecek.")
+    elif sel_gust >= 50.0:
+        hazards_summary.append(f"🚨 <strong>Şiddetli Fırtına:</strong> Açık rüzgâr koridoru! {sel_gust:.1f} km/s hamle ile çatı uçması ve vinç devrilme riski mevcut.")
+    elif sel_gust >= 30.0:
+        hazards_summary.append(f"💨 <strong>Orta Kuvvette Rüzgâr:</strong> {sel_gust:.1f} km/s hızında esiş bekleniyor, rutin önlemler yeterlidir.")
+
+    is_sel_night = (current_sel_h >= 21) or (current_sel_h <= 7)
+    if is_sel_night and sel_temp <= 2.0 and sel_cloud <= 35:
+        hazards_summary.append(f"❄️ <strong>Aktif Radyasyon Donu:</strong> Gökyüzü açık (%{sel_cloud:.0f} bulut). Çiy noktası {sel_dew:.1f}°C olduğundan kayısı bahçelerinde don savar pervaneler çalıştırılmalıdır.")
+
+    if (45 <= sel_wind_deg <= 135) and sel_speed >= 8.0:
+        hazards_summary.append("🌊 <strong>Karakaya Göl Nem Taşınımı:</strong> Doğu sektörlü rüzgâr baraj gölü üzerinden estiği için havzaya nem taşımaktadır.")
+
+    hazards_html = "<br>• ".join(hazards_summary)
+
+    st.markdown(
+        f"""
+        <div class="benchmark-box" style="margin-top: 8px; padding: 12px; font-size: 0.88rem; line-height: 1.5; color: #eceff1;">
+            <strong style="color: #ffb74d;">🔍 Saat {selected_time_str} İçin Öngörülen Hadiseler:</strong><br>
+            • {hazards_html}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+st.markdown("---")
+
+# --- XAI: AÇIKLANABİLİR YAPAY ZEKÂ / ETKİ PUSULASI ---
+st.markdown("### 🧠 Açıklanabilir Yapay Zekâ (XAI): Model Kararını Gerekçelendirme")
+st.caption(f"📍 **Seçilen Zaman Penceresi ({selected_time_str}):** Hibrit modelin bu andaki kararını hangi fiziksel faktörlerin ne yönde etkilediği aşağıda dengelenmiştir.")
+
+cur_xai_vec = X_norm[current_sel_h]
+feature_contributions = cur_xai_vec * weights
+
+feature_titles = [
+    "Rüzgâr Taban Hızı",
+    "3s Basınç Düşüşü (ΔP)",
+    "Beydağları Blokajı (215°)",
+    "Hamle Faktörü",
+    "Kar / Donma Fazı",
+    "Konvektif Dolu İndeksi",
+]
+
+xai_records = []
+for f_name, f_val in zip(feature_titles, feature_contributions):
+    is_danger = (f_val >= 0)
+    category = "🔴 Riski Artıran Faktör (Tehlike Yönü)" if is_danger else "🟢 Riski Düşüren Faktör (Güvenlik Kalkanı)"
+    meaning = "Alarm Üretiyor" if is_danger else "Riski Sönümlüyor"
+    xai_records.append({
+        "Fiziksel Parametre": f_name,
+        "Katkı Değeri": f_val,
+        "Kategori": category,
+        "Anlam": meaning,
+        "Renk": "#f44336" if is_danger else "#4caf50",
+        "Etiket": f"{f_val:+.2f} ({meaning})"
+    })
+
+df_xai_plot = pd.DataFrame(xai_records)
+df_xai_plot = df_xai_plot.sort_values(by="Katkı Değeri", ascending=True)
+
+fig_xai = go.Figure()
+
+for cat, color_code in [("🟢 Riski Düşüren Faktör (Güvenlik Kalkanı)", "#4caf50"), ("🔴 Riski Artıran Faktör (Tehlike Yönü)", "#f44336")]:
+    sub_df = df_xai_plot[df_xai_plot["Kategori"] == cat]
+    if not sub_df.empty:
+        fig_xai.add_trace(
+            go.Bar(
+                y=sub_df["Fiziksel Parametre"],
+                x=sub_df["Katkı Değeri"],
+                name=cat,
+                orientation="h",
+                marker_color=color_code,
+                text=sub_df["Etiket"],
+                textposition="outside",
+                textfont=dict(size=11, color="#e0e0e0"),
+                hovertemplate="<b>%{y}</b><br>Karar Etkisi: %{x:+.2f}<extra></extra>"
+            )
         )
+
+fig_xai.add_vline(x=0, line_width=2, line_color="rgba(255,255,255,0.4)")
+
+fig_xai.update_layout(
+    xaxis=dict(
+        title="Fiziksel Karar Katkısı (Sol: Riski Azaltan Kalkan | Sağ: Afet Alarmı Üreten Baskı)",
+        zeroline=False,
+        showgrid=True,
+        gridcolor="rgba(255,255,255,0.08)",
+    ),
+    yaxis=dict(title="", autorange="reversed"),
+    template="plotly_white",
+    height=320,
+    margin=dict(l=10, r=60, t=30, b=30),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)"
+)
+
+st.plotly_chart(fig_xai, use_container_width=True)
+
+dominant_danger = df_xai_plot[df_xai_plot["Katkı Değeri"] > 0].sort_values("Katkı Değeri", ascending=False)
+dominant_shield = df_xai_plot[df_xai_plot["Katkı Değeri"] < 0].sort_values("Katkı Değeri", ascending=True)
+
+danger_text = f"**{dominant_danger.iloc[0]['Fiziksel Parametre']}** (+{dominant_danger.iloc[0]['Katkı Değeri']:.2f})" if not dominant_danger.empty else "Belirgin bir tehlike baskısı yok"
+shield_text = f"**{dominant_shield.iloc[0]['Fiziksel Parametre']}** ({dominant_shield.iloc[0]['Katkı Değeri']:.2f})" if not dominant_shield.empty else "Belirgin bir sönümleme engeli yok"
+
+st.markdown(
+    f"""
+    <div class="benchmark-box" style="padding: 10px 16px; font-size: 0.88rem; line-height: 1.5;">
+        💡 <strong>Nasıl Okunmalı?</strong> Grafiğin sağındaki <span style="color: #f44336; font-weight: 700;">kırmızı çubuklar</span> hava olayını afete sürükleyen unsurları; solundaki <span style="color: #4caf50; font-weight: 700;">yeşil çubuklar</span> ise Malatya coğrafyasının riski düşüren kalkanlarını temsil eder.<br>
+        • Saat {selected_time_str} itibarıyla en büyük afet baskısı: {danger_text}<br>
+        • Saat {selected_time_str} itibarıyla en güçlü hafifletici kalkan: {shield_text}
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown("---")
 
 # --- SEKTÖREL OPERASYONEL REÇETELER ---
 st.markdown("### 📋 Sektörel Eyleme Dönüştürülebilir Operasyonel Reçeteler")
@@ -1466,428 +1858,71 @@ with r_col4:
         unsafe_allow_html=True,
     )
 
-st.markdown("---")
 
-# --- MEKÂNSAL FARKINDALIK (HARİTA & 15 DAKİKALIK ZAMAN ÖLÇEĞİ İLE ANLIK TAHMİN) ---
-st.markdown("### 🧭 Dinamik Afet Risk Haritası ve 15 Dakikalık Zaman Ölçeği")
-
-# 1. Saat ve Dakika Başlatıcı Değerler
-now_dt = datetime.now(TR_TZ)
-cur_real_h = now_dt.hour
-cur_real_m = int(round(now_dt.minute / 15.0) * 15)
-if cur_real_m == 60:
-    cur_real_h = min(23, cur_real_h + 1)
-    cur_real_m = 0
-
-is_viewing_today = (mode == "Canlı Operasyonel" and st.session_state.current_date == today_date)
-
-default_hour = cur_real_h if is_viewing_today else peak_idx
-default_min = cur_real_m if is_viewing_today else 0
-
-if "time_hour_val" not in st.session_state:
-    st.session_state.time_hour_val = default_hour
-
-if "time_min_val" not in st.session_state:
-    st.session_state.time_min_val = default_min
-
-# Üst Kontrol Barı (Düğme + Saat Kaydırıcı + 4 Parçalı Çeyrek Saat Butonları)
-t_btn_col, t_slider_col, t_quarter_col = st.columns([1.3, 3.2, 1.5])
-
-with t_btn_col:
-    st.write("")
-    btn_text = f"📍 Canlı Saate Git ({cur_real_h:02d}:{cur_real_m:02d})" if is_viewing_today else f"⚡ Pik Saate Git ({peak_idx:02d}:00)"
-    if st.button(btn_text, use_container_width=True):
-        st.session_state.time_hour_val = default_hour
-        st.session_state.time_min_val = default_min
-        st.rerun()
-
-with t_slider_col:
-    sel_h = st.slider(
-        "⏱️ Saat Başları (24 Saatlik Noktalar):",
-        min_value=0,
-        max_value=23,
-        value=st.session_state.time_hour_val,
-        format="%02d:00",
-        key="time_hour_slider"
-    )
-    if sel_h != st.session_state.time_hour_val:
-        st.session_state.time_hour_val = sel_h
-        st.rerun()
-
-with t_quarter_col:
-    quarter_opts = [0, 15, 30, 45]
-    cur_quarter_idx = quarter_opts.index(st.session_state.time_min_val) if st.session_state.time_min_val in quarter_opts else 0
-    sel_m = st.radio(
-        "⏱️ 15 Dk Ölçek (Çeyrek Saat):",
-        options=quarter_opts,
-        index=cur_quarter_idx,
-        format_func=lambda m: f":{m:02d}",
-        horizontal=True,
-        key="time_min_radio"
-    )
-    if sel_m != st.session_state.time_min_val:
-        st.session_state.time_min_val = sel_m
-        st.rerun()
-
-current_sel_h = st.session_state.time_hour_val
-current_sel_m = st.session_state.time_min_val
-next_hour_label = f"{(current_sel_h + 1) % 24:02d}:00"
-selected_time_str = f"{current_sel_h:02d}:{current_sel_m:02d}"
-
-# Görsel 4 Parçalı Cetvel (Ruler Bar)
-dot_00 = "active" if current_sel_m == 0 else ""
-dot_15 = "active" if current_sel_m == 15 else ""
-dot_30 = "active" if current_sel_m == 30 else ""
-dot_45 = "active" if current_sel_m == 45 else ""
-
+# ==============================================================================
+# BÖLÜM 2: 🌐 KÜRESEL SAYISAL HAVA TAHMİN MODELLERİ (NWP HAM GİRDİ VERİLERİ)
+# ==============================================================================
 st.markdown(
-    f"""
-    <div class="ruler-container">
-        <div class="ruler-tick">
-            <span style="font-weight: 700; color: #90caf9;">{current_sel_h:02d}:00</span>
-            <div class="ruler-dot {dot_00}"></div>
-        </div>
-        <div class="ruler-line"></div>
-        <div class="ruler-tick">
-            <span style="color: #cfd8dc;">{current_sel_h:02d}:15</span>
-            <div class="ruler-dot {dot_15}"></div>
-        </div>
-        <div class="ruler-line"></div>
-        <div class="ruler-tick">
-            <span style="color: #cfd8dc;">{current_sel_h:02d}:30</span>
-            <div class="ruler-dot {dot_30}"></div>
-        </div>
-        <div class="ruler-line"></div>
-        <div class="ruler-tick">
-            <span style="color: #cfd8dc;">{current_sel_h:02d}:45</span>
-            <div class="ruler-dot {dot_45}"></div>
-        </div>
-        <div class="ruler-line"></div>
-        <div class="ruler-tick">
-            <span style="font-weight: 700; color: #78909c;">{next_hour_label}</span>
-            <div class="ruler-dot"></div>
-        </div>
+    """
+    <div class="section-banner-nwp">
+        <h3 style="margin: 0 0 6px 0; color: #a5d6a7;">🌐 BÖLÜM 2: Küresel Sayısal Hava Tahmin Modelleri (NWP Verileri)</h3>
+        <p style="margin: 0; font-size: 0.92rem; color: #cfd8dc;">
+            Bu bölümde yer alan veriler; Avrupa (ECMWF), ABD (GFS) ve Almanya (ICON) merkezlerinden doğrudan çekilen işlenmemiş ham tahmin grafikleridir. MetaCast bu girdileri yukarıdaki 1. Bölümde fiziksel süzgeçten geçirerek nihai karara dönüştürür.
+        </p>
     </div>
     """,
     unsafe_allow_html=True
 )
 
-is_now_selected = (is_viewing_today and current_sel_h == cur_real_h and current_sel_m == cur_real_m)
-
-# Seçilen 15 dakikalık zaman dilimine göre meteorolojik interpolasyon
-frac = current_sel_m / 60.0
-next_h = min(current_sel_h + 1, len(df) - 1)
-
-def interp_val(series):
-    v1 = float(series.iloc[current_sel_h])
-    v2 = float(series.iloc[next_h])
-    return v1 + (v2 - v1) * frac
-
-w_deg1 = float(df["wind_direction_10m_ecmwf_ifs"].iloc[current_sel_h])
-w_deg2 = float(df["wind_direction_10m_ecmwf_ifs"].iloc[next_h])
-diff_deg = (w_deg2 - w_deg1 + 180) % 360 - 180
-sel_wind_deg = (w_deg1 + diff_deg * frac) % 360
-
-sel_gust = interp_val(gust_mean)
-sel_speed = interp_val(df["wind_speed_10m_ecmwf_ifs"])
-sel_temp = interp_val(temp)
-sel_dew = interp_val(dew_point_series)
-sel_precip = interp_val(precip)
-sel_cape = interp_val(cape_series) if not cape_series.empty else 0.0
-sel_cloud = interp_val(cloud_cover)
-sel_risk = interp_val(pd.Series(probabilities))
-
-c_map1, c_map2 = st.columns([1.65, 1.35])
-
-with c_map1:
-    center_lat, center_lon = 38.3552, 38.3095
-
-    stations = [
-        {"name": "Malatya Merkez", "lat": 38.3552, "lon": 38.3095, "type": "merkez"},
-        {"name": "Erhaç (LTAT)", "lat": 38.4312, "lon": 38.0898, "type": "erhac"},
-        {"name": "Battalgazi", "lat": 38.4215, "lon": 38.3650, "type": "battalgazi"},
-        {"name": "Yeşilyurt", "lat": 38.2950, "lon": 38.2450, "type": "yesilyurt"},
-        {"name": "Doğanşehir Boğazı", "lat": 38.0120, "lon": 37.8810, "type": "dogansehir"},
-    ]
-
-    trace_beydaglari = go.Scattermap(
-        lat=[38.10, 38.15, 38.25, 38.20, 38.05, 37.95, 38.10],
-        lon=[38.00, 38.05, 38.20, 38.35, 38.25, 38.05, 38.00],
-        mode='lines',
-        fill='toself',
-        fillcolor='rgba(121, 85, 72, 0.45)',
-        line=dict(width=2, color='rgba(90, 60, 50, 0.9)'),
-        name="Beydağları (Orografik Engel)",
-        hoverinfo="name"
-    )
-
-    trace_baraj = go.Scattermap(
-        lat=[38.35, 38.45, 38.60, 38.65, 38.50, 38.30, 38.35],
-        lon=[38.65, 38.75, 38.80, 38.65, 38.55, 38.60, 38.65],
-        mode='lines',
-        fill='toself',
-        fillcolor='rgba(3, 169, 244, 0.45)',
-        line=dict(width=2, color='rgba(2, 119, 189, 0.9)'),
-        name="Karakaya Barajı (Nem Kaynağı)",
-        hoverinfo="name"
-    )
-
-    lats, lons, hover_texts, pt_colors = [], [], [], []
-    for st_info in stations:
-        lats.append(st_info["lat"])
-        lons.append(st_info["lon"])
-
-        loc_r = sel_risk
-        loc_t = sel_temp
-        loc_g = sel_gust
-
-        if st_info["type"] == "dogansehir":
-            loc_g += 12.0
-            loc_t -= 1.8
-            if loc_g >= 45: loc_r = max(loc_r, 75.0)
-        elif st_info["type"] == "battalgazi":
-            loc_t -= 0.8
-            if loc_t <= 1.0 and is_radiation_frost_danger: loc_r = max(loc_r, 88.0)
-        elif st_info["type"] == "yesilyurt":
-            loc_g += 5.0
-            loc_t += 0.9
-        elif st_info["type"] == "erhac":
-            if loc_g >= 50: loc_r = max(loc_r, 80.0)
-
-        if loc_r >= 65.0:
-            pt_colors.append("#f44336")
-        elif loc_r >= 35.0:
-            pt_colors.append("#ff9800")
-        else:
-            pt_colors.append("#4caf50")
-
-        hover_texts.append(
-            f"<b>{st_info['name']}</b> ({selected_time_str})<br>"
-            f"Risk: <b>%{loc_r:.0f}</b><br>"
-            f"Sıcaklık: {loc_t:.1f}°C<br>"
-            f"Hamle: {loc_g:.1f} km/s"
-        )
-
-    trace_points = go.Scattermap(
-        lat=lats,
-        lon=lons,
-        mode='markers+text',
-        marker=dict(size=14, color=pt_colors),
-        text=[s["name"] for s in stations],
-        textposition="top right",
-        textfont=dict(color="#ffffff", size=12, family="Arial Black"),
-        hovertext=hover_texts,
-        hoverinfo="text",
-        name="İstasyonlar"
-    )
-
-    w_rad = np.radians(sel_wind_deg)
-    s_lat = center_lat + (0.24 * np.cos(w_rad))
-    s_lon = center_lon + (0.24 * np.sin(w_rad))
-
-    trace_arrow = go.Scattermap(
-        lat=[s_lat, center_lat],
-        lon=[s_lon, center_lon],
-        mode='lines+markers',
-        line=dict(width=5, color='#ff1744'),
-        marker=dict(size=[6, 14], color='#ff1744'),
-        name=f"Rüzgâr ({sel_wind_deg:.0f}°)",
-        hoverinfo="skip"
-    )
-
-    fig_map = go.Figure(data=[trace_beydaglari, trace_baraj, trace_points, trace_arrow])
-
-    fig_map.update_layout(
-        map=dict(
-            style="white-bg",
-            center=dict(lat=38.33, lon=38.30),
-            zoom=8.0,
-            layers=[
-                dict(
-                    sourcetype="raster",
-                    source=["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"],
-                    below="traces"
-                )
-            ]
-        ),
-        showlegend=False,
-        height=400,
-        margin=dict(l=0, r=0, t=10, b=0)
-    )
-
-    st.plotly_chart(fig_map, use_container_width=True)
-
-    st.markdown(
-        """
-        <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; font-size: 0.82rem; margin-top: 4px; color: #cfd8dc;">
-            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; border-radius: 50%; background-color: #4caf50;"></div> Güvenli (<%35)</div>
-            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; border-radius: 50%; background-color: #ff9800;"></div> Dikkat (%35-65)</div>
-            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; border-radius: 50%; background-color: #f44336;"></div> Kritik Afet (>%65)</div>
-            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; background-color: rgba(121,85,72,0.7);"></div> Beydağları</div>
-            <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; background-color: rgba(3,169,244,0.7);"></div> Karakaya Barajı</div>
-        </div>
-        """, unsafe_allow_html=True
-    )
-
-with c_map2:
-    time_badge_text = "🟢 CANLI / ŞU ANKİ ZAMAN" if is_now_selected else "⏱️ SEÇİLEN ZAMAN DİLİMİ"
-    time_badge_color = "#4caf50" if is_now_selected else "#ff9800"
-
-    st.markdown(
-        f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <h4 style="margin: 0; color: #90caf9;">📋 Saat {selected_time_str} Tahmin & Hadiseler</h4>
-            <span style="background-color: {time_badge_color}; color: #000; font-size: 0.76rem; font-weight: 800; padding: 2px 8px; border-radius: 6px;">{time_badge_text}</span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    h_c1, h_c2 = st.columns(2)
-    h_c1.metric("Beklenen Sıcaklık", f"{sel_temp:.1f}°C", delta=f"Çiy: {sel_dew:.1f}°C")
-    h_c2.metric("Rüzgâr Hamlesi", f"{sel_gust:.1f} km/s", delta=f"Yön: {sel_wind_deg:.0f}°")
-
-    hazards_summary = []
-    
-    # 1. Yağış & Faz
-    if sel_precip > 0.05:
-        if sel_temp <= 1.5:
-            hazards_summary.append(f"❄️ <strong>Kar / Sulu Kar Hadisesi:</strong> Yağış hızı {sel_precip:.1f} mm/saat. Zemin sıcaklığı düşük, yollarda gizli buzlanma bekleniyor.")
-        elif sel_cape >= 900 or (sel_temp >= 22 and sel_gust >= 35):
-            hazards_summary.append(f"⚡ <strong>Konvektif Dolu / Oraj:</strong> Yüksek termodinamik enerji ({sel_cape:.0f} J/kg). Ani sağanak ve dolu fırtınası riski yüksek.")
-        else:
-            hazards_summary.append(f"💧 <strong>Sıvı Yağış (Yağmur):</strong> {sel_precip:.1f} mm birikimle normal yağış geçişi bekleniyor.")
+# --- KISA ATMOSFERİK PARAMETRE ÖZETİ ---
+total_precip = precip.sum()
+if total_precip <= 0.05:
+    precip_prob_str = "%5 (Çok Düşük)"
+    dom_type = "☀️ Yağış Yok"
+else:
+    prob_val = min(95, max(30, int(25 + total_precip * 20)))
+    precip_prob_str = f"%{prob_val} ({total_precip:.1f} mm)"
+    if hail_potential.sum() > 0:
+        dom_type = "⚡ Dolu / Süper Hücre"
+    elif is_snow_phase.sum() > 0:
+        dom_type = "❄️ Kar / Sulu Kar"
     else:
-        hazards_summary.append("☀️ <strong>Yağış Hadisesi:</strong> Yağış beklenmiyor, zemin kuru.")
+        dom_type = "💧 Sıvı Yağmur"
 
-    # 2. Rüzgar & Orografi
-    angle_diff_sel = np.radians(sel_wind_deg - 215.0)
-    blockage_sel = float(np.abs(np.cos(angle_diff_sel)))
-    if blockage_sel >= 0.70 and sel_gust >= 40.0:
-        hazards_summary.append(f"⛰️ <strong>Beydağları Blokajı (De-Warning):</strong> Rüzgâr ({sel_wind_deg:.0f}°) Beydağları kalkanına çarpıyor. Şehir merkezinde fırtına etkisi sönümlenecek.")
-    elif sel_gust >= 50.0:
-        hazards_summary.append(f"🚨 <strong>Şiddetli Fırtına:</strong> Açık rüzgâr koridoru! {sel_gust:.1f} km/s hamle ile çatı uçması ve vinç devrilme riski mevcut.")
-    elif sel_gust >= 30.0:
-        hazards_summary.append(f"💨 <strong>Orta Kuvvette Rüzgâr:</strong> {sel_gust:.1f} km/s hızında esiş bekleniyor, rutin önlemler yeterlidir.")
-
-    # 3. Zirai Don (Gece)
-    is_sel_night = (current_sel_h >= 21) or (current_sel_h <= 7)
-    if is_sel_night and sel_temp <= 2.0 and sel_cloud <= 35:
-        hazards_summary.append(f"❄️ <strong>Aktif Radyasyon Donu:</strong> Gökyüzü açık (%{sel_cloud:.0f} bulut). Çiy noktası {sel_dew:.1f}°C olduğundan kayısı bahçelerinde don savar pervaneler çalıştırılmalıdır.")
-
-    # 4. Göl Etkisi
-    if (45 <= sel_wind_deg <= 135) and sel_speed >= 8.0:
-        hazards_summary.append("🌊 <strong>Karakaya Göl Nem Taşınımı:</strong> Doğu sektörlü rüzgâr baraj gölü üzerinden estiği için havzaya nem taşımaktadır.")
-
-    hazards_html = "<br>• ".join(hazards_summary)
-
-    st.markdown(
-        f"""
-        <div class="benchmark-box" style="margin-top: 8px; padding: 12px; font-size: 0.88rem; line-height: 1.5; color: #eceff1;">
-            <strong style="color: #ffb74d;">🔍 Saat {selected_time_str} İçin Öngörülen Hadiseler:</strong><br>
-            • {hazards_html}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-st.markdown("---")
-
-# --- XAI: AÇIKLANABİLİR YAPAY ZEKÂ / ETKİ PUSULASI ---
-st.markdown("### 🧠 Açıklanabilir Yapay Zekâ (XAI): Model Kararını Gerekçelendirme")
-st.caption(f"📍 **Seçilen Zaman Penceresi ({selected_time_str}):** Hibrit modelin bu andaki kararını hangi fiziksel faktörlerin ne yönde etkilediği aşağıda dengelenmiştir.")
-
-# Seçili saate göre XAI öznitelik vektörü
-cur_xai_vec = X_norm[current_sel_h]
-feature_contributions = cur_xai_vec * weights
-
-feature_titles = [
-    "Rüzgâr Taban Hızı",
-    "3s Basınç Düşüşü (ΔP)",
-    "Beydağları Blokajı (215°)",
-    "Hamle Faktörü",
-    "Kar / Donma Fazı",
-    "Konvektif Dolu İndeksi",
-]
-
-xai_records = []
-for f_name, f_val in zip(feature_titles, feature_contributions):
-    is_danger = (f_val >= 0)
-    category = "🔴 Riski Artıran Faktör (Tehlike Yönü)" if is_danger else "🟢 Riski Düşüren Faktör (Güvenlik Kalkanı)"
-    meaning = "Alarm Üretiyor" if is_danger else "Riski Sönümlüyor"
-    xai_records.append({
-        "Fiziksel Parametre": f_name,
-        "Katkı Değeri": f_val,
-        "Kategori": category,
-        "Anlam": meaning,
-        "Renk": "#f44336" if is_danger else "#4caf50",
-        "Etiket": f"{f_val:+.2f} ({meaning})"
-    })
-
-df_xai_plot = pd.DataFrame(xai_records)
-df_xai_plot = df_xai_plot.sort_values(by="Katkı Değeri", ascending=True)
-
-fig_xai = go.Figure()
-
-for cat, color_code in [("🟢 Riski Düşüren Faktör (Güvenlik Kalkanı)", "#4caf50"), ("🔴 Riski Artıran Faktör (Tehlike Yönü)", "#f44336")]:
-    sub_df = df_xai_plot[df_xai_plot["Kategori"] == cat]
-    if not sub_df.empty:
-        fig_xai.add_trace(
-            go.Bar(
-                y=sub_df["Fiziksel Parametre"],
-                x=sub_df["Katkı Değeri"],
-                name=cat,
-                orientation="h",
-                marker_color=color_code,
-                text=sub_df["Etiket"],
-                textposition="outside",
-                textfont=dict(size=11, color="#e0e0e0"),
-                hovertemplate="<b>%{y}</b><br>Karar Etkisi: %{x:+.2f}<extra></extra>"
-            )
-        )
-
-fig_xai.add_vline(x=0, line_width=2, line_color="rgba(255,255,255,0.4)")
-
-fig_xai.update_layout(
-    xaxis=dict(
-        title="Fiziksel Karar Katkısı (Sol: Riski Azaltan Kalkan | Sağ: Afet Alarmı Üreten Baskı)",
-        zeroline=False,
-        showgrid=True,
-        gridcolor="rgba(255,255,255,0.08)",
-    ),
-    yaxis=dict(title="", autorange="reversed"),
-    template="plotly_white",
-    height=320,
-    margin=dict(l=10, r=60, t=30, b=30),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)"
+avg_cloud = cloud_cover.mean()
+cloud_desc_summary = (
+    f"%{avg_cloud:.0f} (Açık)"
+    if avg_cloud <= 25
+    else (f"%{avg_cloud:.0f} (Parçalı)" if avg_cloud <= 65 else f"%{avg_cloud:.0f} (Kapalı)")
 )
 
-st.plotly_chart(fig_xai, use_container_width=True)
-
-# Otomatik Dinamik XAI Yorumu
-dominant_danger = df_xai_plot[df_xai_plot["Katkı Değeri"] > 0].sort_values("Katkı Değeri", ascending=False)
-dominant_shield = df_xai_plot[df_xai_plot["Katkı Değeri"] < 0].sort_values("Katkı Değeri", ascending=True)
-
-danger_text = f"**{dominant_danger.iloc[0]['Fiziksel Parametre']}** (+{dominant_danger.iloc[0]['Katkı Değeri']:.2f})" if not dominant_danger.empty else "Belirgin bir tehlike baskısı yok"
-shield_text = f"**{dominant_shield.iloc[0]['Fiziksel Parametre']}** ({dominant_shield.iloc[0]['Katkı Değeri']:.2f})" if not dominant_shield.empty else "Belirgin bir sönümleme engeli yok"
-
-st.markdown(
-    f"""
-    <div class="benchmark-box" style="padding: 10px 16px; font-size: 0.88rem; line-height: 1.5;">
-        💡 <strong>Nasıl Okunmalı?</strong> Grafiğin sağındaki <span style="color: #f44336; font-weight: 700;">kırmızı çubuklar</span> hava olayını afete sürükleyen unsurları; solundaki <span style="color: #4caf50; font-weight: 700;">yeşil çubuklar</span> ise Malatya coğrafyasının riski düşüren kalkanlarını temsil eder.<br>
-        • Saat {selected_time_str} itibarıyla en büyük afet baskısı: {danger_text}<br>
-        • Saat {selected_time_str} itibarıyla en güçlü hafifletici kalkan: {shield_text}
-    </div>
-    """,
-    unsafe_allow_html=True
+max_cape = float(cape_series.max())
+cape_summary = (
+    f"{max_cape:.0f} J/kg" if max_cape > 0 else "0 J/kg (Stabil Atmosfer)"
 )
 
-st.markdown("---")
+st.markdown("##### 📌 Sayısal Modellerin Günlük Kritik Ham Parametreleri")
+s1, s2, s3, s4, s5 = st.columns(5)
+s1.metric("Yağış İhtimali", precip_prob_str)
+s1.caption(f"Toplam Birikim: **{total_precip:.1f} mm**")
 
-# --- SAATLİK SAYISAL MODEL GRAFİKLERİ ---
-st.markdown(f"### 📊 Erhaç Üssü Saatlik Sayısal Rüzgâr Hamlesi Kıyası ({date_display})")
+s2.metric("Baskın Yağış Türü", dom_type)
+s2.caption(f"Aralık: {temp.min():.1f}°C / {temp.max():.1f}°C")
+
+s3.metric("Bulutluluk", cloud_desc_summary)
+s3.caption(f"Çiy Doygunluk Açığı: {dew_point_depression.min():.1f}°C")
+
+s4.metric("Termodinamik CAPE", cape_summary)
+s4.caption(
+    "Kararsızlık: Yüksek (Dolu Riski)"
+    if max_cape >= 900
+    else "Kararsızlık: Normal"
+)
+
+s5.metric("Zemin Basıncı", f"{df['surface_pressure_ecmwf_ifs'].mean():.1f} hPa")
+s5.caption(f"3s Eğilim: {pressure_diff.iloc[peak_idx]:+.1f} hPa")
+
+st.markdown(f"#### 📊 Erhaç Üssü Saatlik Sayısal Rüzgâr Hamlesi Kıyası ({date_display})")
 fig_wind = go.Figure()
 fig_wind.add_trace(
     go.Scatter(
@@ -1928,7 +1963,7 @@ fig_wind.update_layout(
 )
 st.plotly_chart(fig_wind, use_container_width=True)
 
-st.markdown("### 🌧️ Saatlik Sıcaklık, Çiy Noktası ve Yağış Türü Dağılımı")
+st.markdown("#### 🌧️ Saatlik Sıcaklık, Çiy Noktası ve Yağış Türü Dağılımı")
 fig_weather = go.Figure()
 fig_weather.add_trace(
     go.Scatter(
