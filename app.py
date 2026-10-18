@@ -1470,53 +1470,75 @@ with r_col4:
 
 st.markdown("---")
 
-# --- MEKÂNSAL FARKINDALIK (HARİTA & CANLI / SEÇİLEN SAAT TAHMİN KUTUSU) ---
-st.markdown("### 🧭 Dinamik Afet Risk Haritası ve Saatlik Hadise Tahmini")
+# --- MEKÂNSAL FARKINDALIK (HARİTA & 15 DAKİKALIK ZAMAN ÖLÇEĞİ İLE ANLIK TAHMİN) ---
+st.markdown("### 🧭 Dinamik Afet Risk Haritası ve 15 Dakikalık Zaman Ölçeği")
 
-# Canlı Türkiye Saati
-current_real_hour = datetime.now(TR_TZ).hour
+# 24 Saat İçin 15 Dakikalık Zaman Noktaları (00:00, 00:15, 00:30, ..., 23:45)
+time_slots = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
+
+# Canlı Türkiye Saati ve En Yakın 15 Dakikalık Zaman Dilimi
+now_dt = datetime.now(TR_TZ)
+cur_h = now_dt.hour
+cur_m = int(round(now_dt.minute / 15.0) * 15)
+if cur_m == 60:
+    cur_h = min(23, cur_h + 1)
+    cur_m = 45 if (cur_h == 23 and now_dt.hour == 23) else 0
+
+live_time_str = f"{cur_h:02d}:{cur_m:02d}"
 is_viewing_today = (mode == "Canlı Operasyonel" and st.session_state.current_date == today_date)
 
-default_target_hour = current_real_hour if is_viewing_today else peak_idx
-default_target_hour = max(0, min(default_target_hour, len(df) - 1))
+default_target_time = live_time_str if is_viewing_today else f"{peak_idx:02d}:00"
+if default_target_time not in time_slots:
+    default_target_time = time_slots[0]
 
-# Widget State Başlatma
-if "time_slider_widget" not in st.session_state:
-    st.session_state.time_slider_widget = default_target_hour
+# Session State başlatma
+if "time_slider_widget" not in st.session_state or not isinstance(st.session_state.time_slider_widget, str):
+    st.session_state.time_slider_widget = default_target_time
 
-# Üst Kontrol Barı (Düğme + Zaman Kaydırıcı)
+# Üst Kontrol Barı (Düğme + 15 Dakikalık Zaman Kaydırıcı)
 t_btn_col, t_slider_col = st.columns([1.3, 4.7])
 with t_btn_col:
     st.write("")
-    btn_text = f"📍 Canlı Saate Git ({current_real_hour:02d}:00)" if is_viewing_today else f"⚡ Pik Saate Git ({peak_idx:02d}:00)"
+    btn_text = f"📍 Canlı Saate Git ({live_time_str})" if is_viewing_today else f"⚡ Pik Saate Git ({peak_idx:02d}:00)"
     if st.button(btn_text, use_container_width=True):
-        st.session_state.time_slider_widget = default_target_hour
+        st.session_state.time_slider_widget = default_target_time
         st.rerun()
 
 with t_slider_col:
-    chosen_hour = st.slider(
-        "⏱️ Zaman Penceresi (Saat Seçin - Harita ve Sağdaki Tahmin Kutusu Eş Zamanlı Güncellenir):",
-        min_value=0,
-        max_value=len(df) - 1,
-        format="%02d:00",
+    chosen_time = st.select_slider(
+        "⏱️ Zaman Penceresi (15'er Dakikalık Ölçek - 00:00'dan 23:45'e Kadar):",
+        options=time_slots,
         key="time_slider_widget"
     )
 
-sel_idx = st.session_state.time_slider_widget
-sel_time_str = df["time"].iloc[sel_idx].strftime("%H:00")
-is_now_selected = (is_viewing_today and sel_idx == current_real_hour)
+selected_time_str = st.session_state.time_slider_widget
+is_now_selected = (is_viewing_today and selected_time_str == live_time_str)
 
-# Seçilen saate ait meteorolojik değişkenler
-sel_wind_deg = float(df["wind_direction_10m_ecmwf_ifs"].iloc[sel_idx])
-sel_gust = float(gust_mean.iloc[sel_idx])
-sel_speed = float(df["wind_speed_10m_ecmwf_ifs"].iloc[sel_idx])
-sel_temp = float(temp.iloc[sel_idx])
-sel_dew = float(dew_point_series.iloc[sel_idx])
-sel_precip = float(precip.iloc[sel_idx])
-sel_cape = float(cape_series.iloc[sel_idx]) if not cape_series.empty else 0.0
-sel_risk = float(probabilities[sel_idx])
-sel_precip_name = df["precip_type"].iloc[sel_idx]
-sel_cloud = float(cloud_cover.iloc[sel_idx])
+# Seçilen 15 dakikalık zaman dilimine göre meteorolojik interpolasyon
+sel_h = int(selected_time_str.split(":")[0])
+sel_m = int(selected_time_str.split(":")[1])
+frac = sel_m / 60.0
+next_h = min(sel_h + 1, len(df) - 1)
+
+def interp_val(series):
+    v1 = float(series.iloc[sel_h])
+    v2 = float(series.iloc[next_h])
+    return v1 + (v2 - v1) * frac
+
+# Rüzgâr açısı interpolasyonu (Döngüsel 0-360 farkı gözetilerek)
+w_deg1 = float(df["wind_direction_10m_ecmwf_ifs"].iloc[sel_h])
+w_deg2 = float(df["wind_direction_10m_ecmwf_ifs"].iloc[next_h])
+diff_deg = (w_deg2 - w_deg1 + 180) % 360 - 180
+sel_wind_deg = (w_deg1 + diff_deg * frac) % 360
+
+sel_gust = interp_val(gust_mean)
+sel_speed = interp_val(df["wind_speed_10m_ecmwf_ifs"])
+sel_temp = interp_val(temp)
+sel_dew = interp_val(dew_point_series)
+sel_precip = interp_val(precip)
+sel_cape = interp_val(cape_series) if not cape_series.empty else 0.0
+sel_cloud = interp_val(cloud_cover)
+sel_risk = interp_val(pd.Series(probabilities))
 
 c_map1, c_map2 = st.columns([1.65, 1.35])
 
@@ -1553,7 +1575,6 @@ with c_map1:
         hoverinfo="name"
     )
 
-    # Seçili saate göre istasyon renk ve metinleri
     lats, lons, hover_texts, pt_colors = [], [], [], []
     for st_info in stations:
         lats.append(st_info["lat"])
@@ -1584,7 +1605,7 @@ with c_map1:
             pt_colors.append("#4caf50")
 
         hover_texts.append(
-            f"<b>{st_info['name']}</b> ({sel_time_str})<br>"
+            f"<b>{st_info['name']}</b> ({selected_time_str})<br>"
             f"Risk: <b>%{loc_r:.0f}</b><br>"
             f"Sıcaklık: {loc_t:.1f}°C<br>"
             f"Hamle: {loc_g:.1f} km/s"
@@ -1603,7 +1624,6 @@ with c_map1:
         name="İstasyonlar"
     )
 
-    # Seçili saatin rüzgâr oku
     w_rad = np.radians(sel_wind_deg)
     s_lat = center_lat + (0.24 * np.cos(w_rad))
     s_lon = center_lon + (0.24 * np.sin(w_rad))
@@ -1653,13 +1673,13 @@ with c_map1:
     )
 
 with c_map2:
-    time_badge_text = "🟢 CANLI / ŞU ANKİ SAAT" if is_now_selected else "⏱️ SEÇİLEN ZAMAN DİLİMİ"
+    time_badge_text = "🟢 CANLI / ŞU ANKİ ZAMAN" if is_now_selected else "⏱️ SEÇİLEN ZAMAN DİLİMİ"
     time_badge_color = "#4caf50" if is_now_selected else "#ff9800"
 
     st.markdown(
         f"""
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <h4 style="margin: 0; color: #90caf9;">📋 Saat {sel_time_str} Tahmin & Hadiseler</h4>
+            <h4 style="margin: 0; color: #90caf9;">📋 Saat {selected_time_str} Tahmin & Hadiseler</h4>
             <span style="background-color: {time_badge_color}; color: #000; font-size: 0.76rem; font-weight: 800; padding: 2px 8px; border-radius: 6px;">{time_badge_text}</span>
         </div>
         """,
@@ -1675,11 +1695,11 @@ with c_map2:
     # 1. Yağış & Faz
     if sel_precip > 0.05:
         if sel_temp <= 1.5:
-            hazards_summary.append(f"❄️ <strong>Kar / Sulu Kar Hadisesi:</strong> Yağış miktarı {sel_precip:.1f} mm. Zemin sıcaklığı düşük, yollarda gizli buzlanma bekleniyor.")
+            hazards_summary.append(f"❄️ <strong>Kar / Sulu Kar Hadisesi:</strong> Yağış hızı {sel_precip:.1f} mm/saat. Zemin sıcaklığı düşük, yollarda gizli buzlanma bekleniyor.")
         elif sel_cape >= 900 or (sel_temp >= 22 and sel_gust >= 35):
             hazards_summary.append(f"⚡ <strong>Konvektif Dolu / Oraj:</strong> Yüksek termodinamik enerji ({sel_cape:.0f} J/kg). Ani sağanak ve dolu fırtınası riski yüksek.")
         else:
-            hazards_summary.append(f"💧 <strong>Sıvı Yağış (Yağmur):</strong> Saatlik birikim {sel_precip:.1f} mm seviyesinde normal yağış bekleniyor.")
+            hazards_summary.append(f"💧 <strong>Sıvı Yağış (Yağmur):</strong> {sel_precip:.1f} mm birikimle normal yağış geçişi bekleniyor.")
     else:
         hazards_summary.append("☀️ <strong>Yağış Hadisesi:</strong> Yağış beklenmiyor, zemin kuru.")
 
@@ -1687,27 +1707,27 @@ with c_map2:
     angle_diff_sel = np.radians(sel_wind_deg - 215.0)
     blockage_sel = float(np.abs(np.cos(angle_diff_sel)))
     if blockage_sel >= 0.70 and sel_gust >= 40.0:
-        hazards_summary.append(f"⛰️ <strong>Beydağları Blokajı (De-Warning):</strong> Rüzgâr ({sel_wind_deg:.0f}°) Beydağları kalkanına çarpıyor. Şehir merkezinde beklenen fırtına etkisi sönümlenecek.")
+        hazards_summary.append(f"⛰️ <strong>Beydağları Blokajı (De-Warning):</strong> Rüzgâr ({sel_wind_deg:.0f}°) Beydağları kalkanına çarpıyor. Şehir merkezinde fırtına etkisi sönümlenecek.")
     elif sel_gust >= 50.0:
-        hazards_summary.append(f"🚨 <strong>Şiddetli Fırtına:</strong> Açık rüzgâr koridoru! {sel_gust:.1f} km/s hamle ile çatı uçması ve kule vinç devrilme riski mevcut.")
+        hazards_summary.append(f"🚨 <strong>Şiddetli Fırtına:</strong> Açık rüzgâr koridoru! {sel_gust:.1f} km/s hamle ile çatı uçması ve vinç devrilme riski mevcut.")
     elif sel_gust >= 30.0:
         hazards_summary.append(f"💨 <strong>Orta Kuvvette Rüzgâr:</strong> {sel_gust:.1f} km/s hızında esiş bekleniyor, rutin önlemler yeterlidir.")
 
     # 3. Zirai Don (Gece)
-    is_sel_night = (df["time"].iloc[sel_idx].hour >= 21) or (df["time"].iloc[sel_idx].hour <= 7)
+    is_sel_night = (sel_h >= 21) or (sel_h <= 7)
     if is_sel_night and sel_temp <= 2.0 and sel_cloud <= 35:
-        hazards_summary.append(f"❄️ <strong>Aktif Radyasyon Donu:</strong> Gökyüzü açık (%{sel_cloud:.0f} bulut), ısı uzaya kaçıyor. Çiy noktası {sel_dew:.1f}°C olduğundan kayısı bahçelerinde buz kalkanı açılmalıdır.")
+        hazards_summary.append(f"❄️ <strong>Aktif Radyasyon Donu:</strong> Gökyüzü açık (%{sel_cloud:.0f} bulut). Çiy noktası {sel_dew:.1f}°C olduğundan kayısı bahçelerinde don savar pervaneler çalıştırılmalıdır.")
 
     # 4. Göl Etkisi
     if (45 <= sel_wind_deg <= 135) and sel_speed >= 8.0:
-        hazards_summary.append("🌊 <strong>Karakaya Göl Nem Taşınımı:</strong> Rüzgâr baraj gölü üzerinden estiği için Malatya çanağında havadaki bağıl nem oranını artırmaktadır.")
+        hazards_summary.append("🌊 <strong>Karakaya Göl Nem Taşınımı:</strong> Doğu sektörlü rüzgâr baraj gölü üzerinden estiği için havzaya nem taşımaktadır.")
 
     hazards_html = "<br>• ".join(hazards_summary)
 
     st.markdown(
         f"""
         <div class="benchmark-box" style="margin-top: 8px; padding: 12px; font-size: 0.88rem; line-height: 1.5; color: #eceff1;">
-            <strong style="color: #ffb74d;">🔍 Saat {sel_time_str} İçin Öngörülen Hadiseler:</strong><br>
+            <strong style="color: #ffb74d;">🔍 Saat {selected_time_str} İçin Öngörülen Hadiseler:</strong><br>
             • {hazards_html}
         </div>
         """,
