@@ -1,0 +1,35 @@
+name: 7/24 Saatlik Veri Toplayıcı ve Doğrulama
+
+on:
+  schedule:
+    # Her saat başı otomatik çalışır (UTC)
+    - cron: '0 * * * *'
+  workflow_dispatch: # İstediğin zaman manuel de çalıştırabilmen için
+
+jobs:
+  collect-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu Çek
+        uses: actions/checkout@v3
+
+      - name: Python Kur
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Bağımlılıkları Yükle
+        run: |
+          pip install requests pandas numpy
+
+      - name: Saatlik Ölçümü Al ve Veritabanına Yaz
+        run: |
+          python src/cron_logger.py
+
+      - name: Veritabanını Depoya Kaydet (Commit & Push)
+        run: |
+          git config --global user.name "MetaCast-Bot"
+          git config --global user.email "bot@metacast.local"
+          git add data/metacast_logs.db models/metacast_weights.json || true
+          git commit -m "Auto-Log: Saatlik istasyon ölçümü ve kalibrasyon [skip ci]" || exit 0
+          git push
