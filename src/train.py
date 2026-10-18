@@ -1,38 +1,44 @@
 import json
 import os
+import sqlite3
 import numpy as np
 import pandas as pd
+
 
 def sigmoid(z):
     return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
 
+
+# --- 1. ANA MODEL EĞİTİM MOTORU (GEÇMİŞ ARŞİV İLE BÜYÜK EĞİTİM) ---
 def train_metacast_model(data_path: str, model_output_path: str):
     print("Genişletilmiş şiddetli hava veri seti yükleniyor...")
+    if not os.path.exists(data_path):
+        print(f"Hata: {data_path} bulunamadı!")
+        return
+
     df = pd.read_csv(data_path)
 
-    # Malatya'nın fiziksel ve topoğrafik gerçeklerine göre güncellenmiş özellikler
+    # Malatya'nın topoğrafik ve fiziksel öznitelikleri
     features = [
-        "wind_u",                 # Rüzgar Doğu-Batı Vektörü
-        "wind_v",                 # Rüzgar Kuzey-Güney Vektörü
-        "pressure_diff_3h",       # Barometrik Eğilim
-        "temp_diff_3h",           # Çanak İçi Soğuma Hızı (Katabatik İnversiyon için)
-        "mountain_blockage_index",# Beydağları Blokajı
-        "gust_factor",            # Hamle Çarpanı
-        "dam_moisture_advection", # Karakaya Barajı Nem Taşınımı
-        "is_snow_phase",          # Kar/Sulu Kar Fazı
-        "hail_potential",         # Konvektif Dolu Potansiyeli
+        "wind_u",
+        "wind_v",
+        "pressure_diff_3h",
+        "temp_diff_3h",
+        "mountain_blockage_index",
+        "gust_factor",
+        "dam_moisture_advection",
+        "is_snow_phase",
+        "hail_potential",
     ]
 
-    # Hedef Değişken: Genel Şiddetli Hava Olayı (Fırtına, Kar, Dolu VEYA Zirai Don)
+    # Hedef Değişken (Fırtına, Kar, Dolu veya Zirai Don)
     target_col = "target_severe_event"
 
     X = df[features].values
     y = df[target_col].values
 
-    # ZAMANSAL BÖLME (Temporal Split) - Data Leakage Engellendi
-    # Hava durumu verisi rastgele karıştırılamaz, kronolojik ilerlemelidir.
+    # Zamansal Bölme (Temporal Split - Veri Sızıntısını Önler)
     split_idx = int(len(df) * 0.8)
-    
     X_train, y_train = X[:split_idx], y[:split_idx]
     X_test, y_test = X[split_idx:], y[split_idx:]
 
@@ -47,22 +53,20 @@ def train_metacast_model(data_path: str, model_output_path: str):
     severe_events_test = int(np.sum(y_test))
 
     print(
-        f"Eğitim Kümesi (Geçmiş): {len(X_train)} saat (Şiddetli Olay: {severe_events_train}) | "
-        f"Test Kümesi (Gelecek): {len(X_test)} saat (Şiddetli Olay: {severe_events_test})"
+        f"Eğitim Kümesi: {len(X_train)} saat (Afet: {severe_events_train}) | "
+        f"Test Kümesi: {len(X_test)} saat (Afet: {severe_events_test})"
     )
     print("Fizik kısıtlı (Physics-Informed) karar motoru eğitiliyor...")
 
     weights = np.zeros(X_train.shape[1])
     bias = 0.0
     lr = 0.05
-    # Sınıf dengesizliği (Class Imbalance) için pozitif sınıf ağırlığı
     pos_weight = (len(y_train) - np.sum(y_train)) / (np.sum(y_train) + 1e-5)
 
     for epoch in range(1500):
         linear_model = np.dot(X_train_norm, weights) + bias
         y_predicted = sigmoid(linear_model)
 
-        # Hata hesaplamasında sınıf ağırlığı uygulanıyor
         errors = (y_predicted - y_train) * np.where(y_train == 1, pos_weight, 1)
 
         dw = (1 / len(X_train)) * np.dot(X_train_norm.T, errors)
@@ -88,7 +92,7 @@ def train_metacast_model(data_path: str, model_output_path: str):
     print(f"Test Kümesi F1-Skoru: {f1:.3f}")
     print(f"Yakalanan Şiddetli Hava Olayları (Recall): %{recall * 100:.1f}")
     print(f"Doğruluk (Precision): %{precision * 100:.1f}")
-    print(f"Karmaşıklık: TP={tp}, FP={fp}, FN={fn}, TN={tn}")
+    print(f"Karmaşıklık Matrisi: TP={tp}, FP={fp}, FN={fn}, TN={tn}")
 
     os.makedirs(os.path.dirname(model_output_path), exist_ok=True)
     model_payload = {
@@ -97,6 +101,8 @@ def train_metacast_model(data_path: str, model_output_path: str):
         "bias": float(bias),
         "mean": mean.tolist(),
         "std": std.tolist(),
+        "last_trained_timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "total_logs_trained": 0,
     }
 
     with open(model_output_path, "w", encoding="utf-8") as f:
@@ -104,7 +110,59 @@ def train_metacast_model(data_path: str, model_output_path: str):
 
     print(f"\nModel başarıyla kaydedildi: {model_output_path}")
 
+
+# --- 2. CANLI KENDİ KENDİNE ÖĞRENME MOTORU (SQLITE LOGLARI İLE OTOMATİK KALİBRASYON) ---
+def retrain_from_logs(
+    db_path: str = "data/metacast_logs.db",
+    model_path: str = "models/metacast_weights.json",
+    min_new_records: int = 50,
+):
+    """
+    SQLite tablosunda biriken gerçek Erhaç METAR ölçümleri ve sayısal model
+    sapmalarını okur. Ağırlıkları yerel topoğrafik blokaja göre otomatik günceller.
+    """
+    if not os.path.exists(db_path) or not os.path.exists(model_path):
+        return False, "Veritabanı veya model ağırlık dosyası bulunamadı."
+
+    conn = sqlite3.connect(db_path)
+    df_logs = pd.read_sql_query(
+        "SELECT * FROM validation_logs WHERE obs_gust IS NOT NULL", conn
+    )
+    conn.close()
+
+    if len(df_logs) < min_new_records:
+        return False, f"Yetersiz kayıt sayısı ({len(df_logs)}/{min_new_records})."
+
+    with open(model_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    weights = np.array(payload["weights"])
+    bias = float(payload["bias"])
+
+    # Sayısal model ile yer telemetrisi arasındaki ortalama rüzgâr hatası
+    delta_w = df_logs["delta_wind"].values
+    mean_bias_error = float(np.mean(delta_w))
+
+    lr = 0.01
+    # 4. indeks mountain_blockage_index (Beydağları orografisi) katsayısıdır
+    if len(weights) > 4:
+        weights[4] -= lr * mean_bias_error * 0.1
+    bias -= lr * mean_bias_error * 0.05
+
+    payload["weights"] = weights.tolist()
+    payload["bias"] = float(bias)
+    payload["last_calibrated_timestamp"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload["total_logs_trained"] = len(df_logs)
+
+    with open(model_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=4)
+
+    return True, f"Model {len(df_logs)} yer istasyonu kaydıyla başarıyla güncellendi!"
+
+
 if __name__ == "__main__":
     input_features = os.path.join("data", "features_data.csv")
     output_model = os.path.join("models", "metacast_weights.json")
+    
+    # Dosya doğrudan çalıştırıldığında ana eğitimi başlatır
     train_metacast_model(input_features, output_model)
