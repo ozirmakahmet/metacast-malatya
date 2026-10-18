@@ -133,7 +133,7 @@ def sigmoid(z):
     return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
 
 
-# --- MLOps VERİ GÜNLÜĞÜ (SQLITE) ---
+# --- MLOps VERİ GÜNLÜĞÜ (SQLITE) & OTOMATİK ÖĞRENME TETİKLEYİCİSİ ---
 def init_logger_db():
     os.makedirs("data", exist_ok=True)
     conn = sqlite3.connect("data/metacast_logs.db")
@@ -191,7 +191,20 @@ def log_validation_entry(
             ),
         )
         conn.commit()
+
+        # Kayıt sayısını kontrol et
+        cursor.execute("SELECT COUNT(*) FROM validation_logs WHERE obs_gust IS NOT NULL")
+        total_count = cursor.fetchone()[0]
         conn.close()
+
+        # Her 50 yeni yer telemetrisi kaydında bir arka planda ağırlıkları otomatik yeniden eğit
+        if total_count > 0 and total_count % 50 == 0:
+            try:
+                from src.train import retrain_from_logs
+                retrain_from_logs(min_new_records=50)
+            except Exception:
+                pass
+
     except Exception:
         pass
 
@@ -524,6 +537,7 @@ elif "Akademik Doğrulama" in main_category:
 else:
     mode = "What-If Laboratuvarı"
 
+# Model Ağırlıklarının Yüklenmesi
 try:
     with open("models/metacast_weights.json", "r", encoding="utf-8") as f:
         payload = json.load(f)
@@ -531,6 +545,8 @@ try:
     bias = payload["bias"]
     mean = np.array(payload["mean"])
     std = np.array(payload["std"])
+    last_calib_str = payload.get("last_calibrated_timestamp", "İlk Kurulum")
+    total_calib_logs = payload.get("total_logs_trained", 0)
 except Exception as e:
     st.error(f"Model ağırlıkları yüklenemedi: {e}")
     st.stop()
@@ -571,13 +587,10 @@ if mode == "Akademik Doğrulama Modu":
 
     b1, b2, b3, b4 = st.columns(4)
     b1.metric("Brier Skoru (BS)", "0.084")
-    b1.caption(
-        "Karesel Olasılık Hatası (0: Mükemmel, Ref Sayısal Model: 0.180) | 2024"
-        " Test Verisi"
-    )
+    b1.caption("Karesel Olasılık Hatası (0: Mükemmel, Ref NWP: 0.180) | 2024 Testi")
 
     b2.metric("Yakalama Oranı (POD)", "%88.6")
-    b2.caption("2024 Yılındaki Kritik Afetleri Önceden Yakalama Başarısı")
+    b2.caption("2024 Afetlerini Önceden Yakalama Başarısı")
 
     b3.metric("Yanlış Alarm Oranı (FAR)", "%14.2")
     b3.caption("De-Warning Mekanizmasıyla Gereksiz Alarmları Filtreleme")
@@ -618,27 +631,15 @@ if mode == "Akademik Doğrulama Modu":
 # --- "WHAT-IF" SİMÜLASYON LABORATUVARI ---
 if mode == "What-If Laboratuvarı":
     st.subheader("🧪 'What-If' Atmosfer & Orografi Simülasyon Laboratuvarı")
-    st.caption(
-        "⚠️ Bu sekme hipotez testleri içindir. Canlı operasyon verilerini"
-        " etkilemez."
-    )
+    st.caption("⚠️ Bu sekme hipotez testleri içindir. Canlı operasyon verilerini etkilemez.")
 
     preset_corridor = st.selectbox(
         "🌪️ Malatya Tipik Meteorolojik Hava Koridoru Seçin:",
         [
             "Özel Ayar / Serbest Kontrol",
-            (
-                "1. Akdeniz Lodosu & Yağış Kütlesi (215° - Beydağları Duvarına"
-                " Çarpış / Blokaj)"
-            ),
-            (
-                "2. Karadeniz / Balkan Soğuk Akımı (340° - Hekimhan/Tohma Girişi"
-                " & Tipi/Don)"
-            ),
-            (
-                "3. Fırat Vadi Koridoru & Bahar Dolusu (045° - Açık Tünel Süper"
-                " Hücre)"
-            ),
+            "1. Akdeniz Lodosu & Yağış Kütlesi (215° - Beydağları Duvarına Çarpış / Blokaj)",
+            "2. Karadeniz / Balkan Soğuk Akımı (340° - Hekimhan/Tohma Girişi & Tipi/Don)",
+            "3. Fırat Vadi Koridoru & Bahar Dolusu (045° - Açık Tünel Süper Hücre)",
         ],
     )
 
@@ -1220,6 +1221,9 @@ with v_col1:
         <p style="margin: 0; font-size: 0.9rem; color: #cfd8dc;"><strong>Doğrulama:</strong> {rel_status}</p>
         <div style="margin-top: 8px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 0.85rem;">
             {delta_display}
+        </div>
+        <div style="margin-top: 8px; font-size: 0.78rem; color: #78909c;">
+            ⚙️ Son Kalibrasyon: <strong>{last_calib_str}</strong> ({total_calib_logs} Yer Kaydıyla)
         </div>
     </div>
     """,
