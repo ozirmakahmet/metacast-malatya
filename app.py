@@ -660,7 +660,7 @@ if mode == "Model Kıyaslama Arenası":
 
     ecmwf_g_now = float(df_raw["wind_gusts_10m_ecmwf_ifs"].iloc[now_idx])
     gfs_g_now = float(df_raw["wind_gusts_10m_gfs_seamless"].iloc[now_idx])
-    icon_g_now = float(df_raw["wind_gusts_10m_icon_seamless"].iloc[now_idx])
+    icon_g_now = float(df_raw["wind_gusts_10m_icon_seamless"].iloc[now_idx]) if "wind_gusts_10m_icon_seamless" in df_raw.columns else ecmwf_g_now
     mean_g_now = (ecmwf_g_now + gfs_g_now + icon_g_now) / 3.0
 
     wdir_now = float(df_raw["wind_direction_10m_ecmwf_ifs"].iloc[now_idx])
@@ -727,7 +727,7 @@ if mode == "Model Kıyaslama Arenası":
 
         e_g = float(df_arena["wind_gusts_10m_ecmwf_ifs"].iloc[h_i])
         g_g = float(df_arena["wind_gusts_10m_gfs_seamless"].iloc[h_i])
-        i_g = float(df_arena["wind_gusts_10m_icon_seamless"].iloc[h_i])
+        i_g = float(df_arena["wind_gusts_10m_icon_seamless"].iloc[h_i]) if "wind_gusts_10m_icon_seamless" in df_arena.columns else e_g
         m_mean = (e_g + g_g + i_g) / 3.0
 
         w_dir = float(df_arena["wind_direction_10m_ecmwf_ifs"].iloc[h_i])
@@ -1029,9 +1029,9 @@ if mode == "Canlı Operasyonel":
 else:
     df, date_display, tag_sub = generate_scenario(mode)
 
-ecmwf = df["wind_gusts_10m_ecmwf_ifs"]
-gfs = df["wind_gusts_10m_gfs_seamless"]
-icon = df["wind_gusts_10m_icon_seamless"]
+ecmwf = df["wind_gusts_10m_ecmwf_ifs"].fillna(0)
+gfs = df["wind_gusts_10m_gfs_seamless"].fillna(0)
+icon = df["wind_gusts_10m_icon_seamless"].fillna(ecmwf) if "wind_gusts_10m_icon_seamless" in df.columns else ecmwf
 
 gust_mean = (ecmwf + gfs + icon) / 3.0
 gust_std = np.std([ecmwf, gfs, icon], axis=0)
@@ -1040,7 +1040,7 @@ peak_idx = int(np.argmax(gust_mean))
 peak_time = df["time"].iloc[peak_idx].strftime("%d.%m.%Y - Saat %H:00")
 peak_gust = gust_mean.iloc[peak_idx]
 
-wind_dir_series = df["wind_direction_10m_ecmwf_ifs"]
+wind_dir_series = df["wind_direction_10m_ecmwf_ifs"].fillna(0)
 live_wind_deg = float(wind_dir_series.iloc[peak_idx])
 
 pressure_diff = df["surface_pressure_ecmwf_ifs"].diff(periods=3).fillna(0)
@@ -1050,15 +1050,15 @@ gust_factor = (
     gust_mean / (df["wind_speed_10m_ecmwf_ifs"] + 1e-5)
 ).clip(1.0, 5.0)
 
-temp = df["temperature_2m_ecmwf_ifs"]
-precip = df["precipitation_ecmwf_ifs"]
+temp = df["temperature_2m_ecmwf_ifs"].fillna(0)
+precip = df["precipitation_ecmwf_ifs"].fillna(0)
 cloud_cover = df.get(
     "cloud_cover_ecmwf_ifs",
     df.get("cloud_cover", pd.Series(np.zeros(len(df)))),
-)
+).fillna(20)
 
-cape_series = df.get("cape", pd.Series(np.zeros(len(df))))
-dew_point_series = df.get("dew_point_2m_ecmwf_ifs", temp - 4.0)
+cape_series = df.get("cape", pd.Series(np.zeros(len(df)))).fillna(0)
+dew_point_series = df.get("dew_point_2m_ecmwf_ifs", temp - 4.0).fillna(0)
 dew_point_depression = temp - dew_point_series
 
 night_mask = (df["time"].dt.hour >= 21) | (df["time"].dt.hour <= 7)
@@ -1098,7 +1098,7 @@ is_snow_phase = (df["precip_type"] == "❄️ Kar / Sulu Kar").astype(int)
 hail_potential = (df["precip_type"] == "⚡ Dolu / Süper Hücre").astype(int)
 
 X_input = np.column_stack([
-    df["wind_speed_10m_ecmwf_ifs"].values,
+    df["wind_speed_10m_ecmwf_ifs"].fillna(0).values,
     pressure_diff.values,
     mountain_blockage.values,
     gust_factor.values,
@@ -1115,7 +1115,6 @@ probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 # ==============================================================================
 st.markdown("### 📱 Önümüzdeki 24 Saatin Saatlik Tahmini & Hadise Özeti")
 
-# Zaman dilimi uyuşmazlığını önlemek için tzinfo=None yapıldı
 now_real_dt = datetime.now(TR_TZ).replace(tzinfo=None)
 
 if mode == "Canlı Operasyonel":
@@ -1146,7 +1145,7 @@ def get_weather_icon_and_desc(t, p, c, cape):
         else:
             return "☁️", "Kapalı"
 
-hourly_cards_html = []
+hourly_cards_list = []
 rain_events = []
 frost_events = []
 storm_events = []
@@ -1156,7 +1155,6 @@ for idx_h in range(len(df_24h)):
     temp_val = float(df_24h["temperature_2m_ecmwf_ifs"].iloc[idx_h])
     precip_val = float(df_24h["precipitation_ecmwf_ifs"].iloc[idx_h])
     
-    # Sütun yoksa IndexError vermeden güvenle 0 veya 20 al
     cloud_val = float(df_24h["cloud_cover_ecmwf_ifs"].iloc[idx_h]) if "cloud_cover_ecmwf_ifs" in df_24h.columns else (float(df_24h["cloud_cover"].iloc[idx_h]) if "cloud_cover" in df_24h.columns else 20.0)
     cape_val = float(df_24h["cape"].iloc[idx_h]) if "cape" in df_24h.columns else 0.0
     gust_val = float(df_24h["wind_gusts_10m_ecmwf_ifs"].iloc[idx_h])
@@ -1175,23 +1173,13 @@ for idx_h in range(len(df_24h)):
     card_cls = "hourly-card active-now" if is_first else "hourly-card"
     time_badge = "Şimdi" if is_first else h_label
 
-    precip_label = f"💧 %{int(min(95, precip_val*25 + 10))}" if precip_val > 0.05 else ""
+    precip_label = f"<div class='hourly-precip'>💧 %{int(min(95, precip_val*25 + 10))}</div>" if precip_val > 0.05 else "<div class='hourly-precip'></div>"
 
-    hourly_cards_html.append(f"""
-        <div class="{card_cls}">
-            <div class="hourly-time">{time_badge}</div>
-            <div class="hourly-icon">{icon}</div>
-            <div class="hourly-temp">{temp_val:.0f}°</div>
-            <div class="hourly-desc">{desc}</div>
-            <div class="hourly-precip">{precip_label}</div>
-        </div>
-    """)
+    card_str = f"<div class='{card_cls}'><div class='hourly-time'>{time_badge}</div><div class='hourly-icon'>{icon}</div><div class='hourly-temp'>{temp_val:.0f}°</div><div class='hourly-desc'>{desc}</div>{precip_label}</div>"
+    hourly_cards_list.append(card_str)
 
-st.markdown(f"""
-<div class="hourly-scroll-container">
-    {''.join(hourly_cards_html)}
-</div>
-""", unsafe_allow_html=True)
+all_cards_merged = "".join(hourly_cards_list)
+st.markdown(f'<div class="hourly-scroll-container">{all_cards_merged}</div>', unsafe_allow_html=True)
 
 bulletin_messages = []
 if rain_events:
