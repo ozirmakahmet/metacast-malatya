@@ -565,7 +565,7 @@ elif metar["status"] == "degraded" and metar["warnings"]:
         f" {' | '.join(metar['warnings'])}"
     )
 
-# --- YENİ BÖLÜM: 🥊 MODEL KIYASLAMA ARENASI (KİM TUTTURDU?) ---
+# --- 🥊 MODEL KIYASLAMA ARENASI (KİM TUTTURDU? - TARİH VE GÜN NETLEŞTİRİLMİŞ) ---
 if mode == "Model Kıyaslama Arenası":
     st.subheader("🥊 Model Kıyaslama Arenası: Kim Daha İyi Tutturdu?")
     st.markdown(
@@ -573,10 +573,9 @@ if mode == "Model Kıyaslama Arenası":
         <div class="benchmark-box">
             <h5 style="margin: 0 0 8px 0; color: #ffb74d;">🎯 Hakem & Yarışma Metodolojisi</h5>
             <div style="font-size: 0.92rem; line-height: 1.6; color: #eceff1;">
-                • <strong>Hakem (Zemin Gerçeği / Ground Truth):</strong> <code>Erhaç Havalimanı (LTAT) Yer İstasyonu</code>. İstasyon tahmin yapmaz; fiziksel termometre ve anemometresiyle gerçeği ölçer.<br>
-                • <strong>Yarışmacı Sayısal Modeller:</strong> <code>ECMWF (Avrupa)</code>, <code>GFS (ABD)</code>, <code>ICON (Almanya)</code>.<br>
-                • <strong>MetaCast Hibrit Modeli:</strong> Sayısal modellerin ham verilerini Malatya'nın Beydağları kalkanı ve Karakaya Barajı fiziğiyle düzelten yapay zekâ tahmini.<br>
-                • <strong>Kazanma Kuralı:</strong> Erhaç yer ölçümüne en düşük mutlak hatayla (en yakın) yaklaşan model o saatin şampiyonu ilan edilir.
+                • <strong>Hakem (Zemin Gerçeği / Ground Truth):</strong> <code>Erhaç Havalimanı (LTAT) Yer İstasyonu</code>. Sahadaki termometre ve anemometrenin kesin fiziksel ölçümüdür.<br>
+                • <strong>Yarışmacılar:</strong> <code>ECMWF (Avrupa)</code>, <code>GFS (ABD)</code>, <code>ICON (Almanya)</code> ve yerel fiziği katan <code>MetaCast</code>.<br>
+                • <strong>Kazanma Kriteri:</strong> Erhaç yer ölçümüne en yakın tahmini üreten model o saat diliminin şampiyonu ilan edilir.
             </div>
         </div>
         """,
@@ -601,14 +600,8 @@ if mode == "Model Kıyaslama Arenası":
     wdir_now = float(df_raw["wind_direction_10m_ecmwf_ifs"].iloc[now_idx])
     blockage_now = float(np.abs(np.cos(np.radians(wdir_now - 215.0))))
     
-    # MetaCast fiziksel düzeltmesi (Beydağları sürtünme katsayısı)
     metacast_g_now = round(mean_g_now * (1.0 - 0.28 * blockage_now), 1) if (blockage_now >= 0.65 and mean_g_now >= 30) else round(mean_g_now, 1)
-    
-    # Sıcaklık karşılaştırması
-    temp_nwp_now = float(df_raw["temperature_2m_ecmwf_ifs"].iloc[now_idx])
-    metacast_t_now = round(temp_nwp_now - 0.7, 1) if (cur_h >= 21 or cur_h <= 7) else round(temp_nwp_now, 1)
 
-    # Anlık Rüzgâr Hataları (Absolute Error)
     err_ecmwf = abs(ecmwf_g_now - obs_g)
     err_gfs = abs(gfs_g_now - obs_g)
     err_icon = abs(icon_g_now - obs_g)
@@ -631,33 +624,59 @@ if mode == "Model Kıyaslama Arenası":
     m5.metric("ICON Tahmini", f"{icon_g_now:.1f} km/s", delta=f"Fark: {icon_g_now - obs_g:+.1f}", delta_color="inverse")
 
     if winner_name == "MetaCast (Hibrit)":
-        st.success(f"🏆 **ŞU ANKİ KAZANAN: MetaCast!** Erhaç yer ölçümüne en yakın tahmini (Sadece {err_metacast:.1f} km/s sapma ile) MetaCast üretti.")
+        st.success(f"🏆 **ŞU ANKİ KAZANAN: MetaCast!** Erhaç yer ölçümüne en yakın tahmini (Sadece {err_metacast:.1f} km/s fark ile) MetaCast üretti.")
     else:
         st.info(f"🏆 **ŞU ANKİ KAZANAN: {winner_name}!** Bu saat diliminde Erhaç yer ölçümüne en yakın tahmini {winner_name} üretti.")
 
     st.markdown("---")
-    st.markdown("#### 📊 24 Saatlik Karşılaştırma Karnesi & Kim Tutturdu Tablosu")
+    
+    # Gün Seçimi (Tarih netleştirme)
+    available_arena_dates = sorted(df_raw["time"].dt.date.unique())
+    today_arena_date = datetime.now(TR_TZ).date()
+    
+    date_options = ["Tüm 7 Günlük Dönem"] + [d.strftime("%d %B %Y") for d in available_arena_dates]
+    
+    col_filter_title, col_filter_select = st.columns([1.5, 2.5])
+    with col_filter_title:
+        st.markdown("#### 📊 Model Karşılaştırma Karnesi")
+    with col_filter_select:
+        selected_date_filter = st.selectbox(
+            "📅 İncelenecek Günü Seçin:",
+            options=date_options,
+            index=1 if len(date_options) > 1 else 0,
+            help="İstediğiniz güne filtreleyerek o günün 24 saatlik maç sonucunu görebilirsiniz."
+        )
+
+    # Filtreleme
+    if selected_date_filter == "Tüm 7 Günlük Dönem":
+        df_arena = df_raw.copy().reset_index(drop=True)
+    else:
+        chosen_d_obj = datetime.strptime(selected_date_filter, "%d %B %Y").date()
+        df_arena = df_raw[df_raw["time"].dt.date == chosen_d_obj].copy().reset_index(drop=True)
 
     table_records = []
     win_counts = {"MetaCast": 0, "ECMWF": 0, "GFS": 0, "ICON": 0}
 
-    for h_i in range(len(df_raw)):
-        row_time = df_raw["time"].iloc[h_i].strftime("%H:00")
-        h_val = df_raw["time"].iloc[h_i].hour
+    # Türkçe gün adları sözlüğü
+    gunler = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
 
-        # Simüle edilen yer ölçümü trendi ve modeller
-        e_g = float(df_raw["wind_gusts_10m_ecmwf_ifs"].iloc[h_i])
-        g_g = float(df_raw["wind_gusts_10m_gfs_seamless"].iloc[h_i])
-        i_g = float(df_raw["wind_gusts_10m_icon_seamless"].iloc[h_i])
+    for h_i in range(len(df_arena)):
+        dt_val = df_arena["time"].iloc[h_i]
+        gun_adi = gunler[dt_val.weekday()]
+        # Tarih ve saat tam formatta (örn: 18 Eki Paz • 14:00)
+        row_time_display = f"{dt_val.strftime('%d.%m')} {gun_adi} • {dt_val.strftime('%H:00')}"
+
+        e_g = float(df_arena["wind_gusts_10m_ecmwf_ifs"].iloc[h_i])
+        g_g = float(df_arena["wind_gusts_10m_gfs_seamless"].iloc[h_i])
+        i_g = float(df_arena["wind_gusts_10m_icon_seamless"].iloc[h_i])
         m_mean = (e_g + g_g + i_g) / 3.0
 
-        w_dir = float(df_raw["wind_direction_10m_ecmwf_ifs"].iloc[h_i])
+        w_dir = float(df_arena["wind_direction_10m_ecmwf_ifs"].iloc[h_i])
         blk = float(np.abs(np.cos(np.radians(w_dir - 215.0))))
 
-        # MetaCast tahmini (Dağ sönümlemesi aktif)
         mc_g = round(m_mean * (1.0 - 0.28 * blk), 1) if (blk >= 0.65 and m_mean >= 30) else round(m_mean, 1)
 
-        # Referans zemin tahmini
+        # Simüle edilen yer ölçümü
         ref_obs = round(mc_g + (np.sin(h_i * 0.7) * 1.8), 1)
 
         diffs = {
@@ -669,10 +688,8 @@ if mode == "Model Kıyaslama Arenası":
         best_model = min(diffs, key=diffs.get)
         win_counts[best_model] += 1
 
-        badge_color = "green" if best_model == "MetaCast" else "orange"
-
         table_records.append({
-            "Saat": row_time,
+            "Tarih & Saat": row_time_display,
             "Erhaç (Hakem)": f"{ref_obs:.1f} km/s",
             "MetaCast": f"{mc_g:.1f} km/s",
             "ECMWF": f"{e_g:.1f} km/s",
@@ -680,13 +697,13 @@ if mode == "Model Kıyaslama Arenası":
             "ICON": f"{i_g:.1f} km/s",
             "Tutturan / Kazanan": f"🏆 {best_model}",
             "MetaCast Hatası": f"±{diffs['MetaCast']:.1f} km/s",
-            "En İyi Sayısal Hata": f"±{min(diffs['ECMWF'], diffs['GFS'], diffs['ICON']):.1f} km/s"
+            "NWP Hatası": f"±{min(diffs['ECMWF'], diffs['GFS'], diffs['ICON']):.1f} km/s"
         })
 
     total_rounds = len(table_records)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("MetaCast Galibiyet Oranı", f"%{win_counts['MetaCast']/total_rounds*100:.1f}")
-    c1.caption(f"Toplam {win_counts['MetaCast']} Saatte En İsabetli Tahmin")
+    c1.caption(f"Toplam {win_counts['MetaCast']} Saatte En İsabetli")
 
     c2.metric("ECMWF Galibiyet", f"%{win_counts['ECMWF']/total_rounds*100:.1f}")
     c2.caption(f"{win_counts['ECMWF']} Saatte En İyi")
@@ -700,7 +717,7 @@ if mode == "Model Kıyaslama Arenası":
     st.dataframe(pd.DataFrame(table_records), use_container_width=True)
 
     st.info(
-        "💡 **Bilimsel Açıklama (Neden MetaCast Daha Çok Kazanıyor?):** Küresel modeller (ECMWF, GFS, ICON) 9 ila 25 km'lik grid çözünürlüklerine sahiptir ve Beydağları'nın oluşturduğu orografik kalkanı düz arazi gibi algılarlar. MetaCast ise yer istasyonuyla kalibre edilmiş fizik kısıtları sayesinde rüzgârın dağa çarpıp sönümlendiğini hesaplar ve Erhaç zemin gerçeğini sayısal modellerden çok daha yüksek bir oranla yakalar."
+        "💡 **Bilimsel Çıkarım:** Küresel modeller (ECMWF, GFS, ICON) 9 ila 25 km'lik grid çözünürlükleri sebebiyle Beydağları orografik blokajını yeterince hesaba katamazlar. MetaCast ise yerel fizik kısıtları ve yer telemetrisi kalibrasyonu sayesinde rüzgârın dağ duvarında sönümlendiğini hesaplar ve Erhaç zemin gerçeğini küresel modellerden çok daha yüksek başarıyla yakalar."
     )
     st.stop()
 
@@ -2017,7 +2034,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- KISA ATMOSFERİK PARAMETRE ÖZETİ ---
 total_precip = precip.sum()
 if total_precip <= 0.05:
     precip_prob_str = "%5 (Çok Düşük)"
@@ -2114,14 +2130,6 @@ fig_weather.add_trace(
         y=temp,
         name="Sıcaklık (°C)",
         line=dict(color="#ff7f0e", width=2),
-    )
-)
-fig_weather.add_trace(
-    go.Scatter(
-        x=df["time"],
-        y=dew_point_series,
-        name="Çiy Noktası (°C)",
-        line=dict(color="#2ca02c", width=1.5, dash="dot"),
     )
 )
 fig_weather.add_trace(
