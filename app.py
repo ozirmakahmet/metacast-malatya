@@ -696,6 +696,15 @@ if mode == "Model Kıyaslama Arenası":
     available_arena_dates = sorted(df_raw["time"].dt.date.unique())
     date_options = ["Tüm 7 Günlük Dönem"] + [d.strftime("%d %B %Y") for d in available_arena_dates]
     
+    # Bugünün tarihini bulup menüde otomatik olarak seçili getirme
+    today_arena_date = datetime.now(TR_TZ).date()
+    today_arena_str = today_arena_date.strftime("%d %B %Y")
+    
+    if today_arena_str in date_options:
+        default_arena_idx = date_options.index(today_arena_str)
+    else:
+        default_arena_idx = 1 if len(date_options) > 1 else 0
+
     col_filter_title, col_filter_select = st.columns([1.5, 2.5])
     with col_filter_title:
         st.markdown("##### 📊 Model Karşılaştırma Karnesi")
@@ -703,7 +712,7 @@ if mode == "Model Kıyaslama Arenası":
         selected_date_filter = st.selectbox(
             "Günü Filtreleyin:",
             options=date_options,
-            index=1 if len(date_options) > 1 else 0,
+            index=default_arena_idx,
             label_visibility="collapsed"
         )
 
