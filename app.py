@@ -910,7 +910,7 @@ if mode == "Model Kıyaslama Arenası":
             elif "Basınç" in selected_param:
                 c_unit = "hPa"
                 c_ref, c_mc, c_ec, c_gfs, c_icon = act_p, mc_p, e_p, g_p, i_p
-            else:
+            else:  # Bileşik Genel Başarı
                 c_unit = "Puan"
                 sc_mc = round(max(0, 100 - (abs(mc_g - act_g)*1.0 + abs(mc_t - act_t)*3.0 + abs(mc_pr - act_pr)*6.0 + abs(mc_p - act_p)*0.8)), 1)
                 sc_ec = round(max(0, 100 - (abs(e_g - act_g)*1.0 + abs(e_t - act_t)*3.0 + abs(e_pr - act_pr)*6.0 + abs(e_p - act_p)*0.8)), 1)
@@ -918,28 +918,26 @@ if mode == "Model Kıyaslama Arenası":
                 sc_icon = round(max(0, 100 - (abs(i_g - act_g)*1.0 + abs(i_t - act_t)*3.0 + abs(i_pr - act_pr)*6.0 + abs(i_p - act_p)*0.8)), 1)
                 c_ref, c_mc, c_ec, c_gfs, c_icon = 100.0, sc_mc, sc_ec, sc_gfs, sc_icon
 
+            # Farkların Sözlüğü
             if "Bileşik" in selected_param:
-                diffs_row = {"MetaCast": 100 - c_mc, "ECMWF": 100 - c_ec, "GFS": 100 - c_gfs, "ICON": 100 - c_icon}
-                min_err_val = min(diffs_row.values())
-            # Minimum hataya eşit (±0.05 toleransla) olan tüm modelleri bul
-            tied_models = [m for m, err in diffs_row.items() if abs(err - min_err_val) <= 0.05]
+                diffs_row = {"MetaCast": round(100 - c_mc, 1), "ECMWF": round(100 - c_ec, 1), "GFS": round(100 - c_gfs, 1), "ICON": round(100 - c_icon, 1)}
+            else:
+                diffs_row = {"MetaCast": round(abs(c_mc - c_ref), 1), "ECMWF": round(abs(c_ec - c_ref), 1), "GFS": round(abs(c_gfs - c_ref), 1), "ICON": round(abs(c_icon - c_ref), 1)}
 
-            if len(tied_models) > 1:
-                row_winner_txt = f"🤝 {' & '.join(tied_models)}"
-                for m in tied_models:
-                    win_counts[m] += 1
-            else:
-                best_model_row = tied_models[0]
-                win_counts[best_model_row] += 1
-                row_winner_txt = f"🏆 {best_model_row}"
-            elif "Yağış" in selected_param and c_ref == 0.0 and max(c_mc, c_ec, c_gfs, c_icon) <= 0.05:
+            # Kazananı ve Eşitlik (Beraberlik) Durumunu Belirleme
+            if "Yağış" in selected_param and c_ref == 0.0 and max(c_mc, c_ec, c_gfs, c_icon) <= 0.05:
                 row_winner_txt = "🤝 Konsensüs (Kuru)"
-                diffs_row = {"MetaCast": 0.0, "ECMWF": 0.0, "GFS": 0.0, "ICON": 0.0}
             else:
-                diffs_row = {"MetaCast": abs(c_mc - c_ref), "ECMWF": abs(c_ec - c_ref), "GFS": abs(c_gfs - c_ref), "ICON": abs(c_icon - c_ref)}
-                best_model_row = min(diffs_row, key=diffs_row.get)
-                win_counts[best_model_row] += 1
-                row_winner_txt = f"🏆 {best_model_row}"
+                min_err_val = min(diffs_row.values())
+                tied_models = [m for m, err in diffs_row.items() if abs(err - min_err_val) <= 0.05]
+                if len(tied_models) > 1:
+                    row_winner_txt = f"🤝 {' & '.join(tied_models)}"
+                    for m in tied_models:
+                        win_counts[m] += 1
+                else:
+                    best_model_row = tied_models[0]
+                    win_counts[best_model_row] += 1
+                    row_winner_txt = f"🏆 {best_model_row}"
 
             table_records.append({
                 "Tarih & Saat": row_time_display,
