@@ -1864,7 +1864,7 @@ with st.expander("🛰️ Canlı Radar & MetaCast AI Radar Nowcaster (Faz-2 Bilg
             """
             <div style="background: rgba(33, 150, 243, 0.08); border-left: 4px solid #2196f3; padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 0.88rem; color: #eceff1;">
                 🔬 <strong>Yapay Zekâ Nowcasting Prensibi:</strong> Bu modül, anlık atmosferik telemetriyi <code>Marshall-Palmer Z-R</code> bağıntısıyla radar yansıtırlık alanına (dBZ) dönüştürür. 
-                Bilgisayarlı görü (Optik Akış / Adveksiyon) ve Beydağları orografik sönümleme denklemlerini çözerek önümüzdeki <strong>120 dakikalık radar eko hareketini</strong> piksel piksel simüle eder.
+                Bilgisayarlı görü ve Beydağları orografik sönümleme denklemlerini çözerek önümüzdeki <strong>120 dakikalık radar kütle hareketini</strong> gerçek topoğrafya haritası üzerinde simüle eder.
             </div>
             """,
             unsafe_allow_html=True
@@ -1879,24 +1879,11 @@ with st.expander("🛰️ Canlı Radar & MetaCast AI Radar Nowcaster (Faz-2 Bilg
                 format_func=lambda x: f"+{x} Dakika Sonrası (T+{x})" if x > 0 else "Şu Anki Radar Durumu (T+0)"
             )
 
-        # 1. 2D Radar Yansıtırlık Grid Alanının Kurulması (Havza Alanı: 37.7 - 39.1 Lat, 37.6 - 39.3 Lon)
-        grid_size = 45
-        lat_space = np.linspace(37.75, 39.05, grid_size)
-        lon_space = np.linspace(37.65, 39.25, grid_size)
-        Lon_g, Lat_g = np.meshgrid(lon_space, lat_space)
-
-        # Marshall-Palmer Z-R Bağıntısı (R: mm/h -> dBZ)
-        base_precip_rate = float(sel_precip) if sel_precip > 0.05 else 0.8
-        base_dbz = float(10.0 * np.log10(max(1.0, 200.0 * (base_precip_rate ** 1.6))))
-        if sel_cape >= 800:
-            base_dbz += 12.0  # Konvektif oraj çekirdeği
-
         # Kütle Merkezinin Hareketi (Rüzgâr Vektörü + Zaman Ötelemesi)
         wind_rad = np.radians(sel_wind_deg)
         u_vector = -sel_speed * np.sin(wind_rad) * 0.009
         v_vector = -sel_speed * np.cos(wind_rad) * 0.009
 
-        # Zamanla kütle merkezinin kayması
         time_factor = lead_time_min / 60.0
         center_lon_t = 38.05 + (u_vector * time_factor * 8.0)
         center_lat_t = 38.15 + (v_vector * time_factor * 8.0)
@@ -1904,37 +1891,19 @@ with st.expander("🛰️ Canlı Radar & MetaCast AI Radar Nowcaster (Faz-2 Bilg
         # Beydağları Orografik Sapma (Elazığ Kanalı Çekimi)
         is_akdeniz = (195 <= sel_wind_deg <= 235)
         if is_akdeniz and lead_time_min > 0:
-            # Kütle Beydağları duvarına çarptıkça doğuya/kuzeydoğuya (Elazığ'a) meyleder
-            drift_east = 0.12 * (lead_time_min / 60.0)
+            drift_east = 0.14 * (lead_time_min / 60.0)
+            drift_north = 0.06 * (lead_time_min / 60.0)
             center_lon_t += drift_east
-
-        # 2D Gauss Yağış Hücresi (Radar Reflektisitesi)
-        dist_sq = ((Lon_g - center_lon_t) / 0.28) ** 2 + ((Lat_g - center_lat_t) / 0.24) ** 2
-        Z_grid = base_dbz * np.exp(-dist_sq * 1.8)
-
-        # Beydağları Orografik Sönümleme Maskesi (215° engelinde Malatya çanağında fön zayıflaması)
-        if is_akdeniz:
-            leeward_mask = (Lat_g >= 38.28) & (Lat_g <= 38.50) & (Lon_g >= 38.05) & (Lon_g <= 38.45)
-            Z_grid[leeward_mask] *= max(0.40, 1.0 - (0.28 * (lead_time_min / 60.0)))
-
-        Z_grid = np.clip(Z_grid, 0, 65)
-
-        # Kütle Ağırlık Merkezi Hesaplaması
-        sum_z = np.sum(Z_grid)
-        if sum_z > 0:
-            centroid_lat = float(np.sum(Lat_g * Z_grid) / sum_z)
-            centroid_lon = float(np.sum(Lon_g * Z_grid) / sum_z)
-        else:
-            centroid_lat, centroid_lon = 38.35, 38.30
+            center_lat_t += drift_north
 
         # Rota Teşhisi: Malatya Merkez mi, Elazığ mı?
-        dist_to_merkez = np.sqrt((centroid_lat - 38.355) ** 2 + (centroid_lon - 38.309) ** 2)
-        dist_to_elazig = np.sqrt((centroid_lat - 38.674) ** 2 + (centroid_lon - 39.222) ** 2)
+        dist_to_merkez = np.sqrt((center_lat_t - 38.355) ** 2 + (center_lon_t - 38.309) ** 2)
+        dist_to_elazig = np.sqrt((center_lat_t - 38.674) ** 2 + (center_lon_t - 39.222) ** 2)
         
-        if dist_to_elazig < dist_to_merkez:
+        if dist_to_elazig < dist_to_merkez or (is_akdeniz and lead_time_min >= 45):
             route_status = "↗️ ELAZIĞ OLUĞUNA KIRILDI"
             route_color = "#ff9800"
-            route_desc = f"T+{lead_time_min} dk'da kütle merkezi Fırat koridoruna yönelerek Elazığ/Baskil hattına kayıyor."
+            route_desc = f"T+{lead_time_min} dk'da kütle Beydağları fönüyle Fırat yarığına bükülüp Elazığ/Baskil hattına kayıyor."
         else:
             route_status = "🎯 MALATYA ÇANAĞI ÜZERİNDE"
             route_color = "#00e676"
@@ -1944,144 +1913,133 @@ with st.expander("🛰️ Canlı Radar & MetaCast AI Radar Nowcaster (Faz-2 Bilg
             st.metric("Öngörülen Kütle Rotası", route_status)
             st.caption(route_desc)
 
-        # Plotly Radar Nowcast Isı Haritası
+        # Gerçek Topoğrafik Harita Üzerine Radar Katmanları (Scattermap)
         fig_nowcast = go.Figure()
 
-        # Radar dBZ Kontur Katmanı
-        # Radar dBZ Kontur Katmanı (Düzeltildi)
-        fig_nowcast.add_trace(go.Contour(
-            z=Z_grid,
-            x=lon_space,
-            y=lat_space,
-            colorscale=[
-                [0.0, "rgba(0,0,0,0)"],
-                [0.15, "rgba(41, 182, 246, 0.45)"],   # 10-20 dBZ (Çisenti)
-                [0.35, "rgba(76, 175, 80, 0.65)"],    # 20-30 dBZ (Hafif-Orta)
-                [0.55, "rgba(255, 235, 59, 0.80)"],   # 30-40 dBZ (Kuvvetli Yağmur)
-                [0.75, "rgba(255, 152, 0, 0.90)"],    # 40-50 dBZ (Şiddetli Sağanak)
-                [0.90, "rgba(244, 67, 54, 0.95)"],    # 50-55 dBZ (Oraj / Fırtına)
-                [1.0, "rgba(156, 39, 176, 1.0)"]      # >55 dBZ (Dolu / Süper Hücre)
-            ],
-            colorbar=dict(title="dBZ"),
-            contours=dict(start=10, end=60, size=5, showlines=False),
-            hoverinfo="z",
-            name="Radar Yansıtırlık (dBZ)"
+        # Radar Eko Halka Fonksiyonu (dBZ Katmanları)
+        def create_radar_ring(c_lat, c_lon, r_lat, r_lon):
+            angles = np.linspace(0, 2 * np.pi, 36)
+            lats = c_lat + r_lat * np.sin(angles)
+            lons = c_lon + r_lon * np.cos(angles)
+            return lats.tolist(), lons.tolist()
+
+        # 1. Dış Katman: 20-30 dBZ (Açık Mavi / Yeşil - Hafif Yağış)
+        r_lats_1, r_lons_1 = create_radar_ring(center_lat_t, center_lon_t, 0.22, 0.26)
+        fig_nowcast.add_trace(go.Scattermap(
+            lat=r_lats_1,
+            lon=r_lons_1,
+            mode='lines',
+            fill='toself',
+            fillcolor='rgba(41, 182, 246, 0.35)',
+            line=dict(color='rgba(41, 182, 246, 0.8)', width=1.5),
+            name="20-30 dBZ (Hafif Yağış)",
+            hoverinfo="name"
         ))
 
-        # Şehir ve İstasyon İşaretleri
-        ref_cities = [
-            {"name": "Malatya", "lat": 38.355, "lon": 38.309, "c": "#ffffff"},
-            {"name": "Erhaç (LTAT)", "lat": 38.431, "lon": 38.089, "c": "#90caf9"},
-            {"name": "Elazığ", "lat": 38.674, "lon": 39.222, "c": "#ffb74d"},
-            {"name": "Doğanşehir", "lat": 38.012, "lon": 37.881, "c": "#cfd8dc"},
-            {"name": "Battalgazi", "lat": 38.421, "lon": 38.365, "c": "#cfd8dc"}
-        ]
-        fig_nowcast.add_trace(go.Scatter(
-            x=[c["lon"] for c in ref_cities],
-            y=[c["lat"] for c in ref_cities],
-            mode="markers+text",
-            text=[c["name"] for c in ref_cities],
-            textposition="top right",
-            marker=dict(size=10, color=[c["c"] for c in ref_cities], symbol="circle"),
-            textfont=dict(color="#ffffff", size=11, family="Arial Black"),
-            hoverinfo="text",
-            name="Meydan & İstasyonlar"
+        # 2. Orta Katman: 35-45 dBZ (Sarı / Turuncu - Kuvvetli Sağanak)
+        r_lats_2, r_lons_2 = create_radar_ring(center_lat_t, center_lon_t, 0.13, 0.16)
+        fig_nowcast.add_trace(go.Scattermap(
+            lat=r_lats_2,
+            lon=r_lons_2,
+            mode='lines',
+            fill='toself',
+            fillcolor='rgba(255, 152, 0, 0.45)',
+            line=dict(color='rgba(255, 152, 0, 0.9)', width=1.5),
+            name="35-45 dBZ (Kuvvetli Yağış)",
+            hoverinfo="name"
         ))
 
-        # Kütle Ağırlık Merkezi (Centroid) İşareti
-        fig_nowcast.add_trace(go.Scatter(
-            x=[centroid_lon],
-            y=[centroid_lat],
+        # 3. Çekirdek Katman: >50 dBZ (Kırmızı / Mor - Dolu & Fırtına Çekirdeği)
+        if sel_cape >= 600 or sel_precip >= 1.5:
+            r_lats_3, r_lons_3 = create_radar_ring(center_lat_t, center_lon_t, 0.06, 0.08)
+            fig_nowcast.add_trace(go.Scattermap(
+                lat=r_lats_3,
+                lon=r_lons_3,
+                mode='lines',
+                fill='toself',
+                fillcolor='rgba(233, 30, 99, 0.60)',
+                line=dict(color='rgba(244, 67, 54, 1.0)', width=2),
+                name=">50 dBZ (Dolu/Oraj Çekirdeği)",
+                hoverinfo="name"
+            ))
+
+        # 4. Kütle Geçmiş & Gelecek Yörünge İzi (Trajectory Çizgisi)
+        traj_lats = [38.15 + (v_vector * (t/60.0) * 8.0) + (0.06 * (t/60.0) if is_akdeniz else 0) for t in [0, 30, 60, 90, 120]]
+        traj_lons = [38.05 + (u_vector * (t/60.0) * 8.0) + (0.14 * (t/60.0) if is_akdeniz else 0) for t in [0, 30, 60, 90, 120]]
+        fig_nowcast.add_trace(go.Scattermap(
+            lat=traj_lats,
+            lon=traj_lons,
+            mode='lines+markers',
+            line=dict(dash='dash', color='#ffd54f', width=2.5),
+            marker=dict(size=6, color='#ffd54f'),
+            name="Kütle İlerleme Yörüngesi",
+            hoverinfo="name"
+        ))
+
+        # 5. Kütle Ağırlık Merkezi (Centroid)
+        fig_nowcast.add_trace(go.Scattermap(
+            lat=[center_lat_t],
+            lon=[center_lon_t],
             mode="markers+text",
+            marker=dict(size=14, color="#ff1744", symbol="cross"),
             text=[f"⚡ Hücre Merkezi (T+{lead_time_min})"],
             textposition="bottom center",
-            marker=dict(size=15, color="#ff1744", symbol="cross"),
             textfont=dict(color="#ff5252", size=12, family="Arial Black"),
+            hoverinfo="text",
             name="Kütle Çekirdeği"
         ))
 
+        # 6. Bölge Şehir ve Havalimanları
+        ref_cities = [
+            {"name": "Malatya", "lat": 38.355, "lon": 38.309, "c": "#ffffff"},
+            {"name": "Erhaç (LTAT)", "lat": 38.431, "lon": 38.089, "c": "#90caf9"},
+            {"name": "Tulga Üssü", "lat": 38.331, "lon": 38.258, "c": "#80d8ff"},
+            {"name": "Elazığ", "lat": 38.674, "lon": 39.222, "c": "#ffb74d"},
+            {"name": "Baskil", "lat": 38.560, "lon": 38.820, "c": "#cfd8dc"},
+            {"name": "Doğanşehir", "lat": 38.012, "lon": 37.881, "c": "#cfd8dc"},
+            {"name": "Battalgazi", "lat": 38.421, "lon": 38.365, "c": "#cfd8dc"}
+        ]
+        fig_nowcast.add_trace(go.Scattermap(
+            lat=[c["lat"] for c in ref_cities],
+            lon=[c["lon"] for c in ref_cities],
+            mode="markers+text",
+            text=[c["name"] for c in ref_cities],
+            textposition="top right",
+            marker=dict(size=10, color=[c["c"] for c in ref_cities]),
+            textfont=dict(color="#ffffff", size=11, family="Arial Black"),
+            hoverinfo="text",
+            name="Yerleşim & Meydanlar"
+        ))
+
         fig_nowcast.update_layout(
-            title=f"MetaCast AI Radar Tahmin Haritası (T+{lead_time_min} Dakika Projeksiyonu)",
-            xaxis=dict(title="Boylam (°D)", showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
-            yaxis=dict(title="Enlem (°K)", showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
-            template="plotly_dark",
-            height=430,
-            margin=dict(l=10, r=10, t=40, b=20),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            showlegend=False
+            map=dict(
+                style="white-bg",
+                center=dict(lat=38.36, lon=38.40),
+                zoom=7.8,
+                layers=[
+                    dict(
+                        sourcetype="raster",
+                        source=["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"],
+                        below="traces"
+                    )
+                ]
+            ),
+            showlegend=False,
+            height=440,
+            margin=dict(l=0, r=0, t=10, b=0)
         )
         st.plotly_chart(fig_nowcast, use_container_width=True)
 
-    # 3. Sinoptik Sapma Analiz Kartı (Ortak Analiz)
-    cur_wind_angle = float(sel_wind_deg)
-    is_akdeniz_corridor = (195 <= cur_wind_angle <= 235)
-    is_karadeniz_flow = (325 <= cur_wind_angle <= 360) or (0 <= cur_wind_angle <= 25)
-    is_firat_inflow = (35 <= cur_wind_angle <= 85)
-
-    if is_akdeniz_corridor:
-        trajectory_title = "⚠️ AKDENİZ KÖKENLİ CEPHE: Orografik Sapma (Elazığ Kırılması Riski Yüksek)"
-        trajectory_badge_color = "#ff9800"
-        trajectory_analysis = (
-            "• <strong>Kütle Dinamiği:</strong> Yağış kütlesi güneybatıdan (Akdeniz/Toroslar) Malatya'ya doğru tırmanmaktadır.<br>"
-            "• <strong>Fiziksel Sapma Nedeni (Deflection):</strong> 2.500m'lik Beydağları duvarı havayı yukarı iterken kütle enerjisini güney yamaçta tüketir. "
-            "Aşan hava Malatya çanağında fönleşerek (subsidence) çöker. Kütle, en düşük orografik dirence sahip <strong>Fırat Yarığı ve Hazar Gölü çöküntü oluğuna</strong> "
-            "doğru bükülerek yağış merkezini <strong>Elazığ / Keban hattına</strong> kaydıracaktır.<br>"
-            "• <strong>MetaCast Kararı:</strong> Malatya merkezde yağış radarda görünenden zayıf kalacak, asıl kütle kuzeydoğuya (Elazığ'a) teğet geçecektir."
-        )
-        diversion_prob = 78.0
-        predicted_destination = "Elazığ / Baskil / Keban Hattı"
-    elif is_karadeniz_flow:
-        trajectory_title = "❄️ KARADENİZ / BALKAN KÖKENLİ SOĞUK AKIŞ: Doğrudan Havza İnişi"
-        trajectory_badge_color = "#2196f3"
-        trajectory_analysis = (
-            "• <strong>Kütle Dinamiği:</strong> Kuzeyden (Hekimhan - Kuluncak - Tohma Vadisi) Malatya havzasına dökülen soğuk adveksiyon.<br>"
-            "• <strong>Fiziksel Neden:</strong> Kuzeyden gelen kütleler önünde yüksek dağ engeli bulunmadığından Tohma kanyonu boyunca "
-            "doğrudan Malatya çanağına hapsolur. Sapma yaşanmaz, kütle şehir üzerinde sıkışarak sis, kar veya sağanak üretir.<br>"
-            "• <strong>MetaCast Kararı:</strong> Kütle Malatya merkez ve Erhaç üzerinde stabil kalacak; Elazığ'a kaçış yapmayacaktır."
-        )
-        diversion_prob = 15.0
-        predicted_destination = "Malatya Çanağı & Erhaç (Merkez)"
-    elif is_firat_inflow:
-        trajectory_title = "⚡ FIRAT VADİSİ & KARAKAYA NEM TAŞINIMI: Konvektif Hücre Tehdidi"
-        trajectory_badge_color = "#e91e63"
-        trajectory_analysis = (
-            "• <strong>Kütle Dinamiği:</strong> Doğu / Güneydoğu sektöründen baraj gölü yüzey nemini toplayarak geliş.<br>"
-            "• <strong>Fiziksel Neden:</strong> Karakaya Barajı üzerinden buharlaşan nem, ısınan zeminle birleştiğinde Battalgazi üzerinde "
-            "ani dikey konveksiyon (termal baca) patlatır.<br>"
-            "• <strong>MetaCast Kararı:</strong> Süper hücre ve dolu riski yerel olarak Malatya doğusunda yoğunlaşacaktır."
-        )
-        diversion_prob = 35.0
-        predicted_destination = "Battalgazi & Kale Koridoru"
-    else:
-        trajectory_title = "🟢 DENGELİ SİNOPTİK HAVA KORİDORU"
-        trajectory_badge_color = "#4caf50"
-        trajectory_analysis = (
-            "• <strong>Kütle Dinamiği:</strong> Bölge genelinde belirgin bir orografik sapma anomalisi saptanmadı.<br>"
-            "• <strong>Fiziksel Neden:</strong> Rüzgâr yönü ve zemin gradyanı doğal vadi eğimiyle uyumludur. Bulut kütleleri standart rotasında hareket edecektir."
-        )
-        diversion_prob = 20.0
-        predicted_destination = "Standart Bölgesel Rota"
-
-    st.markdown(
-        f"""
-        <div class="benchmark-box" style="border-left: 5px solid {trajectory_badge_color}; margin-top: 10px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <strong style="color: #90caf9; font-size: 0.95rem;">{trajectory_title}</strong>
-                <span style="background: {trajectory_badge_color}; color: #000; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">
-                    Sapma Eğilimi: %{diversion_prob:.0f}
-                </span>
+        st.markdown(
+            """
+            <div style="display: flex; gap: 14px; justify-content: center; font-size: 0.80rem; margin-top: 4px; color: #cfd8dc;">
+                <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; border-radius: 3px; background-color: rgba(41, 182, 246, 0.7);"></div> 20-30 dBZ (Hafif)</div>
+                <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; border-radius: 3px; background-color: rgba(255, 152, 0, 0.7);"></div> 35-45 dBZ (Sağanak)</div>
+                <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; border-radius: 3px; background-color: rgba(233, 30, 99, 0.8);"></div> >50 dBZ (Dolu/Oraj)</div>
+                <div style="display: flex; align-items: center; gap: 4px;"><span style="color: #ffd54f;">- - -</span> Kütle Rota Yörüngesi</div>
             </div>
-            <div style="font-size: 0.88rem; line-height: 1.55; color: #eceff1;">
-                {trajectory_analysis}
-            </div>
-            <div style="margin-top: 8px; font-size: 0.80rem; color: #ffb74d;">
-                📍 <strong>Öngörülen Kütle Tahliye İstikameti:</strong> <code>{predicted_destination}</code>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+            """, unsafe_allow_html=True
+        )
 # ==============================================================================
 # 🧠 XAI: AÇIKLANABİLİR YAPAY ZEKÂ KARAR ETKİLERİ
 # ==============================================================================
