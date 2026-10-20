@@ -1963,25 +1963,25 @@ with st.expander("🛰️ Canlı Radar & MetaCast AI Radar Nowcaster (Faz-2 Bilg
                 hoverinfo="name"
             ))
 
-        # 4. Kütle Geçmiş & Gelecek Yörünge İzi (Trajectory Çizgisi)
+        # 4. Kütle Geçmiş & Gelecek Yörünge İzi (Trajectory Çizgisi - Düzeltildi)
         traj_lats = [38.15 + (v_vector * (t/60.0) * 8.0) + (0.06 * (t/60.0) if is_akdeniz else 0) for t in [0, 30, 60, 90, 120]]
         traj_lons = [38.05 + (u_vector * (t/60.0) * 8.0) + (0.14 * (t/60.0) if is_akdeniz else 0) for t in [0, 30, 60, 90, 120]]
         fig_nowcast.add_trace(go.Scattermap(
             lat=traj_lats,
             lon=traj_lons,
             mode='lines+markers',
-            line=dict(dash='dash', color='#ffd54f', width=2.5),
-            marker=dict(size=6, color='#ffd54f'),
+            line=dict(color='#ffd54f', width=3),
+            marker=dict(size=7, color='#ffd54f'),
             name="Kütle İlerleme Yörüngesi",
             hoverinfo="name"
         ))
 
-        # 5. Kütle Ağırlık Merkezi (Centroid)
+        # 5. Kütle Ağırlık Merkezi (Centroid - Düzeltildi)
         fig_nowcast.add_trace(go.Scattermap(
             lat=[center_lat_t],
             lon=[center_lon_t],
             mode="markers+text",
-            marker=dict(size=14, color="#ff1744", symbol="cross"),
+            marker=dict(size=14, color="#ff1744"),
             text=[f"⚡ Hücre Merkezi (T+{lead_time_min})"],
             textposition="bottom center",
             textfont=dict(color="#ff5252", size=12, family="Arial Black"),
