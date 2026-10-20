@@ -1863,26 +1863,39 @@ with c_map2:
 st.markdown("---")
 
 # ==============================================================================
-# 🛰️ BÖLGESEL & KÜRESEL CANLI DOPPLER RADARI VE SİNOPTİK YÖRÜNGE MOTORU
+# 🛰️ BÖLGESEL & KÜRESEL CANLI RADAR VE GELECEK SAATLERİN SİMÜLASYONU
 # ==============================================================================
 st.markdown("---")
 with st.expander("🛰️ Canlı Radar, Uydu Takibi & Sinoptik Sapma (Trajectory) Analizi", expanded=True):
-    st.markdown(
-        """
-        <div style="font-size: 0.88rem; color: #cfd8dc; margin-bottom: 10px;">
-            🔍 <strong>Serbest Navigasyon:</strong> Haritayı fare ile kaydırarak Akdeniz, Karadeniz, çevre iller veya tüm Türkiye genelindeki yağış ve fırtına hücrelerini inceleyebilir, yakınlaşıp uzaklaşabilirsiniz (Zoom In/Out).
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    col_rad_info, col_rad_opt = st.columns([1.5, 2.5])
+    with col_rad_info:
+        st.caption("🔍 Haritada serbestçe gezinebilir, yakınlaşıp uzaklaşabilirsiniz (Zoom In/Out).")
+    with col_rad_opt:
+        radar_view_mode = st.radio(
+            "Radar Katmanı Seçimi:",
+            [
+                "🔴 Canlı Doppler (Gerçekleşen Son 1 Saat & Anlık Şimşek)",
+                "🔮 Gelecek Saatlerin Yağış Hareketi (+1h, +2h Gelecek Projeksiyonu)"
+            ],
+            horizontal=True,
+            label_visibility="collapsed"
+        )
 
-    # 1. Genişletilmiş ve Serbest Gezintili Canlı Doppler & Fırtına Radarı (Zoom: 6 ile Türkiye ve Doğu Akdeniz Havzası)
-    radar_html = """
+    # Seçime göre radar katmanını belirleme (overlay=radar veya overlay=rain)
+    if "Gelecek Saatlerin" in radar_view_mode:
+        active_overlay = "rain"
+        product_type = "ecmwf"
+        st.info("💡 **Gelecek Projeksiyonu Aktif:** Alttaki oynatma çubuğuyla (Play ▶) önümüzdeki 1 saat, 2 saat ve sonraki günlerde yağış kütlelerinin nereye doğru ilerleyeceğini izleyebilirsiniz.")
+    else:
+        active_overlay = "radar"
+        product_type = "radar"
+
+    radar_html = f"""
     <div style="border-radius: 10px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 4px 15px rgba(0,0,0,0.35);">
         <iframe 
             width="100%" 
             height="480" 
-            src="https://embed.windy.com/embed2.html?lat=38.355&lon=38.310&detailLat=38.431&detailLon=38.090&width=100%&height=480&zoom=6&level=surface&overlay=radar&product=radar&menu=&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1" 
+            src="https://embed.windy.com/embed2.html?lat=38.355&lon=38.310&detailLat=38.431&detailLon=38.090&width=100%&height=480&zoom=6&level=surface&overlay={active_overlay}&product={product_type}&menu=&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1" 
             frameborder="0">
         </iframe>
     </div>
@@ -1892,7 +1905,6 @@ with st.expander("🛰️ Canlı Radar, Uydu Takibi & Sinoptik Sapma (Trajectory
     # 2. MetaCast Fiziksel Kütle Yörüngesi ve Elazığ / Havza Sapma Motoru
     cur_wind_angle = float(sel_wind_deg)
     
-    # Akdeniz Kütlesi ve Beydağları Sapma Teşhisi
     is_akdeniz_corridor = (195 <= cur_wind_angle <= 235)
     is_karadeniz_flow = (325 <= cur_wind_angle <= 360) or (0 <= cur_wind_angle <= 25)
     is_firat_inflow = (35 <= cur_wind_angle <= 85)
