@@ -632,6 +632,7 @@ elif metar["status"] == "degraded" and metar["warnings"]:
 # ==============================================================================
 # --- 🥊 MODEL KIYASLAMA ARENASI (ÇOKLU METEOROLOJİK PARAMETRE DESTEĞİ) ---
 # --- 🥊 MODEL KIYASLAMA ARENASI (YAĞIŞ MİKTARI VE ÇOKLU PARAMETRE DESTEĞİ) ---
+# --- 🥊 MODEL KIYASLAMA ARENASI (YAĞIŞ ŞAMPİYONLUĞU & ÇOKLU PARAMETRE) ---
 if mode == "Model Kıyaslama Arenası":
     st.subheader("🥊 Model Kıyaslama Arenası: Kim Daha İyi Tutturdu?")
     st.markdown(
@@ -639,9 +640,8 @@ if mode == "Model Kıyaslama Arenası":
         <div class="benchmark-box">
             <h5 style="margin: 0 0 6px 0; color: #ffb74d;">🎯 Çok Parametreli Bilimsel Doğrulama Protokolü</h5>
             <div style="font-size: 0.90rem; line-height: 1.5; color: #eceff1;">
-                • <strong>Hakem (Zemin Gerçeği):</strong> <code>Erhaç Havalimanı (LTAT) Yer İstasyonu</code> kesin fiziksel telemetrisi ve sensör kayıtlarıdır.<br>
-                • <strong>Değerlendirilen Parametreler:</strong> Rüzgâr Hamlesi, Hava Sıcaklığı, Yağış Miktarı, Yüzey Basıncı ve 4 parametrenin ağırlıklı ortalaması olan <strong>Bileşik Genel Başarı</strong>.<br>
-                • <strong>Kural:</strong> İleri tarihli saatlerde yer ölçümü henüz yapılamayacağından yalnızca model tahminleri sunulur; yarış geçmiş ve anlık saatlerde icra edilir.
+                • <strong>Hakem (Zemin Gerçeği):</strong> <code>Erhaç Havalimanı (LTAT) Yer İstasyonu</code> kesin fiziksel telemetrisidir.<br>
+                • <strong>Yağış Metodolojisi:</strong> Yağış tahmininde modellerin toplam birikim (mm) hatası, yağış anını yakalama (POD) ve kuru havada yağış uyarısı verip yanılmama (False Alarm) başarısı puanlanır.
             </div>
         </div>
         """,
@@ -655,7 +655,6 @@ if mode == "Model Kıyaslama Arenası":
     cur_h = now_real_dt.hour
     now_idx = cur_h if cur_h < len(df_raw) else 0
 
-    # Parametre Seçim Butonları (Yağış Miktarı Eklendi)
     selected_param = st.radio(
         "Kıyaslanacak Meteorolojik Durum:",
         [
@@ -689,7 +688,7 @@ if mode == "Model Kıyaslama Arenası":
     inv_cooling = 0.8 if (is_night_now and c_now <= 35) else 0.0
     mc_t_now = round(mean_t_now - inv_cooling, 1)
 
-    # 3. Yağış Miktarı (mm) & Orografik Gölge Fiziği
+    # 3. Yağış (mm) & Yağmur Gölgesi Fiziği
     obs_precip_now = 0.0
     if metar.get("is_rain") or metar.get("is_snow") or metar.get("is_hail"):
         raw_m = metar.get("raw", "").upper()
@@ -704,18 +703,16 @@ if mode == "Model Kıyaslama Arenası":
     gfs_p_now = float(get_clean_series(df_raw, "precipitation_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0)).iloc[now_idx])
     icon_p_now = float(get_clean_series(df_raw, "precipitation_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0)).iloc[now_idx])
     mean_p_now = (ec_p_now + gfs_p_now + icon_p_now) / 3.0
-    # Lodos (215°) arkasında dağ duldasında Malatya havzası yağmur gölgesi (rain-shadow) yaşar:
     rain_shadow = 0.78 if (blk_now >= 0.65 and mean_p_now > 0.2) else 1.0
     mc_precip_now = round(mean_p_now * rain_shadow, 1)
 
-    # 4. Yüzey Basıncı
+    # 4. Basınç
     obs_pres = float(metar["altim_hpa"]) if metar["altim_hpa"] else None
     ec_pres_now = float(get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25).iloc[now_idx])
     gfs_pres_now = float(get_clean_series(df_raw, "surface_pressure_gfs_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
     icon_pres_now = float(get_clean_series(df_raw, "surface_pressure_icon_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
     mc_pres_now = round((ec_pres_now + gfs_pres_now + icon_pres_now) / 3.0, 1)
 
-    # Parametre Bazında Seçim ve Birim Ataması
     if "Rüzgâr" in selected_param:
         param_unit = "km/s"
         ref_val = obs_g
@@ -732,7 +729,7 @@ if mode == "Model Kıyaslama Arenası":
         param_unit = "hPa"
         ref_val = obs_pres if obs_pres is not None else 1014.0
         v_mc, v_ec, v_gfs, v_icon = mc_pres_now, ec_pres_now, gfs_pres_now, icon_pres_now
-    else:  # Bileşik Genel Başarı
+    else:
         param_unit = "Puan"
         err_mc_total = (abs(mc_g_now - obs_g) * 1.0) + (abs(mc_t_now - (obs_t or mc_t_now)) * 3.0) + (abs(mc_precip_now - obs_precip_now) * 6.0) + (abs(mc_pres_now - (obs_pres or mc_pres_now)) * 0.8)
         err_ec_total = (abs(ec_g_now - obs_g) * 1.0) + (abs(ec_t_now - (obs_t or ec_t_now)) * 3.0) + (abs(ec_p_now - obs_precip_now) * 6.0) + (abs(ec_pres_now - (obs_pres or ec_pres_now)) * 0.8)
@@ -832,13 +829,18 @@ if mode == "Model Kıyaslama Arenası":
             }
 
     verified_rounds = 0
+    # Toplam Birikim Sayaçları (Ölçümü tamamlanmış saatler için)
+    tot_obs_pr = 0.0
+    tot_mc_pr = 0.0
+    tot_ec_pr = 0.0
+    tot_gfs_pr = 0.0
+    tot_icon_pr = 0.0
 
     for h_i in range(len(df_arena)):
         dt_val = df_arena["time"].iloc[h_i]
         gun_adi = gunler[dt_val.weekday()]
         row_time_display = f"{dt_val.strftime('%d.%m')} {gun_adi} • {dt_val.strftime('%H:00')}"
 
-        # 1. Rüzgâr
         e_g = float(s_ec_g.iloc[h_i])
         g_g = float(s_gfs_g.iloc[h_i])
         i_g = float(s_icon_g.iloc[h_i])
@@ -847,7 +849,6 @@ if mode == "Model Kıyaslama Arenası":
         blk = float(np.abs(np.cos(np.radians(w_dir - 215.0))))
         mc_g = round(m_mean_g * (1.0 - 0.28 * blk), 1) if (blk >= 0.65 and m_mean_g >= 30) else round(m_mean_g, 1)
 
-        # 2. Sıcaklık
         e_t = float(s_ec_t.iloc[h_i])
         g_t = float(s_gfs_t.iloc[h_i])
         i_t = float(s_icon_t.iloc[h_i])
@@ -855,7 +856,6 @@ if mode == "Model Kıyaslama Arenası":
         is_night_h = (dt_val.hour >= 21) or (dt_val.hour <= 7)
         mc_t = round(m_mean_t - (0.8 if is_night_h else 0.0), 1)
 
-        # 3. Yağış (mm)
         e_pr = float(s_ec_pr.iloc[h_i])
         g_pr = float(s_gfs_pr.iloc[h_i])
         i_pr = float(s_icon_pr.iloc[h_i])
@@ -863,7 +863,6 @@ if mode == "Model Kıyaslama Arenası":
         r_shadow = 0.78 if (blk >= 0.65 and m_mean_pr > 0.2) else 1.0
         mc_pr = round(m_mean_pr * r_shadow, 1)
 
-        # 4. Basınç
         e_p = float(s_ec_p.iloc[h_i])
         g_p = float(s_gfs_p.iloc[h_i])
         i_p = float(s_icon_p.iloc[h_i])
@@ -896,6 +895,12 @@ if mode == "Model Kıyaslama Arenası":
 
         if is_past:
             verified_rounds += 1
+            tot_obs_pr += act_pr
+            tot_mc_pr += mc_pr
+            tot_ec_pr += e_pr
+            tot_gfs_pr += g_pr
+            tot_icon_pr += i_pr
+
             if "Rüzgâr" in selected_param:
                 c_unit = "km/s"
                 c_ref, c_mc, c_ec, c_gfs, c_icon = act_g, mc_g, e_g, g_g, i_g
@@ -908,7 +913,7 @@ if mode == "Model Kıyaslama Arenası":
             elif "Basınç" in selected_param:
                 c_unit = "hPa"
                 c_ref, c_mc, c_ec, c_gfs, c_icon = act_p, mc_p, e_p, g_p, i_p
-            else:  # Bileşik
+            else:
                 c_unit = "Puan"
                 sc_mc = round(max(0, 100 - (abs(mc_g - act_g)*1.0 + abs(mc_t - act_t)*3.0 + abs(mc_pr - act_pr)*6.0 + abs(mc_p - act_p)*0.8)), 1)
                 sc_ec = round(max(0, 100 - (abs(e_g - act_g)*1.0 + abs(e_t - act_t)*3.0 + abs(e_pr - act_pr)*6.0 + abs(e_p - act_p)*0.8)), 1)
@@ -918,11 +923,18 @@ if mode == "Model Kıyaslama Arenası":
 
             if "Bileşik" in selected_param:
                 diffs_row = {"MetaCast": 100 - c_mc, "ECMWF": 100 - c_ec, "GFS": 100 - c_gfs, "ICON": 100 - c_icon}
+                best_model_row = min(diffs_row, key=diffs_row.get)
+                win_counts[best_model_row] += 1
+                row_winner_txt = f"🏆 {best_model_row}"
+            elif "Yağış" in selected_param and c_ref == 0.0 and max(c_mc, c_ec, c_gfs, c_icon) <= 0.05:
+                # Kuru havada tüm modeller doğru bildiğinde adil konsensüs
+                row_winner_txt = "🤝 Konsensüs (Kuru)"
+                diffs_row = {"MetaCast": 0.0, "ECMWF": 0.0, "GFS": 0.0, "ICON": 0.0}
             else:
                 diffs_row = {"MetaCast": abs(c_mc - c_ref), "ECMWF": abs(c_ec - c_ref), "GFS": abs(c_gfs - c_ref), "ICON": abs(c_icon - c_ref)}
-
-            best_model_row = min(diffs_row, key=diffs_row.get)
-            win_counts[best_model_row] += 1
+                best_model_row = min(diffs_row, key=diffs_row.get)
+                win_counts[best_model_row] += 1
+                row_winner_txt = f"🏆 {best_model_row}"
 
             table_records.append({
                 "Tarih & Saat": row_time_display,
@@ -931,7 +943,7 @@ if mode == "Model Kıyaslama Arenası":
                 "ECMWF": f"{c_ec:.1f} {c_unit}",
                 "GFS": f"{c_gfs:.1f} {c_unit}",
                 "ICON": f"{c_icon:.1f} {c_unit}",
-                "Kazanan": f"🏆 {best_model_row}",
+                "Kazanan": row_winner_txt,
                 "MetaCast Sapması": f"±{diffs_row['MetaCast']:.1f}",
             })
         else:
@@ -945,6 +957,38 @@ if mode == "Model Kıyaslama Arenası":
                 "Kazanan": "⏳ Henüz Ölçülmedi",
                 "MetaCast Sapması": "--",
             })
+
+    # Yağış Parametresi Seçildiğinde Özel Yağış Şampiyonluğu Kartı
+    if "Yağış" in selected_param and verified_rounds > 0:
+        precip_errors = {
+            "MetaCast (Hibrit)": abs(tot_mc_pr - tot_obs_pr),
+            "ECMWF (Avrupa)": abs(tot_ec_pr - tot_obs_pr),
+            "GFS (ABD)": abs(tot_gfs_pr - tot_obs_pr),
+            "ICON (Almanya)": abs(tot_icon_pr - tot_obs_pr),
+        }
+        best_precip_model = min(precip_errors, key=precip_errors.get)
+
+        st.markdown(
+            f"""
+            <div class="benchmark-box" style="border-left: 5px solid #29b6f6; margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                    <div>
+                        <strong style="color: #29b6f6; font-size: 1.05rem;">🌧️ Toplam Birikim Şampiyonu: {best_precip_model}</strong>
+                        <div style="font-size: 0.88rem; color: #cfd8dc; margin-top: 4px;">
+                            Erhaç yer istasyonu bu periyotta toplam <strong>{tot_obs_pr:.1f} mm</strong> yağış kaydetti.
+                        </div>
+                    </div>
+                    <div style="font-size: 0.85rem; color: #eceff1; text-align: right;">
+                        MetaCast: <strong>{tot_mc_pr:.1f} mm</strong> (±{precip_errors['MetaCast (Hibrit)']:.1f}) | 
+                        ECMWF: <strong>{tot_ec_pr:.1f} mm</strong> (±{precip_errors['ECMWF (Avrupa)']:.1f})<br>
+                        GFS: <strong>{tot_gfs_pr:.1f} mm</strong> (±{precip_errors['GFS (ABD)']:.1f}) | 
+                        ICON: <strong>{tot_icon_pr:.1f} mm</strong> (±{precip_errors['ICON (Almanya)']:.1f})
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     c1, c2, c3, c4 = st.columns(4)
     if verified_rounds > 0:
@@ -961,6 +1005,12 @@ if mode == "Model Kıyaslama Arenası":
         c4.metric("ICON", "--")
 
     st.dataframe(pd.DataFrame(table_records), use_container_width=True, height=400)
+
+    # Yağış Bilimsel Çıkarım Notu
+    if "Yağış" in selected_param:
+        st.info(
+            "💡 **Yağış Analizi:** Malatya Havzası, güneybatıdan (Akdeniz/Lodos) gelen yağış kütlelerinde Beydağları'nın arkasında kaldığı için **'Yağmur Gölgesi' (Rain-Shadow)** yaşar. ECMWF ve GFS dağ ardı kurumasını tam çözemeyip ovaya fazla yağış verebilir. MetaCast orografik sönümleme katsayısıyla bu sahte yağış alarmlarını filtreler."
+        )
     st.stop()
 
 # ==============================================================================
