@@ -1839,374 +1839,114 @@ st.markdown("---")
 # 🛰️ BÖLGESEL CANLI RADAR & FAZ-2: AI RADAR NOWCASTER (COMPUTER VISION & OPTİK AKIŞ)
 # ==============================================================================
 st.markdown("---")
-with st.expander("🛰️ Canlı Radar & MetaCast AI Radar Nowcaster (Faz-2 Bilgisayarlı Görü)", expanded=True):
-    radar_subtab1, radar_subtab2 = st.tabs([
-        "🔴 Küresel & Bölgesel Canlı Doppler (Windy Akışı)",
-        "🔬 MetaCast AI Radar Nowcaster (+120 Dk Yörünge Simülatörü)",
-    ])
-
-    with radar_subtab1:
-        st.caption("🔍 Serbest Navigasyon: Haritayı fare ile kaydırıp yakınlaşabilir (Zoom In/Out), Akdeniz ve çevre illeri izleyebilirsiniz.")
-        radar_html = """
-        <div style="border-radius: 10px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 4px 15px rgba(0,0,0,0.35);">
-            <iframe 
-                width="100%" 
-                height="460" 
-                src="https://embed.windy.com/embed2.html?lat=38.355&lon=38.310&detailLat=38.431&detailLon=38.090&width=100%&height=460&zoom=6&level=surface&overlay=radar&product=radar&menu=&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1" 
-                frameborder="0">
-            </iframe>
-        </div>
-        """
-        st.components.v1.html(radar_html, height=480)
-
-    # Otomatik Kütle Yörüngesi Parametreleri
-        cur_wind_angle = float(sel_wind_deg)
-        is_akdeniz_flow = (195 <= cur_wind_angle <= 235)
-        
-        # HTML5 & Leaflet Tabanlı Kendi Kendine Akan Canlı Radar Simülatörü
-        nowcast_sim_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8" />
-            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-            <style>
-                body {{
-                    margin: 0;
-                    padding: 0;
-                    background: #0e1117;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                    color: #eceff1;
-                }}
-                #sim-container {{
-                    background: rgba(255, 255, 255, 0.02);
-                    border: 1px solid rgba(255, 255, 255, 0.12);
-                    border-radius: 10px;
-                    overflow: hidden;
-                    padding: 10px 14px 14px 14px;
-                }}
-                .sim-header {{
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 10px;
-                    flex-wrap: wrap;
-                    gap: 8px;
-                }}
-                .timeline-wrapper {{
-                    display: flex;
-                    align-items: center;
-                    gap: 12px;
-                    flex-grow: 1;
-                    max-width: 580px;
-                }}
-                .play-btn {{
-                    background: #2196f3;
-                    border: none;
-                    color: #fff;
-                    font-size: 1rem;
-                    font-weight: 700;
-                    padding: 5px 14px;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    transition: all 0.2s;
-                }}
-                .play-btn:hover {{
-                    background: #1976d2;
-                }}
-                .track-bar {{
-                    position: relative;
-                    flex-grow: 1;
-                    height: 6px;
-                    background: rgba(255, 255, 255, 0.15);
-                    border-radius: 3px;
-                }}
-                .progress-fill {{
-                    position: absolute;
-                    left: 0;
-                    top: 0;
-                    height: 100%;
-                    width: 0%;
-                    background: linear-gradient(90deg, #00e5ff, #ff1744);
-                    border-radius: 3px;
-                    transition: width 0.3s ease;
-                }}
-                .time-badge {{
-                    font-family: monospace;
-                    font-size: 0.95rem;
-                    font-weight: 800;
-                    color: #00e5ff;
-                    min-width: 80px;
-                    text-align: right;
-                }}
-                .status-pill {{
-                    padding: 4px 10px;
-                    border-radius: 6px;
-                    font-size: 0.78rem;
-                    font-weight: 800;
-                    background: rgba(0, 230, 118, 0.15);
-                    border: 1px solid #00e676;
-                    color: #00e676;
-                    transition: all 0.3s ease;
-                }}
-                #radar-map {{
-                    height: 440px;
-                    width: 100%;
-                    border-radius: 8px;
-                    border: 1px solid rgba(255, 255, 255, 0.08);
-                }}
-                .legend-bar {{
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    padding: 8px 10px 0 10px;
-                    font-size: 0.75rem;
-                    color: #b0bec5;
-                    font-weight: 600;
-                }}
-                .dbz-swatch {{
-                    display: inline-block;
-                    width: 12px;
-                    height: 12px;
-                    border-radius: 2px;
-                    margin-right: 4px;
-                    vertical-align: middle;
-                }}
-            </style>
-        </head>
-        <body>
-            <div id="sim-container">
-                <div class="sim-header">
-                    <div class="timeline-wrapper">
-                        <button id="playBtn" class="play-btn">⏸ Durdur</button>
-                        <div class="track-bar">
-                            <div id="progressFill" class="progress-fill"></div>
-                        </div>
-                        <div id="timeBadge" class="time-badge">T+0 Dk</div>
-                    </div>
-                    <div id="statusPill" class="status-pill">🎯 MALATYA ÇANAĞI ÜZERİNDE</div>
-                </div>
-
-                <div id="radar-map"></div>
-
-                <div class="legend-bar">
-                    <div><span class="dbz-swatch" style="background:#00e5ff; box-shadow: 0 0 5px #00e5ff;"></span> 15-25 dBZ (Çisenti)</div>
-                    <div><span class="dbz-swatch" style="background:#00e676; box-shadow: 0 0 5px #00e676;"></span> 25-35 dBZ (Hafif-Orta)</div>
-                    <div><span class="dbz-swatch" style="background:#ffea00; box-shadow: 0 0 5px #ffea00;"></span> 35-45 dBZ (Sağanak)</div>
-                    <div><span class="dbz-swatch" style="background:#ff1744; box-shadow: 0 0 6px #ff1744;"></span> 45-55 dBZ (Kuvvetli Fırtına)</div>
-                    <div><span class="dbz-swatch" style="background:#d500f9; box-shadow: 0 0 6px #d500f9;"></span> >55 dBZ (Dolu / Çekirdek)</div>
-                    <div style="color: #ffd54f;">⚡ Kütle Çekirdeği İlerlemesi</div>
-                </div>
-            </div>
-
-            <script>
-                // 1. Haritanın İlklendirilmesi (OpenTopoMap Kabartması)
-                const map = L.map('radar-map', {{
-                    zoomControl: true,
-                    attributionControl: false
-                }}).setView([38.35, 38.45], 8);
-
-                L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png', {{
-                    maxZoom: 14,
-                    minZoom: 6
-                }}).addTo(map);
-
-                // 2. Önemli İstasyon & Şehir Noktaları
-                const cities = [
-                    {{ name: "Malatya", lat: 38.355, lon: 38.309, color: "#ffffff" }},
-                    {{ name: "Erhaç (LTAT)", lat: 38.431, lon: 38.089, color: "#90caf9" }},
-                    {{ name: "Tulga Üssü", lat: 38.331, lon: 38.258, color: "#80d8ff" }},
-                    {{ name: "Elazığ", lat: 38.674, lon: 39.222, color: "#ffb74d" }},
-                    {{ name: "Baskil", lat: 38.560, lon: 38.820, color: "#cfd8dc" }},
-                    {{ name: "Doğanşehir", lat: 38.012, lon: 37.881, color: "#cfd8dc" }},
-                    {{ name: "Battalgazi", lat: 38.421, lon: 38.365, color: "#cfd8dc" }}
-                ];
-
-                cities.forEach(c => {{
-                    L.circleMarker([c.lat, c.lon], {{
-                        radius: 5,
-                        fillColor: c.color,
-                        color: "#000",
-                        weight: 1.5,
-                        opacity: 1,
-                        fillOpacity: 1
-                    }}).addTo(map).bindTooltip(c.name, {{
-                        permanent: true,
-                        direction: 'right',
-                        className: 'map-label',
-                        offset: [6, 0]
-                    }});
-                }});
-
-                // 3. Simülasyon Adımları (Nowcasting Zaman Ufku)
-                const frames = [
-                    {{ min: 0,  lat: 38.10, lon: 37.95, desc: "🎯 KÜTLE GÜNEYBATI GİRİŞİNDE", status: "🎯 MALATYA ÇANAĞI ÜZERİNDE", color: "#00e676" }},
-                    {{ min: 15, lat: 38.18, lon: 38.06, desc: "🎯 MALATYA ÇANAĞINA TIRMANIYOR", status: "🎯 MALATYA ÇANAĞI ÜZERİNDE", color: "#00e676" }},
-                    {{ min: 30, lat: 38.25, lon: 38.18, desc: "⛰️ BEYDAĞLARI GÜNEY YAMACINA DAYANDI", status: "⛰️ OROGRAFİK ETKİ BAŞLADI", color: "#ffb74d" }},
-                    {{ min: 45, lat: 38.32, lon: 38.32, desc: "⚠️ BEYDAĞLARI BLOKAJI: Fönleşme & Sapma", status: "⚠️ BEYDAĞLARI SÖNÜMLEMESİ", color: "#ff9800" }},
-                    {{ min: 60, lat: 38.42, lon: 38.52, desc: "↗️ FIRAT YARIĞINA BÜKÜLME", status: "↗️ ELAZIĞ OLUĞUNA KIRILDI", color: "#ff9800" }},
-                    {{ min: 90, lat: 38.55, lon: 38.80, desc: "↗️ BASKİL / KEBAN KORİDORUNDA", status: "↗️ ELAZIĞ HATTI TAHLİYESİ", color: "#ff9800" }},
-                    {{ min: 120, lat: 38.68, lon: 39.18, desc: "📍 ELAZIĞ MERKEZ & HAZAR OLUĞUNDA", status: "📍 ELAZIĞ HAVZASINDA ETKİLİ", color: "#ff9800" }}
-                ];
-
-                let currentFrameIdx = 0;
-                let isPlaying = true;
-                let timer = null;
-
-                // Radar Katmanları (Katman Katman Doppler Yankısı)
-                let layerOuter = null;
-                let layerMid = null;
-                let layerCore = null;
-                let centroidMarker = null;
-                let trajLine = null;
-
-                function renderRadarFrame(idx) {{
-                    const f = frames[idx];
-
-                    if (layerOuter) map.removeLayer(layerOuter);
-                    if (layerMid) map.removeLayer(layerMid);
-                    if (layerCore) map.removeLayer(layerCore);
-                    if (centroidMarker) map.removeLayer(centroidMarker);
-                    if (trajLine) map.removeLayer(trajLine);
-
-                    const pathCoords = frames.slice(0, idx + 1).map(item => [item.lat, item.lon]);
-                    if (pathCoords.length > 1) {{
-                        trajLine = L.polyline(pathCoords, {{
-                            color: '#ffd54f',
-                            weight: 3,
-                            dashArray: '6, 6',
-                            opacity: 0.95
-                        }}).addTo(map);
-                    }}
-
-                    // 1. Dış Katman: Neon Cyan & Yeşil (15-30 dBZ Hafif Yağış Halesi)
-                    layerOuter = L.circle([f.lat, f.lon], {{
-                        radius: 28000,
-                        fillColor: '#00e5ff',
-                        color: '#00e676',
-                        weight: 2,
-                        opacity: 0.85,
-                        fillOpacity: 0.38
-                    }}).addTo(map);
-
-                    // 2. Orta Katman: Parlak Elektrik Sarısı & Turuncu (35-45 dBZ Sağanak Çekirdeği)
-                    layerMid = L.circle([f.lat, f.lon], {{
-                        radius: 16000,
-                        fillColor: '#ffea00',
-                        color: '#ff9100',
-                        weight: 2,
-                        opacity: 0.9,
-                        fillOpacity: 0.55
-                    }}).addTo(map);
-
-                    // 3. İç Çekirdek: Yoğun Kırmızı & Mor (>50 dBZ Dolu / Konvektif Fırtına Gözü)
-                    layerCore = L.circle([f.lat, f.lon], {{
-                        radius: 7500,
-                        fillColor: '#ff1744',
-                        color: '#d500f9',
-                        weight: 2.5,
-                        opacity: 1,
-                        fillOpacity: 0.80
-                    }}).addTo(map);
-
-                    // 4. Kütle Çekirdeği İkonu
-                    const coreIcon = L.divIcon({{
-                        className: 'core-cross',
-                        html: '<div style="font-size: 20px; color: #ffffff; text-shadow: 0 0 8px #ff1744; font-weight: 900; line-height: 1; transform: translate(-8px, -10px);">⚡</div>',
-                        iconSize: [20, 20]
-                    }});
-                    centroidMarker = L.marker([f.lat, f.lon], {{ icon: coreIcon }}).addTo(map);
-
-                    // Arayüz Sayaçlarını Güncelle
-                    document.getElementById('timeBadge').innerText = f.min === 0 ? "T+0 Dk (Şimdi)" : `T+${{f.min}} Dk`;
-                    document.getElementById('progressFill').style.width = `${{(idx / (frames.length - 1)) * 100}}%`;
-                    
-                    const pill = document.getElementById('statusPill');
-                    pill.innerText = f.status;
-                    pill.style.color = f.color;
-                    pill.style.borderColor = f.color;
-                    pill.style.background = f.color === "#00e676" ? "rgba(0, 230, 118, 0.15)" : "rgba(255, 152, 0, 0.18)";
-                }}
-
-                function nextStep() {{
-                    currentFrameIdx = (currentFrameIdx + 1) % frames.length;
-                    renderRadarFrame(currentFrameIdx);
-                }}
-
-                function startAnimation() {{
-                    if (timer) clearInterval(timer);
-                    timer = setInterval(nextStep, 1300);
-                    document.getElementById('playBtn').innerText = "⏸ Durdur";
-                    isPlaying = true;
-                }}
-
-                function stopAnimation() {{
-                    if (timer) clearInterval(timer);
-                    document.getElementById('playBtn').innerText = "▶ Başlat";
-                    isPlaying = false;
-                }}
-
-                document.getElementById('playBtn').addEventListener('click', () => {{
-                    if (isPlaying) {{
-                        stopAnimation();
-                    }} else {{
-                        startAnimation();
-                    }}
-                }});
-
-                renderRadarFrame(0);
-                startAnimation();
-
-                setTimeout(() => {{ map.invalidateSize(); }}, 300);
-            </script>
-        </body>
-        </html>
-        """
-        st.components.v1.html(nowcast_sim_html, height=540)
-
-        # 3. Sinoptik Sapma Analiz Kartı
-        if is_akdeniz_flow:
-            trajectory_title = "⚠️ AKDENİZ KÖKENLİ CEPHE: Orografik Sapma (Elazığ Kırılması Riski Yüksek)"
-            trajectory_badge_color = "#ff9800"
-            trajectory_analysis = (
-                "• <strong>Kütle Dinamiği:</strong> Yağış kütlesi güneybatıdan (Akdeniz/Toroslar) Malatya'ya doğru tırmanmaktadır.<br>"
-                "• <strong>Fiziksel Sapma Nedeni (Deflection):</strong> 2.500m'lik Beydağları duvarı havayı yukarı iterken kütle enerjisini güney yamaçta tüketir. "
-                "Aşan hava Malatya çanağında fönleşerek (subsidence) çöker. Kütle, en düşük orografik dirence sahip <strong>Fırat Yarığı ve Hazar Gölü çöküntü oluğuna</strong> "
-                "doğru bükülerek yağış merkezini <strong>Elazığ / Keban hattına</strong> kaydıracaktır.<br>"
-                "• <strong>MetaCast Kararı:</strong> Malatya merkezde yağış radarda görünenden zayıf kalacak, asıl kütle kuzeydoğuya (Elazığ'a) teğet geçecektir."
-            )
-            diversion_prob = 78.0
-            predicted_destination = "Elazığ / Baskil / Keban Hattı"
-        else:
-            trajectory_title = "🟢 DENGELİ SİNOPTİK HAVA KORİDORU"
-            trajectory_badge_color = "#4caf50"
-            trajectory_analysis = (
-                "• <strong>Kütle Dinamiği:</strong> Bölge genelinde belirgin bir orografik sapma anomalisi saptanmadı.<br>"
-                "• <strong>Fiziksel Neden:</strong> Rüzgâr yönü ve zemin gradyanı doğal vadi eğimiyle uyumludur. Bulut kütleleri standart rotasında hareket edecektir."
-            )
-            diversion_prob = 20.0
-            predicted_destination = "Standart Bölgesel Rota"
-
-        st.markdown(
-            f"""
-            <div class="benchmark-box" style="border-left: 5px solid {trajectory_badge_color}; margin-top: 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <strong style="color: #90caf9; font-size: 0.95rem;">{trajectory_title}</strong>
-                    <span style="background: {trajectory_badge_color}; color: #000; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">
-                        Sapma Eğilimi: %{diversion_prob:.0f}
-                    </span>
-                </div>
-                <div style="font-size: 0.88rem; line-height: 1.55; color: #eceff1;">
-                    {trajectory_analysis}
-                </div>
-                <div style="margin-top: 8px; font-size: 0.80rem; color: #ffb74d;">
-                    📍 <strong>Öngörülen Kütle Tahliye İstikameti:</strong> <code>{predicted_destination}</code>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+# ==============================================================================
+# 🛰️ BÖLGESEL & KÜRESEL CANLI RADAR VE OTOMATİK SİMÜLASYON İSTASYONU
+# ==============================================================================
+st.markdown("---")
+with st.expander("🛰️ Canlı Radar, Fırtına Simülatörü & Sinoptik Sapma (Trajectory) Analizi", expanded=True):
+    col_rad_ctrl, col_rad_note = st.columns([2.2, 1.8])
+    with col_rad_ctrl:
+        radar_display_mode = st.radio(
+            "Radar Katmanı Seçimi:",
+            [
+                "🔴 Canlı Doppler & Şimşek Radarı (Son 2 Saatlik Akış + Anlık Yıldırımlar)",
+                "🔮 Gelecek Yağış & Kütle Simülasyonu (Otomatik İleriye Akan Model Hareketi)"
+            ],
+            horizontal=False
         )
+    with col_rad_note:
+        st.caption("💡 **Otomatik Oynatma:** Haritanın sol altındaki **Oynat (▶)** butonuna basarak kütlelerin Malatya ve çevre iller üzerindeki akışını video gibi izleyebilirsiniz. Haritada serbestçe gezinebilirsiniz.")
+
+    # Katman seçimine göre Windy parametreleri
+    if "Gelecek" in radar_display_mode:
+        active_overlay = "rain"
+        product_type = "ecmwf"
+    else:
+        active_overlay = "radar"
+        product_type = "radar"
+
+    # Yüksek Kontrastlı, Asla Donmayan ve Harita Renkleriyle Karışmayan Canlı Radar
+    radar_html = f"""
+    <div style="border-radius: 10px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); box-shadow: 0 4px 18px rgba(0,0,0,0.4);">
+        <iframe 
+            width="100%" 
+            height="490" 
+            src="https://embed.windy.com/embed2.html?lat=38.355&lon=38.310&detailLat=38.431&detailLon=38.090&width=100%&height=490&zoom=7&level=surface&overlay={active_overlay}&product={product_type}&menu=&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1" 
+            frameborder="0">
+        </iframe>
+    </div>
+    """
+    st.components.v1.html(radar_html, height=505)
+
+    # MetaCast Fiziksel Kütle Yörüngesi ve Elazığ / Havza Sapma Motoru
+    cur_wind_angle = float(sel_wind_deg)
+    is_akdeniz_corridor = (195 <= cur_wind_angle <= 235)
+    is_karadeniz_flow = (325 <= cur_wind_angle <= 360) or (0 <= cur_wind_angle <= 25)
+    is_firat_inflow = (35 <= cur_wind_angle <= 85)
+
+    if is_akdeniz_corridor:
+        trajectory_title = "⚠️ AKDENİZ KÖKENLİ CEPHE: Orografik Sapma (Elazığ Kırılması Riski Yüksek)"
+        trajectory_badge_color = "#ff9800"
+        trajectory_analysis = (
+            "• <strong>Kütle Dinamiği:</strong> Yağış kütlesi güneybatıdan (Akdeniz/Toroslar) Malatya'ya doğru tırmanmaktadır.<br>"
+            "• <strong>Fiziksel Sapma Nedeni (Deflection):</strong> 2.500m'lik Beydağları duvarı havayı yukarı iterken kütle enerjisini güney yamaçta tüketir. "
+            "Aşan hava Malatya çanağında fönleşerek (subsidence) çöker. Kütle, en düşük orografik dirence sahip <strong>Fırat Yarığı ve Hazar Gölü çöküntü oluğuna</strong> "
+            "doğru bükülerek yağış merkezini <strong>Elazığ / Keban hattına</strong> kaydıracaktır.<br>"
+            "• <strong>MetaCast Kararı:</strong> Malatya merkezde yağış radarda görünenden zayıf kalacak, asıl kütle kuzeydoğuya (Elazığ'a) teğet geçecektir."
+        )
+        diversion_prob = 78.0
+        predicted_destination = "Elazığ / Baskil / Keban Hattı"
+    elif is_karadeniz_flow:
+        trajectory_title = "❄️ KARADENİZ / BALKAN KÖKENLİ SOĞUK AKIŞ: Doğrudan Havza İnişi"
+        trajectory_badge_color = "#2196f3"
+        trajectory_analysis = (
+            "• <strong>Kütle Dinamiği:</strong> Kuzeyden (Hekimhan - Kuluncak - Tohma Vadisi) Malatya havzasına dökülen soğuk adveksiyon.<br>"
+            "• <strong>Fiziksel Neden:</strong> Kuzeyden gelen kütleler önünde yüksek dağ engeli bulunmadığından Tohma kanyonu boyunca "
+            "doğrudan Malatya çanağına hapsolur. Sapma yaşanmaz, kütle şehir üzerinde sıkışarak sis, kar veya sağanak üretir.<br>"
+            "• <strong>MetaCast Kararı:</strong> Kütle Malatya merkez ve Erhaç üzerinde stabil kalacak; Elazığ'a kaçış yapmayacaktır."
+        )
+        diversion_prob = 15.0
+        predicted_destination = "Malatya Çanağı & Erhaç (Merkez)"
+    elif is_firat_inflow:
+        trajectory_title = "⚡ FIRAT VADİSİ & KARAKAYA NEM TAŞINIMI: Konvektif Hücre Tehdidi"
+        trajectory_badge_color = "#e91e63"
+        trajectory_analysis = (
+            "• <strong>Kütle Dinamiği:</strong> Doğu / Güneydoğu sektöründen baraj gölü yüzey nemini toplayarak geliş.<br>"
+            "• <strong>Fiziksel Neden:</strong> Karakaya Barajı üzerinden buharlaşan nem, ısınan zeminle birleştiğinde Battalgazi üzerinde "
+            "ani dikey konveksiyon (termal baca) patlatır.<br>"
+            "• <strong>MetaCast Kararı:</strong> Süper hücre ve dolu riski yerel olarak Malatya doğusunda yoğunlaşacaktır."
+        )
+        diversion_prob = 35.0
+        predicted_destination = "Battalgazi & Kale Koridoru"
+    else:
+        trajectory_title = "🟢 DENGELİ SİNOPTİK HAVA KORİDORU"
+        trajectory_badge_color = "#4caf50"
+        trajectory_analysis = (
+            "• <strong>Kütle Dinamiği:</strong> Bölge genelinde belirgin bir orografik sapma anomalisi saptanmadı.<br>"
+            "• <strong>Fiziksel Neden:</strong> Rüzgâr yönü ve zemin gradyanı doğal vadi eğimiyle uyumludur. Bulut kütleleri standart rotasında hareket edecektir."
+        )
+        diversion_prob = 20.0
+        predicted_destination = "Standart Bölgesel Rota"
+
+    st.markdown(
+        f"""
+        <div class="benchmark-box" style="border-left: 5px solid {trajectory_badge_color}; margin-top: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <strong style="color: #90caf9; font-size: 0.95rem;">{trajectory_title}</strong>
+                <span style="background: {trajectory_badge_color}; color: #000; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">
+                    Sapma Eğilimi: %{diversion_prob:.0f}
+                </span>
+            </div>
+            <div style="font-size: 0.88rem; line-height: 1.55; color: #eceff1;">
+                {trajectory_analysis}
+            </div>
+            <div style="margin-top: 8px; font-size: 0.80rem; color: #ffb74d;">
+                📍 <strong>Öngörülen Kütle Tahliye İstikameti:</strong> <code>{predicted_destination}</code>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 # ==============================================================================
 # 🧠 XAI: AÇIKLANABİLİR YAPAY ZEKÂ KARAR ETKİLERİ
 # ==============================================================================
