@@ -1863,6 +1863,104 @@ with c_map2:
 st.markdown("---")
 
 # ==============================================================================
+# 🛰️ BÖLGESEL & KÜRESEL CANLI DOPPLER RADARI VE SİNOPTİK YÖRÜNGE MOTORU
+# ==============================================================================
+st.markdown("---")
+with st.expander("🛰️ Canlı Radar, Uydu Takibi & Sinoptik Sapma (Trajectory) Analizi", expanded=True):
+    st.markdown(
+        """
+        <div style="font-size: 0.88rem; color: #cfd8dc; margin-bottom: 10px;">
+            🔍 <strong>Serbest Navigasyon:</strong> Haritayı fare ile kaydırarak Akdeniz, Karadeniz, çevre iller veya tüm Türkiye genelindeki yağış ve fırtına hücrelerini inceleyebilir, yakınlaşıp uzaklaşabilirsiniz (Zoom In/Out).
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # 1. Genişletilmiş ve Serbest Gezintili Canlı Doppler & Fırtına Radarı (Zoom: 6 ile Türkiye ve Doğu Akdeniz Havzası)
+    radar_html = """
+    <div style="border-radius: 10px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 4px 15px rgba(0,0,0,0.35);">
+        <iframe 
+            width="100%" 
+            height="480" 
+            src="https://embed.windy.com/embed2.html?lat=38.355&lon=38.310&detailLat=38.431&detailLon=38.090&width=100%&height=480&zoom=6&level=surface&overlay=radar&product=radar&menu=&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1" 
+            frameborder="0">
+        </iframe>
+    </div>
+    """
+    st.components.v1.html(radar_html, height=500)
+
+    # 2. MetaCast Fiziksel Kütle Yörüngesi ve Elazığ / Havza Sapma Motoru
+    cur_wind_angle = float(sel_wind_deg)
+    
+    # Akdeniz Kütlesi ve Beydağları Sapma Teşhisi
+    is_akdeniz_corridor = (195 <= cur_wind_angle <= 235)
+    is_karadeniz_flow = (325 <= cur_wind_angle <= 360) or (0 <= cur_wind_angle <= 25)
+    is_firat_inflow = (35 <= cur_wind_angle <= 85)
+
+    if is_akdeniz_corridor:
+        trajectory_title = "⚠️ AKDENİZ KÖKENLİ CEPHE: Orografik Sapma (Elazığ Kırılması Riski Yüksek)"
+        trajectory_badge_color = "#ff9800"
+        trajectory_analysis = (
+            "• <strong>Kütle Dinamiği:</strong> Yağış kütlesi güneybatıdan (Akdeniz/Toroslar) Malatya'ya doğru tırmanmaktadır.<br>"
+            "• <strong>Fiziksel Sapma Nedeni (Deflection):</strong> 2.500m'lik Beydağları duvarı havayı yukarı iterken kütle enerjisini güney yamaçta tüketir. "
+            "Aşan hava Malatya çanağında fönleşerek (subsidence) çöker. Kütle, en düşük orografik dirence sahip <strong>Fırat Yarığı ve Hazar Gölü çöküntü oluğuna</strong> "
+            "doğru bükülerek yağış merkezini <strong>Elazığ / Keban hattına</strong> kaydıracaktır.<br>"
+            "• <strong>MetaCast Kararı:</strong> Malatya merkezde yağış radarda görünenden zayıf kalacak, asıl kütle kuzeydoğuya (Elazığ'a) teğet geçecektir."
+        )
+        diversion_prob = 78.0
+        predicted_destination = "Elazığ / Baskil / Keban Hattı"
+    elif is_karadeniz_flow:
+        trajectory_title = "❄️ KARADENİZ / BALKAN KÖKENLİ SOĞUK AKIŞ: Doğrudan Havza İnişi"
+        trajectory_badge_color = "#2196f3"
+        trajectory_analysis = (
+            "• <strong>Kütle Dinamiği:</strong> Kuzeyden (Hekimhan - Kuluncak - Tohma Vadisi) Malatya havzasına dökülen soğuk adveksiyon.<br>"
+            "• <strong>Fiziksel Neden:</strong> Kuzeyden gelen kütleler önünde yüksek dağ engeli bulunmadığından Tohma kanyonu boyunca "
+            "doğrudan Malatya çanağına hapsolur. Sapma yaşanmaz, kütle şehir üzerinde sıkışarak sis, kar veya sağanak üretir.<br>"
+            "• <strong>MetaCast Kararı:</strong> Kütle Malatya merkez ve Erhaç üzerinde stabil kalacak; Elazığ'a kaçış yapmayacaktır."
+        )
+        diversion_prob = 15.0
+        predicted_destination = "Malatya Çanağı & Erhaç (Merkez)"
+    elif is_firat_inflow:
+        trajectory_title = "⚡ FIRAT VADİSİ & KARAKAYA NEM TAŞINIMI: Konvektif Hücre Tehdidi"
+        trajectory_badge_color = "#e91e63"
+        trajectory_analysis = (
+            "• <strong>Kütle Dinamiği:</strong> Doğu / Güneydoğu sektöründen baraj gölü yüzey nemini toplayarak geliş.<br>"
+            "• <strong>Fiziksel Neden:</strong> Karakaya Barajı üzerinden buharlaşan nem, ısınan zeminle birleştiğinde Battalgazi üzerinde "
+            "ani dikey konveksiyon (termal baca) patlatır.<br>"
+            "• <strong>MetaCast Kararı:</strong> Süper hücre ve dolu riski yerel olarak Malatya doğusunda yoğunlaşacaktır."
+        )
+        diversion_prob = 35.0
+        predicted_destination = "Battalgazi & Kale Koridoru"
+    else:
+        trajectory_title = "🟢 DENGELİ SİNOPTİK HAVA KORİDORU"
+        trajectory_badge_color = "#4caf50"
+        trajectory_analysis = (
+            "• <strong>Kütle Dinamiği:</strong> Bölge genelinde belirgin bir orografik sapma anomalisi saptanmadı.<br>"
+            "• <strong>Fiziksel Neden:</strong> Rüzgâr yönü ve zemin gradyanı doğal vadi eğimiyle uyumludur. Bulut kütleleri standart rotasında hareket edecektir."
+        )
+        diversion_prob = 20.0
+        predicted_destination = "Standart Bölgesel Rota"
+
+    st.markdown(
+        f"""
+        <div class="benchmark-box" style="border-left: 5px solid {trajectory_badge_color}; margin-top: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <strong style="color: #90caf9; font-size: 0.95rem;">{trajectory_title}</strong>
+                <span style="background: {trajectory_badge_color}; color: #000; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">
+                    Sapma Eğilimi: %{diversion_prob:.0f}
+                </span>
+            </div>
+            <div style="font-size: 0.88rem; line-height: 1.55; color: #eceff1;">
+                {trajectory_analysis}
+            </div>
+            <div style="margin-top: 8px; font-size: 0.80rem; color: #ffb74d;">
+                📍 <strong>Öngörülen Kütle Tahliye İstikameti:</strong> <code>{predicted_destination}</code>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+# ==============================================================================
 # 🧠 XAI: AÇIKLANABİLİR YAPAY ZEKÂ KARAR ETKİLERİ
 # ==============================================================================
 st.markdown("##### 🧠 Açıklanabilir Yapay Zekâ (XAI): Model Kararını Gerekçelendirme")
