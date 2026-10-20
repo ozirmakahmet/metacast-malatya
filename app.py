@@ -1975,6 +1975,7 @@ with st.expander("🛰️ Canlı Radar & MetaCast AI Radar Nowcaster (Faz-2 Bilg
         fig_nowcast = go.Figure()
 
         # Radar dBZ Kontur Katmanı
+        # Radar dBZ Kontur Katmanı (Düzeltildi)
         fig_nowcast.add_trace(go.Contour(
             z=Z_grid,
             x=lon_space,
@@ -1984,11 +1985,11 @@ with st.expander("🛰️ Canlı Radar & MetaCast AI Radar Nowcaster (Faz-2 Bilg
                 [0.15, "rgba(41, 182, 246, 0.45)"],   # 10-20 dBZ (Çisenti)
                 [0.35, "rgba(76, 175, 80, 0.65)"],    # 20-30 dBZ (Hafif-Orta)
                 [0.55, "rgba(255, 235, 59, 0.80)"],   # 30-40 dBZ (Kuvvetli Yağmur)
-                [0.75, "rgba(255, 152, 0, 0.90)"],   # 40-50 dBZ (Şiddetli Sağanak)
+                [0.75, "rgba(255, 152, 0, 0.90)"],    # 40-50 dBZ (Şiddetli Sağanak)
                 [0.90, "rgba(244, 67, 54, 0.95)"],    # 50-55 dBZ (Oraj / Fırtına)
                 [1.0, "rgba(156, 39, 176, 1.0)"]      # >55 dBZ (Dolu / Süper Hücre)
             ],
-            colorbar=dict(title="dBZ", titleside="right"),
+            colorbar=dict(title="dBZ"),
             contours=dict(start=10, end=60, size=5, showlines=False),
             hoverinfo="z",
             name="Radar Yansıtırlık (dBZ)"
