@@ -1288,19 +1288,13 @@ st.markdown(
 )
 
 # ==============================================================================
-# 📱 ÖNÜMÜZDEKİ 24 SAATİN SAATLİK TAHMİNİ
+# 📅 7 GÜNLÜK HAVA TAHMİNİ & 24 SAATLİK DİNAMİK DAĞILIM
 # ==============================================================================
-st.markdown("##### 📱 Önümüzdeki 24 Saatin Saatlik Tahmini & Hadise Özeti")
+st.markdown("##### 📅 7 Günlük Hava Durumu & Saatlik Hadise Dağılımı")
+st.caption("Aşağıdaki gün sekmelerine tıklayarak o günün 24 saatlik hava akışını ve hadise bültenini inceleyebilirsiniz:")
 
 now_real_dt = datetime.now(TR_TZ).replace(tzinfo=None)
-
-if mode == "Canlı Operasyonel":
-    future_24h_mask = (df_raw["time"] >= now_real_dt - pd.Timedelta(hours=1))
-    df_24h = df_raw[future_24h_mask].head(24).copy().reset_index(drop=True)
-    if len(df_24h) < 12:
-        df_24h = df_raw.tail(24).copy().reset_index(drop=True)
-else:
-    df_24h = df.copy().reset_index(drop=True)
+gunler_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
 def get_weather_icon_and_desc(t, p, c, cape):
     if p > 0.1:
@@ -1322,45 +1316,108 @@ def get_weather_icon_and_desc(t, p, c, cape):
         else:
             return "☁️", "Kapalı"
 
-hourly_cards_list = []
-rain_events = []
-frost_events = []
-storm_events = []
+# İncelenecek 7 Günün Listesi
+if mode == "Canlı Operasyonel":
+    all_dates = sorted(df_raw["time"].dt.date.unique())
+    forecast_days = [d for d in all_dates if d >= today_date][:7]
+    if len(forecast_days) < 7:
+        forecast_days = all_dates[:7]
+else:
+    forecast_days = [df["time"].iloc[0].date()]
 
-t_24_clean = get_clean_series(df_24h, "temperature_2m_ecmwf_ifs", 15.0)
-p_24_clean = get_clean_series(df_24h, "precipitation_ecmwf_ifs", 0.0)
-c_24_clean = get_clean_series(df_24h, "cloud_cover_ecmwf_ifs", 20.0, fallback_series=get_clean_series(df_24h, "cloud_cover", 20.0))
-cape_24_clean = get_clean_series(df_24h, "cape", 0.0)
-g_24_clean = get_clean_series(df_24h, "wind_gusts_10m_ecmwf_ifs", 10.0)
+# 7 Günün Sekme Başlıklarını ve Günlük Özetlerini Hesaplama
+tab_titles = []
+for d_item in forecast_days:
+    sub_df = df_raw[df_raw["time"].dt.date == d_item] if mode == "Canlı Operasyonel" else df
+    t_ser = get_clean_series(sub_df, "temperature_2m_ecmwf_ifs", 15.0)
+    p_ser = get_clean_series(sub_df, "precipitation_ecmwf_ifs", 0.0)
+    c_ser = get_clean_series(sub_df, "cloud_cover_ecmwf_ifs", 20.0)
+    cape_ser = get_clean_series(sub_df, "cape", 0.0)
+    
+    max_t = t_ser.max()
+    min_t = t_ser.min()
+    tot_p = p_ser.sum()
+    
+    if tot_p >= 1.0:
+        day_icon = "🌧️" if min_t > 1.5 else "❄️"
+        if cape_ser.max() >= 800: day_icon = "⚡"
+    elif tot_p > 0.1:
+        day_icon = "🌦️"
+    elif c_ser.mean() <= 25:
+        day_icon = "☀️"
+    elif c_ser.mean() <= 65:
+        day_icon = "⛅"
+    else:
+        day_icon = "☁️"
+        
+    g_label = "Bugün" if (mode == "Canlı Operasyonel" and d_item == today_date) else gunler_tr[d_item.weekday()]
+    tab_titles.append(f"{g_label} ({d_item.strftime('%d.%m')})  {day_icon} {max_t:.0f}° / {min_t:.0f}°")
 
-for idx_h in range(len(df_24h)):
-    row_t = df_24h["time"].iloc[idx_h]
-    temp_val = float(t_24_clean.iloc[idx_h])
-    precip_val = float(p_24_clean.iloc[idx_h])
-    cloud_val = float(c_24_clean.iloc[idx_h])
-    cape_val = float(cape_24_clean.iloc[idx_h])
-    gust_val = float(g_24_clean.iloc[idx_h])
+# 7 Günlük Sekmeler
+day_tabs = st.tabs(tab_titles)
 
-    w_icon, w_desc = get_weather_icon_and_desc(temp_val, precip_val, cloud_val, cape_val)
+for tab_idx, d_item in enumerate(forecast_days):
+    with day_tabs[tab_idx]:
+        sub_df = df_raw[df_raw["time"].dt.date == d_item].copy().reset_index(drop=True) if mode == "Canlı Operasyonel" else df.copy().reset_index(drop=True)
+        
+        t_clean = get_clean_series(sub_df, "temperature_2m_ecmwf_ifs", 15.0)
+        p_clean = get_clean_series(sub_df, "precipitation_ecmwf_ifs", 0.0)
+        c_clean = get_clean_series(sub_df, "cloud_cover_ecmwf_ifs", 20.0, fallback_series=get_clean_series(sub_df, "cloud_cover", 20.0))
+        cape_clean = get_clean_series(sub_df, "cape", 0.0)
+        g_clean = get_clean_series(sub_df, "wind_gusts_10m_ecmwf_ifs", 10.0)
+        
+        hourly_cards_list = []
+        rain_events = []
+        frost_events = []
+        storm_events = []
+        
+        is_today_tab = (mode == "Canlı Operasyonel" and d_item == today_date)
+        cur_hour_val = now_real_dt.hour
+        
+        for idx_h in range(len(sub_df)):
+            row_t = sub_df["time"].iloc[idx_h]
+            temp_val = float(t_clean.iloc[idx_h])
+            precip_val = float(p_clean.iloc[idx_h])
+            cloud_val = float(c_clean.iloc[idx_h])
+            cape_val = float(cape_clean.iloc[idx_h])
+            gust_val = float(g_clean.iloc[idx_h])
 
-    h_label = row_t.strftime("%H:00")
-    if precip_val >= 0.2:
-        rain_events.append(f"Saat <strong>{h_label}</strong> sularında {w_desc.lower()} ({precip_val:.1f} mm)")
-    if temp_val <= 1.0 and cloud_val <= 35:
-        frost_events.append(f"Saat <strong>{h_label}</strong> sularında zemin donu ({temp_val:.1f}°C)")
-    if gust_val >= 45:
-        storm_events.append(f"Saat <strong>{h_label}</strong> civarında kuvvetli rüzgâr ({gust_val:.1f} km/s)")
+            w_icon, w_desc = get_weather_icon_and_desc(temp_val, precip_val, cloud_val, cape_val)
 
-    is_first = (idx_h == 0)
-    card_cls = "hourly-card active-now" if is_first else "hourly-card"
-    time_badge = "Şimdi" if is_first else h_label
+            h_label = row_t.strftime("%H:00")
+            if precip_val >= 0.2:
+                rain_events.append(f"Saat <strong>{h_label}</strong> {w_desc.lower()} ({precip_val:.1f} mm)")
+            if temp_val <= 1.0 and cloud_val <= 35:
+                frost_events.append(f"Saat <strong>{h_label}</strong> zemin donu ({temp_val:.1f}°C)")
+            if gust_val >= 45:
+                storm_events.append(f"Saat <strong>{h_label}</strong> kuvvetli rüzgâr ({gust_val:.1f} km/s)")
 
-    precip_label = f"<div class='hourly-precip'>💧 %{int(min(95, precip_val*25 + 10))}</div>" if precip_val > 0.05 else "<div class='hourly-precip'></div>"
+            is_cur_h = is_today_tab and (row_t.hour == cur_hour_val)
+            card_cls = "hourly-card active-now" if is_cur_h else "hourly-card"
+            time_badge = "Şimdi" if is_cur_h else h_label
 
-    card_str = f"<div class='{card_cls}'><div class='hourly-time'>{time_badge}</div><div class='hourly-icon'>{w_icon}</div><div class='hourly-temp'>{temp_val:.0f}°</div><div class='hourly-desc'>{w_desc}</div>{precip_label}</div>"
-    hourly_cards_list.append(card_str)
+            precip_label = f"<div class='hourly-precip'>💧 %{int(min(95, precip_val*25 + 10))}</div>" if precip_val > 0.05 else "<div class='hourly-precip'></div>"
 
-st.markdown(f'<div class="hourly-scroll-container">{"".join(hourly_cards_list)}</div>', unsafe_allow_html=True)
+            card_str = f"<div class='{card_cls}'><div class='hourly-time'>{time_badge}</div><div class='hourly-icon'>{w_icon}</div><div class='hourly-temp'>{temp_val:.0f}°</div><div class='hourly-desc'>{w_desc}</div>{precip_label}</div>"
+            hourly_cards_list.append(card_str)
+
+        # Seçilen günün 24 saatlik yatay kartları
+        st.markdown(f'<div class="hourly-scroll-container">{"".join(hourly_cards_list)}</div>', unsafe_allow_html=True)
+
+        # Seçilen günün meteorolojik bülteni
+        bulletin_messages = []
+        if rain_events:
+            bulletin_messages.append(f"🌧️ <strong>Yağış Durumu:</strong> {'; '.join(rain_events[:3])}.")
+        if frost_events:
+            bulletin_messages.append(f"❄️ <strong>Zirai Don Riski:</strong> {'; '.join(frost_events[:2])}. Kayısı ve hassas bitkiler için tedbir alınız.")
+        if storm_events:
+            bulletin_messages.append(f"💨 <strong>Kuvvetli Rüzgâr:</strong> {'; '.join(storm_events[:2])}.")
+        if not bulletin_messages:
+            bulletin_messages.append("☀️ <strong>Atmosferik Denge:</strong> Bu gün Malatya genelinde yağış, don veya fırtına anomalisi beklenmiyor. Hava dengeli seyredecek.")
+
+        bulletin_html = "<br>• ".join(bulletin_messages)
+        g_name_full = "Bugün" if is_today_tab else gunler_tr[d_item.weekday()]
+        st.markdown(f'<div class="future-summary-box"><strong>📋 {g_name_full} ({d_item.strftime("%d %B %Y")}) Hadise Bülteni:</strong><br>• {bulletin_html}</div>', unsafe_allow_html=True)
 
 bulletin_messages = []
 if rain_events:
