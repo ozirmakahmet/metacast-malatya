@@ -920,7 +920,16 @@ if mode == "Model Kıyaslama Arenası":
 
             if "Bileşik" in selected_param:
                 diffs_row = {"MetaCast": 100 - c_mc, "ECMWF": 100 - c_ec, "GFS": 100 - c_gfs, "ICON": 100 - c_icon}
-                best_model_row = min(diffs_row, key=diffs_row.get)
+                min_err_val = min(diffs_row.values())
+            # Minimum hataya eşit (±0.05 toleransla) olan tüm modelleri bul
+            tied_models = [m for m, err in diffs_row.items() if abs(err - min_err_val) <= 0.05]
+
+            if len(tied_models) > 1:
+                row_winner_txt = f"🤝 {' & '.join(tied_models)}"
+                for m in tied_models:
+                    win_counts[m] += 1
+            else:
+                best_model_row = tied_models[0]
                 win_counts[best_model_row] += 1
                 row_winner_txt = f"🏆 {best_model_row}"
             elif "Yağış" in selected_param and c_ref == 0.0 and max(c_mc, c_ec, c_gfs, c_icon) <= 0.05:
