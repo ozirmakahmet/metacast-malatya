@@ -447,7 +447,7 @@ def fetch_live_metar():
     }
 
 
-# --- GERÇEK MODEL TAHMİNİ (OPEN-METEO) ---
+# --- GERÇEK MODEL TAHMİNİ (OPEN-METEO / BAĞLANTI HATASI KORUMALI) ---
 @st.cache_data(ttl=600)
 def fetch_live_forecast():
     url = "https://api.open-meteo.com/v1/forecast"
@@ -472,93 +472,66 @@ def fetch_live_forecast():
         "forecast_days": 7,
         "timezone": "Europe/Istanbul",
     }
-    response = requests.get(url, params=params, timeout=8)
-    response.raise_for_status()
-    df = pd.DataFrame(response.json()["hourly"])
-    df["time"] = pd.to_datetime(df["time"])
-    return df, datetime.now(TR_TZ).strftime("%H:%M:%S")
+    
+    os.makedirs("data", exist_ok=True)
+    cache_path = "data/last_forecast_backup.json"
 
+    try:
+        response = requests.get(url, params=params, timeout=8)
+        if response.status_code == 200:
+            raw_data = response.json().get("hourly", {})
+            if raw_data:
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    json.dump(raw_data, f)
+                df = pd.DataFrame(raw_data)
+                df["time"] = pd.to_datetime(df["time"])
+                return df, datetime.now(TR_TZ).strftime("%H:%M:%S")
+    except Exception:
+        pass
 
-# --- GEÇMİŞ SENARYO ÜRETECİ ---
-def generate_scenario(name: str):
-    if "Zirai Don" in name:
-        hours = pd.date_range(start="2024-04-14 00:00", periods=24, freq="h")
-        ecmwf = np.full(24, 8.0)
-        gfs = np.full(24, 7.0)
-        icon_model = np.full(24, 8.0)
-        temp = np.array([
-            4.0, 3.0, 2.0, 1.0, 0.0, -1.0, -1.5, 0.5, 5.0, 10.0, 14.0, 16.0,
-            18.0, 17.5, 16.0, 14.0, 11.0, 9.0, 7.0, 5.5, 4.5, 3.5, 2.5, 1.5,
-        ])
-        precip = np.full(24, 0.0)
-        cloud = np.full(24, 5.0)
-        cape_vals = np.full(24, 0.0)
-        dew_point = temp - 3.5
-        wind_dir = np.full(24, 180.0)
-        pressure = np.full(24, 1024.0)
-        date_display = "14 Nisan 2024"
-        tag_sub = "Bahar Zirai Don & Radyasyonel Soğuma"
+    # 1. Kurtarma Katmanı: Diskteki son başarılı kayıt
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cached_data = json.load(f)
+            df = pd.DataFrame(cached_data)
+            df["time"] = pd.to_datetime(df["time"])
+            return df, "Yedek Önbellek (Offline)"
+        except Exception:
+            pass
 
-    elif "Yanlış Alarm" in name:
-        hours = pd.date_range(start="2024-04-12 00:00", periods=24, freq="h")
-        ecmwf = np.array([25 + 40 * np.sin(i / 3.8) ** 2 for i in range(24)])
-        gfs = ecmwf * 0.95
-        icon_model = ecmwf * 0.90
-        temp = np.full(24, 18.0)
-        precip = np.full(24, 0.0)
-        cloud = np.full(24, 25.0)
-        cape_vals = np.full(24, 150.0)
-        dew_point = np.full(24, 4.0)
-        wind_dir = np.full(24, 215.0)
-        pressure = np.full(24, 1018.0)
-        date_display = "12 Nisan 2024"
-        tag_sub = "İlkbahar Fırtına & De-Warning"
+    # 2. Kurtarma Katmanı: Kesinti Anında Dinamik 10 Günlük Sentetik Veri
+    now_base = datetime.now(TR_TZ).replace(minute=0, second=0, microsecond=0, tzinfo=None)
+    start_time = now_base - timedelta(days=3)
+    total_hours = 10 * 24
+    time_index = pd.date_range(start=start_time, periods=total_hours, freq="h")
 
-    elif "Dolu" in name:
-        hours = pd.date_range(start="2024-06-05 00:00", periods=24, freq="h")
-        ecmwf = np.array([20 + 35 * np.sin(i / 3.8) ** 2 for i in range(24)])
-        gfs = ecmwf * 1.05
-        icon_model = ecmwf * 1.0
-        temp = np.full(24, 28.0)
-        precip = np.array([0 if i < 14 or i > 17 else 8.5 for i in range(24)])
-        cloud = np.array([20 if i < 11 else 95 if 12 <= i <= 17 else 35 for i in range(24)])
-        cape_vals = np.array([150 if i < 12 else 1650 if 13 <= i <= 16 else 300 for i in range(24)])
-        dew_point = np.full(24, 17.5)
-        wind_dir = np.full(24, 45.0)
-        pressure = np.linspace(1015, 1006, 24)
-        date_display = "05 Haziran 2024"
-        tag_sub = "Yaz Dolu & Süper Hücre"
+    hour_arr = np.array([t.hour for t in time_index])
+    diurnal_temp = 14.0 + 7.0 * np.sin((hour_arr - 8) * np.pi / 12)
+    diurnal_wind = 12.0 + 8.0 * np.sin((hour_arr - 11) * np.pi / 12).clip(min=0)
 
-    else:
-        hours = pd.date_range(start="2024-01-20 00:00", periods=24, freq="h")
-        ecmwf = np.full(24, 25.0)
-        gfs = np.full(24, 28.0)
-        icon_model = np.full(24, 24.0)
-        temp = np.linspace(3.0, -2.0, 24)
-        precip = np.array([1.5 if 10 <= i <= 20 else 0.0 for i in range(24)])
-        cloud = np.full(24, 90.0)
-        cape_vals = np.full(24, 0.0)
-        dew_point = temp - 0.5
-        wind_dir = np.full(24, 15.0)
-        pressure = np.full(24, 1012.0)
-        date_display = "20 Ocak 2024"
-        tag_sub = "Kış Karı & Buzlanma Fazı"
-
-    df_sim = pd.DataFrame({
-        "time": pd.to_datetime(hours),
-        "wind_gusts_10m_ecmwf_ifs": ecmwf,
-        "wind_gusts_10m_gfs_seamless": gfs,
-        "wind_gusts_10m_icon_seamless": icon_model,
-        "wind_speed_10m_ecmwf_ifs": ecmwf * 0.45,
-        "wind_direction_10m_ecmwf_ifs": wind_dir,
-        "surface_pressure_ecmwf_ifs": pressure,
-        "temperature_2m_ecmwf_ifs": temp,
-        "precipitation_ecmwf_ifs": precip,
-        "cloud_cover_ecmwf_ifs": cloud,
-        "cape": cape_vals,
-        "dew_point_2m_ecmwf_ifs": dew_point,
+    df_fallback = pd.DataFrame({
+        "time": time_index,
+        "wind_gusts_10m_ecmwf_ifs": np.round(diurnal_wind * 1.5, 1),
+        "wind_gusts_10m_gfs_seamless": np.round(diurnal_wind * 1.35, 1),
+        "wind_gusts_10m_icon_seamless": np.round(diurnal_wind * 1.42, 1),
+        "wind_speed_10m_ecmwf_ifs": np.round(diurnal_wind * 0.5, 1),
+        "wind_direction_10m_ecmwf_ifs": np.full(total_hours, 215.0),
+        "surface_pressure_ecmwf_ifs": np.full(total_hours, 1014.2),
+        "surface_pressure_gfs_seamless": np.full(total_hours, 1013.8),
+        "surface_pressure_icon_seamless": np.full(total_hours, 1014.0),
+        "temperature_2m_ecmwf_ifs": np.round(diurnal_temp, 1),
+        "temperature_2m_gfs_seamless": np.round(diurnal_temp + 0.3, 1),
+        "temperature_2m_icon_seamless": np.round(diurnal_temp - 0.2, 1),
+        "precipitation_ecmwf_ifs": np.zeros(total_hours),
+        "precipitation_gfs_seamless": np.zeros(total_hours),
+        "precipitation_icon_seamless": np.zeros(total_hours),
+        "cloud_cover_ecmwf_ifs": np.full(total_hours, 20.0),
+        "cape": np.full(total_hours, 50.0),
+        "dew_point_2m_ecmwf_ifs": np.round(diurnal_temp - 6.0, 1),
     })
-    return df_sim, date_display, tag_sub
+
+    return df_fallback, "Kurtarma Modu (Ağ Kesintisi)"
 
 
 # ==============================================================================
