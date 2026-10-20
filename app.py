@@ -1602,10 +1602,10 @@ with v_col2:
     )
 
 # ==============================================================================
-# 🧭 DİNAMİK AFET RİSK HARİTASI VE 15 DAKİKALIK ZAMAN ÖLÇEĞİ
+# 🧭 DİNAMİK AFET RİSK HARİTASI VE 15 DAKİKALIK KESİNTİSİZ SAYI DOĞRUSU
 # ==============================================================================
 st.markdown("---")
-st.markdown("##### 🧭 Dinamik Afet Risk Haritası ve Zaman Ölçeği")
+st.markdown("##### 🧭 Dinamik Afet Risk Haritası & Sayı Doğrusu Zaman Çizelgesi")
 
 now_dt = datetime.now(TR_TZ)
 cur_real_h = now_dt.hour
@@ -1618,35 +1618,55 @@ is_viewing_today = (mode == "Canlı Operasyonel" and st.session_state.current_da
 default_hour = cur_real_h if is_viewing_today else peak_idx
 default_min = cur_real_m if is_viewing_today else 0
 
-if "time_hour_val" not in st.session_state: st.session_state.time_hour_val = default_hour
-if "time_min_val" not in st.session_state: st.session_state.time_min_val = default_min
+# 24 Saati 4 Eşit Parçaya (15'er Dk) Bölen 96 Adımlı Sayı Doğrusu Skalası
+time_slots = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
+default_time_str = f"{default_hour:02d}:{default_min:02d}"
 
-t_btn_col, t_slider_col, t_quarter_col = st.columns([1.2, 3.0, 1.8])
+if "selected_time_slot" not in st.session_state or st.session_state.selected_time_slot not in time_slots:
+    st.session_state.selected_time_slot = default_time_str
+
+t_btn_col, t_slider_col = st.columns([1.2, 4.8])
+
 with t_btn_col:
     st.write("")
     btn_text = f"📍 Canlı Saat ({cur_real_h:02d}:{cur_real_m:02d})" if is_viewing_today else f"⚡ Pik Saat ({peak_idx:02d}:00)"
     if st.button(btn_text, use_container_width=True):
-        st.session_state.time_hour_val = default_hour
-        st.session_state.time_min_val = default_min
+        st.session_state.selected_time_slot = default_time_str
         st.rerun()
 
 with t_slider_col:
-    sel_h = st.slider("Saat Seçimi:", min_value=0, max_value=23, value=st.session_state.time_hour_val, format="%02d:00", key="time_hour_slider", label_visibility="collapsed")
-    if sel_h != st.session_state.time_hour_val:
-        st.session_state.time_hour_val = sel_h
+    sel_time = st.select_slider(
+        "24 Saatlik Zaman Çizelgesi (15 Dk Eşit Aralıklar):",
+        options=time_slots,
+        value=st.session_state.selected_time_slot,
+        key="time_stepper_slider",
+        label_visibility="collapsed"
+    )
+    if sel_time != st.session_state.selected_time_slot:
+        st.session_state.selected_time_slot = sel_time
         st.rerun()
 
-with t_quarter_col:
-    quarter_opts = [0, 15, 30, 45]
-    cur_quarter_idx = quarter_opts.index(st.session_state.time_min_val) if st.session_state.time_min_val in quarter_opts else 0
-    sel_m = st.radio("15 Dk Dilim:", options=quarter_opts, index=cur_quarter_idx, format_func=lambda m: f":{m:02d}", horizontal=True, key="time_min_radio", label_visibility="collapsed")
-    if sel_m != st.session_state.time_min_val:
-        st.session_state.time_min_val = sel_m
-        st.rerun()
+    # Sayı Doğrusu Alt Cetveli (3'er Saatlik Ana Kerteriz Noktaları)
+    st.markdown(
+        """
+        <div style="display: flex; justify-content: space-between; font-family: monospace; font-size: 0.74rem; color: #78909c; padding: 0 4px; margin-top: -8px; margin-bottom: 8px;">
+            <span>00:00</span>
+            <span>03:00</span>
+            <span>06:00</span>
+            <span>09:00</span>
+            <span>12:00</span>
+            <span>15:00</span>
+            <span>18:00</span>
+            <span>21:00</span>
+            <span>23:45</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
-current_sel_h = st.session_state.time_hour_val
-current_sel_m = st.session_state.time_min_val
-selected_time_str = f"{current_sel_h:02d}:{current_sel_m:02d}"
+current_sel_h = int(st.session_state.selected_time_slot.split(":")[0])
+current_sel_m = int(st.session_state.selected_time_slot.split(":")[1])
+selected_time_str = st.session_state.selected_time_slot
 
 is_now_selected = (is_viewing_today and current_sel_h == cur_real_h and current_sel_m == cur_real_m)
 frac = current_sel_m / 60.0
