@@ -1859,186 +1859,353 @@ with st.expander("🛰️ Canlı Radar & MetaCast AI Radar Nowcaster (Faz-2 Bilg
         """
         st.components.v1.html(radar_html, height=480)
 
-    with radar_subtab2:
+    # Otomatik Kütle Yörüngesi Parametreleri
+        cur_wind_angle = float(sel_wind_deg)
+        is_akdeniz_flow = (195 <= cur_wind_angle <= 235)
+        
+        # HTML5 & Leaflet Tabanlı Kendi Kendine Akan Canlı Radar Simülatörü
+        nowcast_sim_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8" />
+            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+            <style>
+                body {{
+                    margin: 0;
+                    padding: 0;
+                    background: #0e1117;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    color: #eceff1;
+                }}
+                #sim-container {{
+                    background: rgba(255, 255, 255, 0.02);
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    border-radius: 10px;
+                    overflow: hidden;
+                    padding: 10px 14px 14px 14px;
+                }}
+                .sim-header {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 10px;
+                    flex-wrap: wrap;
+                    gap: 8px;
+                }}
+                .timeline-wrapper {{
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    flex-grow: 1;
+                    max-width: 580px;
+                }}
+                .play-btn {{
+                    background: #2196f3;
+                    border: none;
+                    color: #fff;
+                    font-size: 1rem;
+                    font-weight: 700;
+                    padding: 5px 14px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }}
+                .play-btn:hover {{
+                    background: #1976d2;
+                }}
+                .track-bar {{
+                    position: relative;
+                    flex-grow: 1;
+                    height: 6px;
+                    background: rgba(255, 255, 255, 0.15);
+                    border-radius: 3px;
+                }}
+                .progress-fill {{
+                    position: absolute;
+                    left: 0;
+                    top: 0;
+                    height: 100%;
+                    width: 0%;
+                    background: linear-gradient(90deg, #00e5ff, #ff1744);
+                    border-radius: 3px;
+                    transition: width 0.3s ease;
+                }}
+                .time-badge {{
+                    font-family: monospace;
+                    font-size: 0.95rem;
+                    font-weight: 800;
+                    color: #00e5ff;
+                    min-width: 80px;
+                    text-align: right;
+                }}
+                .status-pill {{
+                    padding: 4px 10px;
+                    border-radius: 6px;
+                    font-size: 0.78rem;
+                    font-weight: 800;
+                    background: rgba(0, 230, 118, 0.15);
+                    border: 1px solid #00e676;
+                    color: #00e676;
+                    transition: all 0.3s ease;
+                }}
+                #radar-map {{
+                    height: 440px;
+                    width: 100%;
+                    border-radius: 8px;
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                }}
+                .legend-bar {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 8px 10px 0 10px;
+                    font-size: 0.75rem;
+                    color: #b0bec5;
+                    font-weight: 600;
+                }}
+                .dbz-swatch {{
+                    display: inline-block;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 2px;
+                    margin-right: 4px;
+                    vertical-align: middle;
+                }}
+            </style>
+        </head>
+        <body>
+            <div id="sim-container">
+                <div class="sim-header">
+                    <div class="timeline-wrapper">
+                        <button id="playBtn" class="play-btn">⏸ Durdur</button>
+                        <div class="track-bar">
+                            <div id="progressFill" class="progress-fill"></div>
+                        </div>
+                        <div id="timeBadge" class="time-badge">T+0 Dk</div>
+                    </div>
+                    <div id="statusPill" class="status-pill">🎯 MALATYA ÇANAĞI ÜZERİNDE</div>
+                </div>
+
+                <div id="radar-map"></div>
+
+                <div class="legend-bar">
+                    <div><span class="dbz-swatch" style="background:#00e5ff; box-shadow: 0 0 5px #00e5ff;"></span> 15-25 dBZ (Çisenti)</div>
+                    <div><span class="dbz-swatch" style="background:#00e676; box-shadow: 0 0 5px #00e676;"></span> 25-35 dBZ (Hafif-Orta)</div>
+                    <div><span class="dbz-swatch" style="background:#ffea00; box-shadow: 0 0 5px #ffea00;"></span> 35-45 dBZ (Sağanak)</div>
+                    <div><span class="dbz-swatch" style="background:#ff1744; box-shadow: 0 0 6px #ff1744;"></span> 45-55 dBZ (Kuvvetli Fırtına)</div>
+                    <div><span class="dbz-swatch" style="background:#d500f9; box-shadow: 0 0 6px #d500f9;"></span> >55 dBZ (Dolu / Çekirdek)</div>
+                    <div style="color: #ffd54f;">⚡ Kütle Çekirdeği İlerlemesi</div>
+                </div>
+            </div>
+
+            <script>
+                // 1. Haritanın İlklendirilmesi (OpenTopoMap Kabartması)
+                const map = L.map('radar-map', {{
+                    zoomControl: true,
+                    attributionControl: false
+                }}).setView([38.35, 38.45], 8);
+
+                L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png', {{
+                    maxZoom: 14,
+                    minZoom: 6
+                }}).addTo(map);
+
+                // 2. Önemli İstasyon & Şehir Noktaları
+                const cities = [
+                    {{ name: "Malatya", lat: 38.355, lon: 38.309, color: "#ffffff" }},
+                    {{ name: "Erhaç (LTAT)", lat: 38.431, lon: 38.089, color: "#90caf9" }},
+                    {{ name: "Tulga Üssü", lat: 38.331, lon: 38.258, color: "#80d8ff" }},
+                    {{ name: "Elazığ", lat: 38.674, lon: 39.222, color: "#ffb74d" }},
+                    {{ name: "Baskil", lat: 38.560, lon: 38.820, color: "#cfd8dc" }},
+                    {{ name: "Doğanşehir", lat: 38.012, lon: 37.881, color: "#cfd8dc" }},
+                    {{ name: "Battalgazi", lat: 38.421, lon: 38.365, color: "#cfd8dc" }}
+                ];
+
+                cities.forEach(c => {{
+                    L.circleMarker([c.lat, c.lon], {{
+                        radius: 5,
+                        fillColor: c.color,
+                        color: "#000",
+                        weight: 1.5,
+                        opacity: 1,
+                        fillOpacity: 1
+                    }}).addTo(map).bindTooltip(c.name, {{
+                        permanent: true,
+                        direction: 'right',
+                        className: 'map-label',
+                        offset: [6, 0]
+                    }});
+                }});
+
+                // 3. Simülasyon Adımları (Nowcasting Zaman Ufku)
+                const frames = [
+                    {{ min: 0,  lat: 38.10, lon: 37.95, desc: "🎯 KÜTLE GÜNEYBATI GİRİŞİNDE", status: "🎯 MALATYA ÇANAĞI ÜZERİNDE", color: "#00e676" }},
+                    {{ min: 15, lat: 38.18, lon: 38.06, desc: "🎯 MALATYA ÇANAĞINA TIRMANIYOR", status: "🎯 MALATYA ÇANAĞI ÜZERİNDE", color: "#00e676" }},
+                    {{ min: 30, lat: 38.25, lon: 38.18, desc: "⛰️ BEYDAĞLARI GÜNEY YAMACINA DAYANDI", status: "⛰️ OROGRAFİK ETKİ BAŞLADI", color: "#ffb74d" }},
+                    {{ min: 45, lat: 38.32, lon: 38.32, desc: "⚠️ BEYDAĞLARI BLOKAJI: Fönleşme & Sapma", status: "⚠️ BEYDAĞLARI SÖNÜMLEMESİ", color: "#ff9800" }},
+                    {{ min: 60, lat: 38.42, lon: 38.52, desc: "↗️ FIRAT YARIĞINA BÜKÜLME", status: "↗️ ELAZIĞ OLUĞUNA KIRILDI", color: "#ff9800" }},
+                    {{ min: 90, lat: 38.55, lon: 38.80, desc: "↗️ BASKİL / KEBAN KORİDORUNDA", status: "↗️ ELAZIĞ HATTI TAHLİYESİ", color: "#ff9800" }},
+                    {{ min: 120, lat: 38.68, lon: 39.18, desc: "📍 ELAZIĞ MERKEZ & HAZAR OLUĞUNDA", status: "📍 ELAZIĞ HAVZASINDA ETKİLİ", color: "#ff9800" }}
+                ];
+
+                let currentFrameIdx = 0;
+                let isPlaying = true;
+                let timer = null;
+
+                // Radar Katmanları (Katman Katman Doppler Yankısı)
+                let layerOuter = null;
+                let layerMid = null;
+                let layerCore = null;
+                let centroidMarker = null;
+                let trajLine = null;
+
+                function renderRadarFrame(idx) {{
+                    const f = frames[idx];
+
+                    if (layerOuter) map.removeLayer(layerOuter);
+                    if (layerMid) map.removeLayer(layerMid);
+                    if (layerCore) map.removeLayer(layerCore);
+                    if (centroidMarker) map.removeLayer(centroidMarker);
+                    if (trajLine) map.removeLayer(trajLine);
+
+                    const pathCoords = frames.slice(0, idx + 1).map(item => [item.lat, item.lon]);
+                    if (pathCoords.length > 1) {{
+                        trajLine = L.polyline(pathCoords, {{
+                            color: '#ffd54f',
+                            weight: 3,
+                            dashArray: '6, 6',
+                            opacity: 0.95
+                        }}).addTo(map);
+                    }}
+
+                    // 1. Dış Katman: Neon Cyan & Yeşil (15-30 dBZ Hafif Yağış Halesi)
+                    layerOuter = L.circle([f.lat, f.lon], {{
+                        radius: 28000,
+                        fillColor: '#00e5ff',
+                        color: '#00e676',
+                        weight: 2,
+                        opacity: 0.85,
+                        fillOpacity: 0.38
+                    }}).addTo(map);
+
+                    // 2. Orta Katman: Parlak Elektrik Sarısı & Turuncu (35-45 dBZ Sağanak Çekirdeği)
+                    layerMid = L.circle([f.lat, f.lon], {{
+                        radius: 16000,
+                        fillColor: '#ffea00',
+                        color: '#ff9100',
+                        weight: 2,
+                        opacity: 0.9,
+                        fillOpacity: 0.55
+                    }}).addTo(map);
+
+                    // 3. İç Çekirdek: Yoğun Kırmızı & Mor (>50 dBZ Dolu / Konvektif Fırtına Gözü)
+                    layerCore = L.circle([f.lat, f.lon], {{
+                        radius: 7500,
+                        fillColor: '#ff1744',
+                        color: '#d500f9',
+                        weight: 2.5,
+                        opacity: 1,
+                        fillOpacity: 0.80
+                    }}).addTo(map);
+
+                    // 4. Kütle Çekirdeği İkonu
+                    const coreIcon = L.divIcon({{
+                        className: 'core-cross',
+                        html: '<div style="font-size: 20px; color: #ffffff; text-shadow: 0 0 8px #ff1744; font-weight: 900; line-height: 1; transform: translate(-8px, -10px);">⚡</div>',
+                        iconSize: [20, 20]
+                    }});
+                    centroidMarker = L.marker([f.lat, f.lon], {{ icon: coreIcon }}).addTo(map);
+
+                    // Arayüz Sayaçlarını Güncelle
+                    document.getElementById('timeBadge').innerText = f.min === 0 ? "T+0 Dk (Şimdi)" : `T+${{f.min}} Dk`;
+                    document.getElementById('progressFill').style.width = `${{(idx / (frames.length - 1)) * 100}}%`;
+                    
+                    const pill = document.getElementById('statusPill');
+                    pill.innerText = f.status;
+                    pill.style.color = f.color;
+                    pill.style.borderColor = f.color;
+                    pill.style.background = f.color === "#00e676" ? "rgba(0, 230, 118, 0.15)" : "rgba(255, 152, 0, 0.18)";
+                }}
+
+                function nextStep() {{
+                    currentFrameIdx = (currentFrameIdx + 1) % frames.length;
+                    renderRadarFrame(currentFrameIdx);
+                }}
+
+                function startAnimation() {{
+                    if (timer) clearInterval(timer);
+                    timer = setInterval(nextStep, 1300);
+                    document.getElementById('playBtn').innerText = "⏸ Durdur";
+                    isPlaying = true;
+                }}
+
+                function stopAnimation() {{
+                    if (timer) clearInterval(timer);
+                    document.getElementById('playBtn').innerText = "▶ Başlat";
+                    isPlaying = false;
+                }}
+
+                document.getElementById('playBtn').addEventListener('click', () => {{
+                    if (isPlaying) {{
+                        stopAnimation();
+                    }} else {{
+                        startAnimation();
+                    }}
+                }});
+
+                renderRadarFrame(0);
+                startAnimation();
+
+                setTimeout(() => {{ map.invalidateSize(); }}, 300);
+            </script>
+        </body>
+        </html>
+        """
+        st.components.v1.html(nowcast_sim_html, height=540)
+
+        # 3. Sinoptik Sapma Analiz Kartı
+        if is_akdeniz_flow:
+            trajectory_title = "⚠️ AKDENİZ KÖKENLİ CEPHE: Orografik Sapma (Elazığ Kırılması Riski Yüksek)"
+            trajectory_badge_color = "#ff9800"
+            trajectory_analysis = (
+                "• <strong>Kütle Dinamiği:</strong> Yağış kütlesi güneybatıdan (Akdeniz/Toroslar) Malatya'ya doğru tırmanmaktadır.<br>"
+                "• <strong>Fiziksel Sapma Nedeni (Deflection):</strong> 2.500m'lik Beydağları duvarı havayı yukarı iterken kütle enerjisini güney yamaçta tüketir. "
+                "Aşan hava Malatya çanağında fönleşerek (subsidence) çöker. Kütle, en düşük orografik dirence sahip <strong>Fırat Yarığı ve Hazar Gölü çöküntü oluğuna</strong> "
+                "doğru bükülerek yağış merkezini <strong>Elazığ / Keban hattına</strong> kaydıracaktır.<br>"
+                "• <strong>MetaCast Kararı:</strong> Malatya merkezde yağış radarda görünenden zayıf kalacak, asıl kütle kuzeydoğuya (Elazığ'a) teğet geçecektir."
+            )
+            diversion_prob = 78.0
+            predicted_destination = "Elazığ / Baskil / Keban Hattı"
+        else:
+            trajectory_title = "🟢 DENGELİ SİNOPTİK HAVA KORİDORU"
+            trajectory_badge_color = "#4caf50"
+            trajectory_analysis = (
+                "• <strong>Kütle Dinamiği:</strong> Bölge genelinde belirgin bir orografik sapma anomalisi saptanmadı.<br>"
+                "• <strong>Fiziksel Neden:</strong> Rüzgâr yönü ve zemin gradyanı doğal vadi eğimiyle uyumludur. Bulut kütleleri standart rotasında hareket edecektir."
+            )
+            diversion_prob = 20.0
+            predicted_destination = "Standart Bölgesel Rota"
+
         st.markdown(
-            """
-            <div style="background: rgba(33, 150, 243, 0.08); border-left: 4px solid #2196f3; padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 0.88rem; color: #eceff1;">
-                🔬 <strong>Yapay Zekâ Nowcasting Prensibi:</strong> Bu modül, anlık atmosferik telemetriyi <code>Marshall-Palmer Z-R</code> bağıntısıyla radar yansıtırlık alanına (dBZ) dönüştürür. 
-                Bilgisayarlı görü ve Beydağları orografik sönümleme denklemlerini çözerek önümüzdeki <strong>120 dakikalık radar kütle hareketini</strong> gerçek topoğrafya haritası üzerinde simüle eder.
+            f"""
+            <div class="benchmark-box" style="border-left: 5px solid {trajectory_badge_color}; margin-top: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <strong style="color: #90caf9; font-size: 0.95rem;">{trajectory_title}</strong>
+                    <span style="background: {trajectory_badge_color}; color: #000; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">
+                        Sapma Eğilimi: %{diversion_prob:.0f}
+                    </span>
+                </div>
+                <div style="font-size: 0.88rem; line-height: 1.55; color: #eceff1;">
+                    {trajectory_analysis}
+                </div>
+                <div style="margin-top: 8px; font-size: 0.80rem; color: #ffb74d;">
+                    📍 <strong>Öngörülen Kütle Tahliye İstikameti:</strong> <code>{predicted_destination}</code>
+                </div>
             </div>
             """,
             unsafe_allow_html=True
-        )
-
-        n_col_lead, n_col_stats = st.columns([2.5, 1.5])
-        with n_col_lead:
-            lead_time_min = st.select_slider(
-                "⏱️ Gelecek Tahmin Ufku (Lead Time):",
-                options=[0, 15, 30, 45, 60, 90, 120],
-                value=30,
-                format_func=lambda x: f"+{x} Dakika Sonrası (T+{x})" if x > 0 else "Şu Anki Radar Durumu (T+0)"
-            )
-
-        # Kütle Merkezinin Hareketi (Rüzgâr Vektörü + Zaman Ötelemesi)
-        wind_rad = np.radians(sel_wind_deg)
-        u_vector = -sel_speed * np.sin(wind_rad) * 0.009
-        v_vector = -sel_speed * np.cos(wind_rad) * 0.009
-
-        time_factor = lead_time_min / 60.0
-        center_lon_t = 38.05 + (u_vector * time_factor * 8.0)
-        center_lat_t = 38.15 + (v_vector * time_factor * 8.0)
-
-        # Beydağları Orografik Sapma (Elazığ Kanalı Çekimi)
-        is_akdeniz = (195 <= sel_wind_deg <= 235)
-        if is_akdeniz and lead_time_min > 0:
-            drift_east = 0.14 * (lead_time_min / 60.0)
-            drift_north = 0.06 * (lead_time_min / 60.0)
-            center_lon_t += drift_east
-            center_lat_t += drift_north
-
-        # Rota Teşhisi: Malatya Merkez mi, Elazığ mı?
-        dist_to_merkez = np.sqrt((center_lat_t - 38.355) ** 2 + (center_lon_t - 38.309) ** 2)
-        dist_to_elazig = np.sqrt((center_lat_t - 38.674) ** 2 + (center_lon_t - 39.222) ** 2)
-        
-        if dist_to_elazig < dist_to_merkez or (is_akdeniz and lead_time_min >= 45):
-            route_status = "↗️ ELAZIĞ OLUĞUNA KIRILDI"
-            route_color = "#ff9800"
-            route_desc = f"T+{lead_time_min} dk'da kütle Beydağları fönüyle Fırat yarığına bükülüp Elazığ/Baskil hattına kayıyor."
-        else:
-            route_status = "🎯 MALATYA ÇANAĞI ÜZERİNDE"
-            route_color = "#00e676"
-            route_desc = f"T+{lead_time_min} dk'da yağış hücresi doğrudan Malatya merkez ve Erhaç üzerinde etkili."
-
-        with n_col_stats:
-            st.metric("Öngörülen Kütle Rotası", route_status)
-            st.caption(route_desc)
-
-        # Gerçek Topoğrafik Harita Üzerine Radar Katmanları (Scattermap)
-        fig_nowcast = go.Figure()
-
-        # Radar Eko Halka Fonksiyonu (dBZ Katmanları)
-        def create_radar_ring(c_lat, c_lon, r_lat, r_lon):
-            angles = np.linspace(0, 2 * np.pi, 36)
-            lats = c_lat + r_lat * np.sin(angles)
-            lons = c_lon + r_lon * np.cos(angles)
-            return lats.tolist(), lons.tolist()
-
-        # 1. Dış Katman: 20-30 dBZ (Açık Mavi / Yeşil - Hafif Yağış)
-        r_lats_1, r_lons_1 = create_radar_ring(center_lat_t, center_lon_t, 0.22, 0.26)
-        fig_nowcast.add_trace(go.Scattermap(
-            lat=r_lats_1,
-            lon=r_lons_1,
-            mode='lines',
-            fill='toself',
-            fillcolor='rgba(41, 182, 246, 0.35)',
-            line=dict(color='rgba(41, 182, 246, 0.8)', width=1.5),
-            name="20-30 dBZ (Hafif Yağış)",
-            hoverinfo="name"
-        ))
-
-        # 2. Orta Katman: 35-45 dBZ (Sarı / Turuncu - Kuvvetli Sağanak)
-        r_lats_2, r_lons_2 = create_radar_ring(center_lat_t, center_lon_t, 0.13, 0.16)
-        fig_nowcast.add_trace(go.Scattermap(
-            lat=r_lats_2,
-            lon=r_lons_2,
-            mode='lines',
-            fill='toself',
-            fillcolor='rgba(255, 152, 0, 0.45)',
-            line=dict(color='rgba(255, 152, 0, 0.9)', width=1.5),
-            name="35-45 dBZ (Kuvvetli Yağış)",
-            hoverinfo="name"
-        ))
-
-        # 3. Çekirdek Katman: >50 dBZ (Kırmızı / Mor - Dolu & Fırtına Çekirdeği)
-        if sel_cape >= 600 or sel_precip >= 1.5:
-            r_lats_3, r_lons_3 = create_radar_ring(center_lat_t, center_lon_t, 0.06, 0.08)
-            fig_nowcast.add_trace(go.Scattermap(
-                lat=r_lats_3,
-                lon=r_lons_3,
-                mode='lines',
-                fill='toself',
-                fillcolor='rgba(233, 30, 99, 0.60)',
-                line=dict(color='rgba(244, 67, 54, 1.0)', width=2),
-                name=">50 dBZ (Dolu/Oraj Çekirdeği)",
-                hoverinfo="name"
-            ))
-
-        # 4. Kütle Geçmiş & Gelecek Yörünge İzi (Trajectory Çizgisi - Düzeltildi)
-        traj_lats = [38.15 + (v_vector * (t/60.0) * 8.0) + (0.06 * (t/60.0) if is_akdeniz else 0) for t in [0, 30, 60, 90, 120]]
-        traj_lons = [38.05 + (u_vector * (t/60.0) * 8.0) + (0.14 * (t/60.0) if is_akdeniz else 0) for t in [0, 30, 60, 90, 120]]
-        fig_nowcast.add_trace(go.Scattermap(
-            lat=traj_lats,
-            lon=traj_lons,
-            mode='lines+markers',
-            line=dict(color='#ffd54f', width=3),
-            marker=dict(size=7, color='#ffd54f'),
-            name="Kütle İlerleme Yörüngesi",
-            hoverinfo="name"
-        ))
-
-        # 5. Kütle Ağırlık Merkezi (Centroid - Düzeltildi)
-        fig_nowcast.add_trace(go.Scattermap(
-            lat=[center_lat_t],
-            lon=[center_lon_t],
-            mode="markers+text",
-            marker=dict(size=14, color="#ff1744"),
-            text=[f"⚡ Hücre Merkezi (T+{lead_time_min})"],
-            textposition="bottom center",
-            textfont=dict(color="#ff5252", size=12, family="Arial Black"),
-            hoverinfo="text",
-            name="Kütle Çekirdeği"
-        ))
-
-        # 6. Bölge Şehir ve Havalimanları
-        ref_cities = [
-            {"name": "Malatya", "lat": 38.355, "lon": 38.309, "c": "#ffffff"},
-            {"name": "Erhaç (LTAT)", "lat": 38.431, "lon": 38.089, "c": "#90caf9"},
-            {"name": "Tulga Üssü", "lat": 38.331, "lon": 38.258, "c": "#80d8ff"},
-            {"name": "Elazığ", "lat": 38.674, "lon": 39.222, "c": "#ffb74d"},
-            {"name": "Baskil", "lat": 38.560, "lon": 38.820, "c": "#cfd8dc"},
-            {"name": "Doğanşehir", "lat": 38.012, "lon": 37.881, "c": "#cfd8dc"},
-            {"name": "Battalgazi", "lat": 38.421, "lon": 38.365, "c": "#cfd8dc"}
-        ]
-        fig_nowcast.add_trace(go.Scattermap(
-            lat=[c["lat"] for c in ref_cities],
-            lon=[c["lon"] for c in ref_cities],
-            mode="markers+text",
-            text=[c["name"] for c in ref_cities],
-            textposition="top right",
-            marker=dict(size=10, color=[c["c"] for c in ref_cities]),
-            textfont=dict(color="#ffffff", size=11, family="Arial Black"),
-            hoverinfo="text",
-            name="Yerleşim & Meydanlar"
-        ))
-
-        fig_nowcast.update_layout(
-            map=dict(
-                style="white-bg",
-                center=dict(lat=38.36, lon=38.40),
-                zoom=7.8,
-                layers=[
-                    dict(
-                        sourcetype="raster",
-                        source=["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"],
-                        below="traces"
-                    )
-                ]
-            ),
-            showlegend=False,
-            height=440,
-            margin=dict(l=0, r=0, t=10, b=0)
-        )
-        st.plotly_chart(fig_nowcast, use_container_width=True)
-
-        st.markdown(
-            """
-            <div style="display: flex; gap: 14px; justify-content: center; font-size: 0.80rem; margin-top: 4px; color: #cfd8dc;">
-                <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; border-radius: 3px; background-color: rgba(41, 182, 246, 0.7);"></div> 20-30 dBZ (Hafif)</div>
-                <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; border-radius: 3px; background-color: rgba(255, 152, 0, 0.7);"></div> 35-45 dBZ (Sağanak)</div>
-                <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; border-radius: 3px; background-color: rgba(233, 30, 99, 0.8);"></div> >50 dBZ (Dolu/Oraj)</div>
-                <div style="display: flex; align-items: center; gap: 4px;"><span style="color: #ffd54f;">- - -</span> Kütle Rota Yörüngesi</div>
-            </div>
-            """, unsafe_allow_html=True
         )
 # ==============================================================================
 # 🧠 XAI: AÇIKLANABİLİR YAPAY ZEKÂ KARAR ETKİLERİ
