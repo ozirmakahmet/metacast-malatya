@@ -1948,55 +1948,139 @@ with st.expander("🛰️ Canlı Radar, Fırtına Simülatörü & Sinoptik Sapma
         unsafe_allow_html=True
     )
 # ==============================================================================
-# 🧠 XAI: AÇIKLANABİLİR YAPAY ZEKÂ KARAR ETKİLERİ
+# 🧠 XAI: AÇIKLANABİLİR YAPAY ZEKÂ KARAR GEREKÇELENDİRMESİ (YAZILI ANALİZ)
 # ==============================================================================
 st.markdown("##### 🧠 Açıklanabilir Yapay Zekâ (XAI): Model Kararını Gerekçelendirme")
-st.caption(f"Saat {selected_time_str} için karar unsurları:")
+st.caption(f"Saat {selected_time_str} itibarıyla yapay zekânın kararını şekillendiren fiziksel unsurlar:")
 
 cur_xai_vec = X_norm[current_sel_h]
 feature_contributions = cur_xai_vec * weights
-feature_titles = ["Rüzgâr Tabanı", "3s Basınç Düşüşü", "Beydağları Blokajı", "Hamle Oranı", "Kar Fazı", "Dolu İndeksi"]
 
-xai_records = []
-for f_name, f_val in zip(feature_titles, feature_contributions):
-    is_danger = (f_val >= 0)
-    xai_records.append({
-        "Parametre": f_name,
-        "Katkı": f_val,
-        "Kategori": "🔴 Riski Artıran Faktör" if is_danger else "🟢 Riski Düşüren Kalkan",
-        "Renk": "#f44336" if is_danger else "#4caf50",
-    })
+# Parametrelerin açıklamalı sözlüğü
+feature_info = [
+    {
+        "name": "Rüzgâr Taban Hızı",
+        "val": float(feature_contributions[0]),
+        "pos_desc": "Sürekli taban rüzgârı yüksek; fırtına zeminini sürekli besliyor.",
+        "neg_desc": "Taban rüzgârı sakin; atmosferde sürekli bir fırtına akışı bulunmuyor."
+    },
+    {
+        "name": "3 Saatlik Basınç Düşüşü (ΔP)",
+        "val": float(feature_contributions[1]),
+        "pos_desc": "Basınç hızla düşüyor; havzaya dinamik bir alçak basınç / cephe yaklaşıyor.",
+        "neg_desc": "Basınç dengeli veya yükselişte; atmosferik stabilite korunuyor."
+    },
+    {
+        "name": "Beydağları Blokajı (215°)",
+        "val": float(feature_contributions[2]),
+        "pos_desc": "Hava koridoru açık; rüzgâr dağ engeline takılmadan ovaya iniyor.",
+        "neg_desc": "Rüzgâr Beydağları duvarına dik çarpıyor; kütle ovaya inemeden dağda sönümleniyor (De-Warning)."
+    },
+    {
+        "name": "Hamle Çarpanı (Gust Factor)",
+        "val": float(feature_contributions[3]),
+        "pos_desc": "Ani rüzgâr darbeleri taban hızın çok üzerinde; savurucu türbülans baskısı yüksek.",
+        "neg_desc": "Rüzgâr esişi düzenli; sert hamle patlamaları beklenmiyor."
+    },
+    {
+        "name": "Kar & Donma Fazı",
+        "val": float(feature_contributions[4]),
+        "pos_desc": "Sıcaklık donma eşiğinde; yağış kar fazına geçip zemin buzlanması riski üretiyor.",
+        "neg_desc": "Sıcaklık donma eşiğinin üzerinde; zemin buzlanması veya kar tehdidi yok."
+    },
+    {
+        "name": "Konvektif Dolu İndeksi (CAPE)",
+        "val": float(feature_contributions[5]),
+        "pos_desc": "Yüksek termodinamik enerji; ani dolu ve süper hücre patlaması riski mevcut.",
+        "neg_desc": "Atmosfer konvektif olarak stabil; dolu veya fırtına bulutu enerjisi yok."
+    }
+]
 
-df_xai_plot = pd.DataFrame(xai_records).sort_values(by="Katkı", ascending=True)
-fig_xai = go.Figure()
+shields = [f for f in feature_info if f["val"] < 0]
+dangers = [f for f in feature_info if f["val"] >= 0]
 
-for cat, color_code in [("🟢 Riski Düşüren Kalkan", "#4caf50"), ("🔴 Riski Artıran Faktör", "#f44336")]:
-    sub_df = df_xai_plot[df_xai_plot["Kategori"] == cat]
-    if not sub_df.empty:
-        fig_xai.add_trace(go.Bar(
-            y=sub_df["Parametre"],
-            x=sub_df["Katkı"],
-            name=cat,
-            orientation="h",
-            marker_color=color_code,
-            text=[f"{v:+.2f}" for v in sub_df["Katkı"]],
-            textposition="outside",
-        ))
+# Sıralama: En etkili faktör en üstte
+shields = sorted(shields, key=lambda x: x["val"])
+dangers = sorted(dangers, key=lambda x: x["val"], reverse=True)
 
-fig_xai.add_vline(x=0, line_width=1.5, line_color="rgba(255,255,255,0.3)")
-fig_xai.update_layout(
-    xaxis=dict(title="Karar Katkı Puanı (Sol: Güvenlik Kalkanı | Sağ: Afet Baskısı)", showgrid=True, gridcolor="rgba(255,255,255,0.06)"),
-    yaxis=dict(title="", autorange="reversed"),
-    height=260,
-    margin=dict(l=10, r=40, t=10, b=25),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)"
+# Net Model Özeti
+net_score = sum(f["val"] for f in feature_info)
+if net_score < -0.20:
+    verdict_text = "🟢 **GENEL TEŞHİS: GÜVENLİ VE SAKİN.** Malatya'nın doğal coğrafi kalkanları ve düşük rüzgâr tabanı, olası afet baskılarını tamamen etkisiz hale getiriyor."
+    verdict_border = "#4caf50"
+elif net_score > 0.20:
+    verdict_text = "🔴 **GENEL TEŞHİS: AFET ALARMI.** Atmosferdeki tehlike faktörleri dağ kalkanlarını aşmış durumda; tedbir protokolleri uygulanmalıdır."
+    verdict_border = "#f44336"
+else:
+    verdict_text = "🟡 **GENEL TEŞHİS: DENGELİ / DİKKAT.** Tehdit ve sönümleme unsurları birbirine yakın seyrediyor; ani lokal değişimler takip edilmelidir."
+    verdict_border = "#ff9800"
+
+st.markdown(
+    f"""
+    <div style="background: rgba(255, 255, 255, 0.03); border-left: 5px solid {verdict_border}; padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 0.88rem; color: #eceff1;">
+        {verdict_text}
+    </div>
+    """,
+    unsafe_allow_html=True
 )
-st.plotly_chart(fig_xai, use_container_width=True)
 
-st.markdown("---")
+xai_col1, xai_col2 = st.columns(2)
 
+with xai_col1:
+    shield_items_html = ""
+    for s in shields:
+        shield_items_html += f"""
+        <div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                <strong style="color: #69f0ae; font-size: 0.85rem;">🛡️ {s['name']}</strong>
+                <span style="background: rgba(0, 230, 118, 0.15); color: #00e676; font-size: 0.75rem; font-weight: 700; padding: 1px 6px; border-radius: 4px;">{s['val']:.2f} Etki</span>
+            </div>
+            <div style="font-size: 0.80rem; color: #b0bec5; line-height: 1.35;">{s['neg_desc']}</div>
+        </div>
+        """
+    if not shield_items_html:
+        shield_items_html = "<div style='font-size: 0.80rem; color: #78909c;'>Şu anda belirgin bir sönümleme kalkanı devrede değil.</div>"
+
+    st.markdown(
+        f"""
+        <div class="directive-card" style="border-left: 4px solid #00e676;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <strong style="color: #00e676; font-size: 0.95rem;">🟢 Güvenlik Kalkanları (Riski Düşürenler)</strong>
+                <span style="font-size: 0.75rem; color: #78909c;">{len(shields)} Unsur</span>
+            </div>
+            {shield_items_html}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+with xai_col2:
+    danger_items_html = ""
+    for d in dangers:
+        danger_items_html += f"""
+        <div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                <strong style="color: #ff5252; font-size: 0.85rem;">⚠️ {d['name']}</strong>
+                <span style="background: rgba(244, 67, 54, 0.15); color: #ff5252; font-size: 0.75rem; font-weight: 700; padding: 1px 6px; border-radius: 4px;">+{d['val']:.2f} Baskı</span>
+            </div>
+            <div style="font-size: 0.80rem; color: #b0bec5; line-height: 1.35;">{d['pos_desc']}</div>
+        </div>
+        """
+    if not danger_items_html:
+        danger_items_html = "<div style='font-size: 0.80rem; color: #78909c;'>Aktif bir afet veya tehlike baskısı saptanmadı.</div>"
+
+    st.markdown(
+        f"""
+        <div class="directive-card" style="border-left: 4px solid #ff1744;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <strong style="color: #ff5252; font-size: 0.95rem;">🔴 Afet Baskıları (Riski Artıranlar)</strong>
+                <span style="font-size: 0.75rem; color: #78909c;">{len(dangers)} Unsur</span>
+            </div>
+            {danger_items_html}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 # ==============================================================================
 # 📋 SEKTÖREL OPERASYONEL REÇETELER
 # ==============================================================================
