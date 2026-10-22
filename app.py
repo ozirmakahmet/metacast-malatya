@@ -1906,330 +1906,241 @@ def run_onnx_radar_nowcasting():
 
 
 # ==============================================================================
-# 🛰️ BÖLGESEL CANLI RADAR & DOĞAL KÜTLE NOWCASTING (SINIRSIZ ZOOM & HATASIZ)
+# 🛰️ BÖLGESEL CANLI RADAR & OTOMATİK AKAN GERÇEK RADAR SİMÜLATÖRÜ (MGM STANDARDI)
 # ==============================================================================
 st.markdown("---")
-with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatörü", expanded=True):
-    col_rad_ctrl, col_rad_note = st.columns([2.2, 1.8])
-    with col_rad_ctrl:
-        radar_display_mode = st.radio(
-            "Radar Modu:",
-            [
-                "🔴 Canlı Kompozit Radar (Türkiye & Çevre İller - Anlık Yağış)",
-                "🔮 MetaCast Nowcast Simülasyonu (Doğal Kütle İlerleme & Sapma Modeli)"
-            ],
-            horizontal=False
-        )
-    with col_rad_note:
-        st.caption("💡 **Kontrol:** Haritada dilediğiniz kadar yakınlaşıp uzaklaşabilirsiniz (Zoom). Sol üstteki **(▶ / ⏸)** butonuyla simülasyonu kontrol edebilirsiniz.")
+with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akışı", expanded=True):
+    st.caption("🔴 Gerçek meteoroloji radar istasyonlarının anlık yansıtırlık (dBZ) akışı ve kütle hareket simülasyonu:")
 
     now_tsi_str = datetime.now(TR_TZ).strftime("%d.%m.%Y %H:%M TSİ")
 
-    if "Canlı Kompozit" in radar_display_mode:
-        radar_live_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8" />
-            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-            <style>
-                body {{ margin: 0; padding: 0; background: #0e1117; font-family: sans-serif; }}
-                #map-wrap {{ position: relative; height: 490px; width: 100%; border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.12); }}
-                #radar-live-map {{ height: 100%; width: 100%; }}
-                .top-tsi-badge {{
-                    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-                    background: #ffffff; color: #0f172a; padding: 4px 18px; border-radius: 20px;
-                    font-size: 0.86rem; font-weight: 800; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-                    z-index: 1000; border: 1px solid #cbd5e1;
-                }}
-            </style>
-        </head>
-        <body>
-            <div id="map-wrap">
-                <div class="top-tsi-badge">{now_tsi_str}</div>
-                <div id="radar-live-map"></div>
+    real_radar_stream_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8" />
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <style>
+            body {{ margin: 0; padding: 0; background: #0e1117; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
+            #sim-container {{
+                background: rgba(255, 255, 255, 0.02);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 10px;
+                overflow: hidden;
+                padding: 10px 14px 14px 14px;
+            }}
+            .sim-header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 10px;
+                flex-wrap: wrap;
+                gap: 8px;
+            }}
+            .timeline-wrapper {{
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex-grow: 1;
+                max-width: 580px;
+            }}
+            .play-btn {{
+                background: #0284c7; border: none; color: #fff; font-size: 0.92rem;
+                font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer;
+                transition: background 0.2s;
+            }}
+            .play-btn:hover {{ background: #0369a1; }}
+            .track-bar {{ position: relative; flex-grow: 1; height: 6px; background: rgba(255,255,255,0.15); border-radius: 3px; }}
+            .progress-fill {{
+                position: absolute; left: 0; top: 0; height: 100%; width: 0%;
+                background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); border-radius: 3px; transition: width 0.2s ease;
+            }}
+            .status-pill {{
+                padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 800;
+                background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e;
+            }}
+            #radar-real-map {{ height: 460px; width: 100%; border-radius: 8px; position: relative; }}
+            .top-tsi-badge {{
+                position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+                background: #ffffff; color: #0f172a; padding: 5px 20px; border-radius: 20px;
+                font-size: 0.90rem; font-weight: 800; box-shadow: 0 4px 15px rgba(0,0,0,0.35);
+                z-index: 1000; letter-spacing: 0.4px; border: 1px solid #cbd5e1;
+            }}
+            .legend-bar {{
+                display: flex; justify-content: space-between; align-items: center;
+                padding: 8px 10px 0 10px; font-size: 0.75rem; color: #94a3b8; font-weight: 700;
+                flex-wrap: wrap; gap: 6px;
+            }}
+            .dbz-box {{ display: inline-block; width: 13px; height: 13px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
+        </style>
+    </head>
+    <body>
+        <div id="sim-container">
+            <div class="sim-header">
+                <div class="timeline-wrapper">
+                    <button id="playBtn" class="play-btn">⏸ Durdur</button>
+                    <div class="track-bar"><div id="progressFill" class="progress-fill"></div></div>
+                    <span id="timeBadge" style="font-family: monospace; font-size: 0.95rem; font-weight: 800; color: #38bdf8; min-width: 80px; text-align: right;">Canlı</span>
+                </div>
+                <div id="statusPill" class="status-pill">📡 CANLI RADAR AKIŞI</div>
             </div>
-            <script>
-                const map = L.map('radar-live-map', {{ zoomControl: true, attributionControl: false }}).setView([38.35, 38.30], 8);
-                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                    maxZoom: 18, minZoom: 5
-                }}).addTo(map);
 
-                fetch('https://api.rainviewer.com/public/weather-maps.json')
-                    .then(res => res.json())
-                    .then(data => {{
-                        const past = data.radar.past;
-                        if (past && past.length > 0) {{
-                            const lastFrame = past[past.length - 1];
-                            L.tileLayer(data.host + lastFrame.path + '/256/{{z}}/{{x}}/{{y}}/2/1_1.png', {{
-                                opacity: 0.75, zIndex: 500
-                            }}).addTo(map);
-                        }}
+            <div style="position: relative;">
+                <div id="tsiBadge" class="top-tsi-badge">{now_tsi_str}</div>
+                <div id="radar-real-map"></div>
+            </div>
+
+            <div class="legend-bar">
+                <div><span class="dbz-box" style="background:#00e5ff;"></span> Çisenti (15-20 dBZ)</div>
+                <div><span class="dbz-box" style="background:#22c55e;"></span> Hafif-Orta (25-35 dBZ)</div>
+                <div><span class="dbz-box" style="background:#eab308;"></span> Sağanak (35-45 dBZ)</div>
+                <div><span class="dbz-box" style="background:#f97316;"></span> Şiddetli (45-50 dBZ)</div>
+                <div><span class="dbz-box" style="background:#dc2626;"></span> Oraj / Dolu (>50 dBZ)</div>
+                <div style="color: #cbd5e1;">🌧️ Gerçek Reflektivite Katmanı</div>
+            </div>
+        </div>
+
+        <script>
+            // 1. Haritanın Kurulumu (Sınırsız Zoom, Temiz Harita)
+            const map = L.map('radar-real-map', {{ zoomControl: true, attributionControl: false }}).setView([38.45, 38.45], 8);
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                maxZoom: 18, minZoom: 5
+            }}).addTo(map);
+
+            // 2. Canlı ve Nowcast Radar Akış Motoru
+            let radarLayers = [];
+            let framesData = [];
+            let currentIdx = 0;
+            let timer = null;
+            let isPlaying = true;
+
+            fetch('https://api.rainviewer.com/public/weather-maps.json')
+                .then(res => res.json())
+                .then(data => {{
+                    const past = data.radar.past || [];
+                    const nowcast = data.radar.nowcast || [];
+                    framesData = past.concat(nowcast);
+
+                    if (framesData.length === 0) return;
+
+                    // Karelerin yüklenmesi (TITAN Yumuşak Geçiş Renk Paleti - Tam MGM Standardı)
+                    framesData.forEach((frame, idx) => {{
+                        const layer = L.tileLayer(data.host + frame.path + '/256/{{z}}/{{x}}/{{y}}/1/1_1.png', {{
+                            opacity: 0,
+                            zIndex: 200,
+                            maxZoom: 18,
+                            minZoom: 5
+                        }});
+                        layer.addTo(map);
+                        radarLayers.push(layer);
                     }});
-            </script>
-        </body>
-        </html>
-        """
-        st.components.v1.html(radar_live_html, height=510)
+
+                    // İlk kareyi göster ve otomatik oynatmayı başlat
+                    currentIdx = past.length > 0 ? past.length - 1 : 0;
+                    showFrame(currentIdx);
+                    startLoop();
+                }});
+
+            function formatTime(unixSec) {{
+                const d = new Date(unixSec * 1000);
+                const day = String(d.getDate()).padStart(2, '0');
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const year = d.getFullYear();
+                const hours = String(d.getHours()).padStart(2, '0');
+                const minutes = String(d.getMinutes()).padStart(2, '0');
+                return `${{day}}.${{month}}.${{year}} ${{hours}}:${{minutes}} TSİ`;
+            }}
+
+            function showFrame(idx) {{
+                if (radarLayers.length === 0) return;
+
+                radarLayers.forEach((l, i) => {{
+                    l.setOpacity(i === idx ? 0.78 : 0);
+                }});
+
+                const f = framesData[idx];
+                document.getElementById('tsiBadge').innerText = formatTime(f.time);
+                document.getElementById('progressFill').style.width = `${{(idx / (framesData.length - 1)) * 100}}%`;
+
+                const isFuture = idx >= (framesData.length - 4);
+                const pill = document.getElementById('statusPill');
+                if (isFuture) {{
+                    pill.innerText = "🔮 NOWCAST KÜTLE TAHMİNİ";
+                    pill.style.color = "#38bdf8";
+                    pill.style.borderColor = "#38bdf8";
+                    pill.style.background = "rgba(56, 189, 248, 0.15)";
+                    document.getElementById('timeBadge').innerText = "Tahmin";
+                }} else {{
+                    pill.innerText = "📡 CANLI RADAR GÖZLEMİ";
+                    pill.style.color = "#22c55e";
+                    pill.style.borderColor = "#22c55e";
+                    pill.style.background = "rgba(34, 197, 94, 0.15)";
+                    document.getElementById('timeBadge').innerText = "Canlı";
+                }}
+            }}
+
+            function nextFrame() {{
+                if (framesData.length === 0) return;
+                currentIdx = (currentIdx + 1) % framesData.length;
+                showFrame(currentIdx);
+            }}
+
+            function startLoop() {{
+                if (timer) clearInterval(timer);
+                timer = setInterval(nextFrame, 800);
+                document.getElementById('playBtn').innerText = "⏸ Durdur";
+                isPlaying = true;
+            }}
+
+            function stopLoop() {{
+                if (timer) clearInterval(timer);
+                document.getElementById('playBtn').innerText = "▶ Başlat";
+                isPlaying = false;
+            }}
+
+            document.getElementById('playBtn').addEventListener('click', () => {{
+                if (isPlaying) stopLoop(); else startLoop();
+            }});
+
+            setTimeout(() => {{ map.invalidateSize(); }}, 350);
+        </script>
+    </body>
+    </html>
+    """
+    st.components.v1.html(real_radar_stream_html, height=540)
+
+    # MetaCast Fiziksel Kütle Yörüngesi ve Elazığ / Havza Sapma Motoru
+    cur_wind_angle = float(sel_wind_deg)
+    is_akdeniz_flow = (195 <= cur_wind_angle <= 235)
+
+    if is_akdeniz_flow:
+        st.markdown(
+            """
+            <div class="benchmark-box" style="border-left: 5px solid #f97316; margin-top: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <strong style="color: #fb923c; font-size: 0.95rem;">⚠️ AKDENİZ KÖKENLİ CEPHE: Orografik Sapma (Elazığ Kırılması Riski)</strong>
+                    <span style="background: #f97316; color: #fff; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">Sapma: %78</span>
+                </div>
+                <div style="font-size: 0.88rem; line-height: 1.5; color: #eceff1;">
+                    • <strong>Fiziksel Sapma Nedeni:</strong> Beydağları orografik engeli kütleyi yukarı iterken enerjisini güney yamaçta tüketir. Aşan hava Malatya çanağında fönleşir. Kütle, en düşük orografik dirence sahip <strong>Fırat Yarığı ve Hazar Gölü çöküntü oluğunu</strong> takip ederek <strong>Elazığ / Keban hattına</strong> kayar.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
     else:
-        cur_wind_angle = float(sel_wind_deg)
-        is_akdeniz_flow = (195 <= cur_wind_angle <= 235)
-
-        nowcast_organic_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8" />
-            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-            <style>
-                body {{ margin: 0; padding: 0; background: #0e1117; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
-                #sim-container {{
-                    background: rgba(255, 255, 255, 0.02);
-                    border: 1px solid rgba(255, 255, 255, 0.12);
-                    border-radius: 10px;
-                    overflow: hidden;
-                    padding: 10px 14px 14px 14px;
-                }}
-                .sim-header {{
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 10px;
-                    flex-wrap: wrap;
-                    gap: 8px;
-                }}
-                .timeline-wrapper {{
-                    display: flex;
-                    align-items: center;
-                    gap: 12px;
-                    flex-grow: 1;
-                    max-width: 580px;
-                }}
-                .play-btn {{
-                    background: #0284c7; border: none; color: #fff; font-size: 0.92rem;
-                    font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer;
-                }}
-                .play-btn:hover {{ background: #0369a1; }}
-                .track-bar {{ position: relative; flex-grow: 1; height: 6px; background: rgba(255,255,255,0.15); border-radius: 3px; }}
-                .progress-fill {{
-                    position: absolute; left: 0; top: 0; height: 100%; width: 0%;
-                    background: linear-gradient(90deg, #16a34a, #eab308, #dc2626); border-radius: 3px; transition: width 0.3s ease;
-                }}
-                .status-pill {{
-                    padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 800;
-                    background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e;
-                }}
-                #radar-organic-map {{ height: 440px; width: 100%; border-radius: 8px; position: relative; }}
-                .top-tsi-badge {{
-                    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-                    background: #ffffff; color: #0f172a; padding: 4px 18px; border-radius: 20px;
-                    font-size: 0.88rem; font-weight: 800; box-shadow: 0 3px 12px rgba(0,0,0,0.35);
-                    z-index: 1000; border: 1px solid #cbd5e1;
-                }}
-                .legend-bar {{
-                    display: flex; justify-content: space-between; align-items: center;
-                    padding: 8px 10px 0 10px; font-size: 0.75rem; color: #94a3b8; font-weight: 700;
-                }}
-                .dbz-box {{ display: inline-block; width: 13px; height: 13px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
-                .city-label {{
-                    background: rgba(15, 23, 42, 0.75); color: #ffffff; padding: 1px 6px;
-                    border-radius: 3px; font-size: 11px; font-weight: 700; border: 1px solid rgba(255,255,255,0.4);
-                }}
-            </style>
-        </head>
-        <body>
-            <div id="sim-container">
-                <div class="sim-header">
-                    <div class="timeline-wrapper">
-                        <button id="playBtn" class="play-btn">⏸ Durdur</button>
-                        <div class="track-bar"><div id="progressFill" class="progress-fill"></div></div>
-                        <span id="timeBadge" style="font-family: monospace; font-size: 0.95rem; font-weight: 800; color: #38bdf8; min-width: 80px; text-align: right;">T+0 Dk</span>
-                    </div>
-                    <div id="statusPill" class="status-pill">🎯 MALATYA ÇANAĞI ÜZERİNDE</div>
-                </div>
-
-                <div style="position: relative;">
-                    <div id="tsiBadge" class="top-tsi-badge">{now_tsi_str}</div>
-                    <div id="radar-organic-map"></div>
-                </div>
-
-                <div class="legend-bar">
-                    <div><span class="dbz-box" style="background:#22c55e;"></span> Hafif (20-30 dBZ)</div>
-                    <div><span class="dbz-box" style="background:#15803d;"></span> Orta Yağış (30-38 dBZ)</div>
-                    <div><span class="dbz-box" style="background:#eab308;"></span> Kuvvetli (38-45 dBZ)</div>
-                    <div><span class="dbz-box" style="background:#f97316;"></span> Şiddetli Sağanak (45-50 dBZ)</div>
-                    <div><span class="dbz-box" style="background:#dc2626;"></span> Oraj / Dolu (>50 dBZ)</div>
+        st.markdown(
+            """
+            <div class="benchmark-box" style="border-left: 5px solid #22c55e; margin-top: 10px;">
+                <strong style="color: #4ade80; font-size: 0.95rem;">🟢 SİNOPTİK DEĞERLENDİRME: HAVA DENGELİ</strong>
+                <div style="font-size: 0.88rem; line-height: 1.5; color: #eceff1; margin-top: 4px;">
+                    • <strong>Öngörü:</strong> Rüzgâr yönü vadi eğimiyle uyumludur; kütleler normal geçiş rotasında hareket eder.
                 </div>
             </div>
-
-            <script>
-                const map = L.map('radar-organic-map', {{ zoomControl: true, attributionControl: false }}).setView([38.38, 38.45], 8);
-                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                    maxZoom: 18, minZoom: 5
-                }}).addTo(map);
-
-                const towns = [
-                    {{ name: "Malatya", lat: 38.355, lon: 38.309 }},
-                    {{ name: "Erhaç (LTAT)", lat: 38.431, lon: 38.089 }},
-                    {{ name: "Tulga Üssü", lat: 38.331, lon: 38.258 }},
-                    {{ name: "Elazığ", lat: 38.674, lon: 39.222 }},
-                    {{ name: "Baskil", lat: 38.560, lon: 38.820 }},
-                    {{ name: "Doğanşehir", lat: 38.012, lon: 37.881 }},
-                    {{ name: "Battalgazi", lat: 38.421, lon: 38.365 }}
-                ];
-
-                towns.forEach(t => {{
-                    const labelIcon = L.divIcon({{
-                        className: 'city-label',
-                        html: t.name,
-                        iconSize: null,
-                        iconAnchor: [-6, 6]
-                    }});
-                    L.circleMarker([t.lat, t.lon], {{
-                        radius: 4, fillColor: "#0284c7", color: "#ffffff", weight: 2, fillOpacity: 1
-                    }}).addTo(map);
-                    L.marker([t.lat, t.lon], {{ icon: labelIcon }}).addTo(map);
-                }});
-
-                function createRadarBand(centerLat, centerLon, scale, seed) {{
-                    const polygons = [];
-                    const subCells = [
-                        {{ dLat: 0.00, dLon: 0.00, r: scale * 1.0,  s: seed }},
-                        {{ dLat: 0.08, dLon: -0.06, r: scale * 0.65, s: seed + 1.2 }},
-                        {{ dLat: -0.06, dLon: 0.08, r: scale * 0.70, s: seed + 2.5 }},
-                        {{ dLat: 0.12, dLon: 0.09, r: scale * 0.50, s: seed + 3.8 }}
-                    ];
-
-                    subCells.forEach(cell => {{
-                        const pts = [];
-                        const n = 22;
-                        for (let i = 0; i < n; i++) {{
-                            const a = (i / n) * 2 * Math.PI;
-                            const w = Math.sin(a * 3 + cell.s) * 0.22 + Math.cos(a * 4 - cell.s) * 0.15;
-                            const rad = cell.r * (1.0 + w);
-                            const lat = (centerLat + cell.dLat) + (rad * 0.75) * Math.sin(a);
-                            const lon = (centerLon + cell.dLon) + (rad * 1.05) * Math.cos(a);
-                            pts.push([lat, lon]);
-                        }}
-                        polygons.push(pts);
-                    }});
-                    return polygons;
-                }}
-
-                const steps = [
-                    {{ min: 0,  lat: 38.12, lon: 37.95, status: "🎯 T+0 KÜTLE GÜNEYBATI GİRİŞİNDE", color: "#22c55e" }},
-                    {{ min: 15, lat: 38.20, lon: 38.08, status: "🎯 T+15 MALATYA ÇANAĞINA TIRMANIŞ", color: "#22c55e" }},
-                    {{ min: 30, lat: 38.28, lon: 38.22, status: "⛰️ T+30 BEYDAĞLARI GÜNEY YAMACI", color: "#eab308" }},
-                    {{ min: 45, lat: 38.36, lon: 38.40, status: "⚠️ T+45 BEYDAĞLARI BLOKAJI / FÖN", color: "#f97316" }},
-                    {{ min: 60, lat: 38.46, lon: 38.62, status: "↗️ T+60 FIRAT YARIĞINA BÜKÜLME", color: "#f97316" }},
-                    {{ min: 90, lat: 38.58, lon: 38.90, status: "↗️ T+90 BASKİL / KEBAN HATTI", color: "#f97316" }},
-                    {{ min: 120, lat: 38.68, lon: 39.20, status: "📍 T+120 ELAZIĞ HAVZASINDA ETKİLİ", color: "#dc2626" }}
-                ];
-
-                let curIdx = 0;
-                let animTimer = null;
-                let isPlaying = true;
-                let activeLayers = [];
-
-                function drawRadarStep(idx) {{
-                    const st = steps[idx];
-                    activeLayers.forEach(l => map.removeLayer(l));
-                    activeLayers = [];
-
-                    const outerPolys = createRadarBand(st.lat, st.lon, 0.22, idx * 0.7);
-                    outerPolys.forEach(pts => {{
-                        const p = L.polygon(pts, {{
-                            color: "#15803d", weight: 1.2, fillColor: "#22c55e", fillOpacity: 0.65
-                        }}).addTo(map);
-                        activeLayers.push(p);
-                    }});
-
-                    const midPolys = createRadarBand(st.lat + 0.02, st.lon - 0.01, 0.12, idx * 0.9 + 1.5);
-                    midPolys.slice(0, 2).forEach(pts => {{
-                        const p = L.polygon(pts, {{
-                            color: "#ca8a04", weight: 1.5, fillColor: "#eab308", fillOpacity: 0.80
-                        }}).addTo(map);
-                        activeLayers.push(p);
-                    }});
-
-                    const corePts = createRadarBand(st.lat + 0.03, st.lon, 0.055, idx * 1.1 + 3.0);
-                    const pCore = L.polygon(corePts[0], {{
-                        color: "#991b1b", weight: 2, fillColor: "#dc2626", fillOpacity: 0.92
-                    }}).addTo(map);
-                    activeLayers.push(pCore);
-
-                    document.getElementById('timeBadge').innerText = st.min === 0 ? "T+0 Dk" : `T+${{st.min}} Dk`;
-                    document.getElementById('progressFill').style.width = `${{(idx / (steps.length - 1)) * 100}}%`;
-                    
-                    const pill = document.getElementById('statusPill');
-                    pill.innerText = st.status;
-                    pill.style.color = st.color;
-                    pill.style.borderColor = st.color;
-                }}
-
-                function nextFrame() {{
-                    curIdx = (curIdx + 1) % steps.length;
-                    drawRadarStep(curIdx);
-                }}
-
-                function startLoop() {{
-                    if (animTimer) clearInterval(animTimer);
-                    animTimer = setInterval(nextFrame, 1300);
-                    document.getElementById('playBtn').innerText = "⏸ Durdur";
-                    isPlaying = true;
-                }}
-
-                function stopLoop() {{
-                    if (animTimer) clearInterval(animTimer);
-                    document.getElementById('playBtn').innerText = "▶ Başlat";
-                    isPlaying = false;
-                }}
-
-                document.getElementById('playBtn').addEventListener('click', () => {{
-                    if (isPlaying) stopLoop(); else startLoop();
-                }});
-
-                drawRadarStep(0);
-                startLoop();
-                setTimeout(() => {{ map.invalidateSize(); }}, 300);
-            </script>
-        </body>
-        </html>
-        """
-        st.components.v1.html(nowcast_organic_html, height=540)
-
-        cur_wind_angle = float(sel_wind_deg)
-        is_akdeniz_flow = (195 <= cur_wind_angle <= 235)
-
-        if is_akdeniz_flow:
-            st.markdown(
-                """
-                <div class="benchmark-box" style="border-left: 5px solid #f97316; margin-top: 10px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                        <strong style="color: #fb923c; font-size: 0.95rem;">⚠️ AKDENİZ KÖKENLİ CEPHE: Orografik Sapma (Elazığ Kırılması)</strong>
-                        <span style="background: #f97316; color: #fff; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">Sapma: %78</span>
-                    </div>
-                    <div style="font-size: 0.88rem; line-height: 1.5; color: #eceff1;">
-                        • <strong>Fiziksel Sapma Nedeni:</strong> Beydağları orografik engeli kütleyi yukarı iterken enerjisini güney yamaçta tüketir. Aşan hava Malatya çanağında fönleşir. Kütle, en düşük orografik dirence sahip <strong>Fırat Yarığı ve Hazar Gölü çöküntü oluğunu</strong> takip ederek <strong>Elazığ / Keban hattına</strong> kayar.
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        else:
-            st.markdown(
-                """
-                <div class="benchmark-box" style="border-left: 5px solid #22c55e; margin-top: 10px;">
-                    <strong style="color: #4ade80; font-size: 0.95rem;">🟢 SİNOPTİK DEĞERLENDİRME: HAVA DENGELİ</strong>
-                    <div style="font-size: 0.88rem; line-height: 1.5; color: #eceff1; margin-top: 4px;">
-                        • <strong>Öngörü:</strong> Rüzgâr yönü vadi eğimiyle uyumludur; kütleler normal geçiş rotasında hareket eder.
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+            """,
+            unsafe_allow_html=True
+        )
 # ==============================================================================
 # 🧠 XAI: AÇIKLANABİLİR YAPAY ZEKÂ KARAR GEREKÇELENDİRMESİ (YAZILI ANALİZ)
 # ==============================================================================
