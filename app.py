@@ -2069,11 +2069,12 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
             </div>
 
             <script>
-                // 1. Esri World Topo Map (API Key gerektirmez, filigransız, yüksek netlik)
-                const map = L.map('radar-organic-map', {{ zoomControl: true, attributionControl: false }}).setView([38.38, 38.45], 8);
-                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
-                    maxZoom: 15, minZoom: 6
-                }}).addTo(map);
+                // 1. Sınırsız Zoom Destekli Yüksek Netlikte Topoğrafik Harita (Zoom Level Hatası Vermez)
+                const map = L.map('radar-organic-map', { zoomControl: true, attributionControl: false }).setView([38.38, 38.45], 8);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 18,
+                    minZoom: 5
+                }).addTo(map);
 
                 // 2. Şehir ve İstasyon Noktaları (Kompakt ve Çakışmayan Etiketler)
                 const towns = [
