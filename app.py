@@ -1906,7 +1906,7 @@ def run_onnx_radar_nowcasting():
 
 
 # ==============================================================================
-# 🛰️ BÖLGESEL CANLI RADAR & DOĞAL KÜTLE NOWCASTING (MGM / RAINVIEWER STANDARDI)
+# 🛰️ BÖLGESEL CANLI RADAR & DOĞAL KÜTLE NOWCASTING (ESRI TOPO & MGM RADAR DESENİ)
 # ==============================================================================
 st.markdown("---")
 with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatörü", expanded=True):
@@ -1915,18 +1915,18 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
         radar_display_mode = st.radio(
             "Radar Modu:",
             [
-                "🔴 Canlı Kompozit Radar (Türkiye & Çevre İller - Anlık Yağış/Şimşek)",
+                "🔴 Canlı Kompozit Radar (Türkiye & Çevre İller - Anlık Yağış)",
                 "🔮 MetaCast Nowcast Simülasyonu (Doğal Kütle İlerleme & Sapma Modeli)"
             ],
             horizontal=False
         )
     with col_rad_note:
-        st.caption("💡 **Kontrol:** Haritada serbestçe gezinebilir, yakınlaşıp uzaklaşabilirsiniz. Sol alttaki **(▶ / ⏸)** butonuyla simülasyon akışını kontrol edebilirsiniz.")
+        st.caption("💡 **Kontrol:** Haritada serbestçe gezinebilir, yakınlaşıp uzaklaşabilirsiniz. Sol üstteki **(▶ / ⏸)** butonuyla simülasyon akışını kontrol edebilirsiniz.")
 
     now_tsi_str = datetime.now(TR_TZ).strftime("%d.%m.%Y %H:%M TSİ")
 
     if "Canlı Kompozit" in radar_display_mode:
-        # Türkiye ve Doğu Anadolu Canlı MGM / Doppler Kompozit Radarı
+        # Esri Topo Altlıklı Canlı RainViewer Kompozit Radarı (API Key İstemez)
         radar_live_html = f"""
         <!DOCTYPE html>
         <html>
@@ -1940,9 +1940,9 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
                 #radar-live-map {{ height: 100%; width: 100%; }}
                 .top-tsi-badge {{
                     position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-                    background: #ffffff; color: #1e293b; padding: 4px 18px; border-radius: 20px;
-                    font-size: 0.86rem; font-weight: 700; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-                    z-index: 1000; letter-spacing: 0.3px; border: 1px solid #cbd5e1;
+                    background: #ffffff; color: #0f172a; padding: 4px 18px; border-radius: 20px;
+                    font-size: 0.86rem; font-weight: 800; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                    z-index: 1000; border: 1px solid #cbd5e1;
                 }}
             </style>
         </head>
@@ -1953,10 +1953,12 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
             </div>
             <script>
                 const map = L.map('radar-live-map', {{ zoomControl: true, attributionControl: false }}).setView([38.35, 38.30], 8);
-                // Temiz, aydınlık ve radar renklerini patlatan altlık harita (Voyager)
-                L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png', {{ maxZoom: 14, minZoom: 5 }}).addTo(map);
+                // Esri World Topo Map (Tamamen ücretsiz, API key gerektirmez, filigransız)
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+                    maxZoom: 15, minZoom: 5
+                }}).addTo(map);
 
-                // RainViewer Gerçek Canlı Radar Katmanı
+                // RainViewer Canlı Radar Katmanı
                 fetch('https://api.rainviewer.com/public/weather-maps.json')
                     .then(res => res.json())
                     .then(data => {{
@@ -1964,8 +1966,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
                         if (past && past.length > 0) {{
                             const lastFrame = past[past.length - 1];
                             L.tileLayer(data.host + lastFrame.path + '/256/{{z}}/{{x}}/{{y}}/2/1_1.png', {{
-                                opacity: 0.78,
-                                zIndex: 500
+                                opacity: 0.75, zIndex: 500
                             }}).addTo(map);
                         }}
                     }});
@@ -1975,7 +1976,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
         """
         st.components.v1.html(radar_live_html, height=510)
     else:
-        # Doğal, Organik Kıvrımlı (Gerçek Radar Gibi) MetaCast Nowcasting Simülatörü
+        # Doğal, Çok Hücreli Gerçek MGM Radar Görünümlü Simülatör
         cur_wind_angle = float(sel_wind_deg)
         is_akdeniz_flow = (195 <= cur_wind_angle <= 235)
 
@@ -2018,7 +2019,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
                 .track-bar {{ position: relative; flex-grow: 1; height: 6px; background: rgba(255,255,255,0.15); border-radius: 3px; }}
                 .progress-fill {{
                     position: absolute; left: 0; top: 0; height: 100%; width: 0%;
-                    background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); border-radius: 3px; transition: width 0.3s ease;
+                    background: linear-gradient(90deg, #16a34a, #eab308, #dc2626); border-radius: 3px; transition: width 0.3s ease;
                 }}
                 .status-pill {{
                     padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 800;
@@ -2029,13 +2030,17 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
                     position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
                     background: #ffffff; color: #0f172a; padding: 4px 18px; border-radius: 20px;
                     font-size: 0.88rem; font-weight: 800; box-shadow: 0 3px 12px rgba(0,0,0,0.35);
-                    z-index: 1000; letter-spacing: 0.3px; border: 1px solid #cbd5e1;
+                    z-index: 1000; border: 1px solid #cbd5e1;
                 }}
                 .legend-bar {{
                     display: flex; justify-content: space-between; align-items: center;
                     padding: 8px 10px 0 10px; font-size: 0.75rem; color: #94a3b8; font-weight: 700;
                 }}
                 .dbz-box {{ display: inline-block; width: 13px; height: 13px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
+                .city-label {{
+                    background: rgba(15, 23, 42, 0.75); color: #ffffff; padding: 1px 6px;
+                    border-radius: 3px; font-size: 11px; font-weight: 700; border: 1px solid rgba(255,255,255,0.4);
+                }}
             </style>
         </head>
         <body>
@@ -2055,20 +2060,22 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
                 </div>
 
                 <div class="legend-bar">
-                    <div><span class="dbz-box" style="background:#00e5ff;"></span> Çisenti (15-20 dBZ)</div>
-                    <div><span class="dbz-box" style="background:#22c55e;"></span> Hafif-Orta (25-35 dBZ)</div>
-                    <div><span class="dbz-box" style="background:#eab308;"></span> Sağanak (35-45 dBZ)</div>
-                    <div><span class="dbz-box" style="background:#f97316;"></span> Şiddetli (45-50 dBZ)</div>
+                    <div><span class="dbz-box" style="background:#22c55e;"></span> Hafif (20-30 dBZ)</div>
+                    <div><span class="dbz-box" style="background:#15803d;"></span> Orta Yağış (30-38 dBZ)</div>
+                    <div><span class="dbz-box" style="background:#eab308;"></span> Kuvvetli (38-45 dBZ)</div>
+                    <div><span class="dbz-box" style="background:#f97316;"></span> Şiddetli Sağanak (45-50 dBZ)</div>
                     <div><span class="dbz-box" style="background:#dc2626;"></span> Oraj / Dolu (>50 dBZ)</div>
                 </div>
             </div>
 
             <script>
-                // 1. Temiz, Aydınlık ve Yüksek Kontrastlı Altlık Harita (CartoDB Voyager)
-                const map = L.map('radar-organic-map', {{ zoomControl: true, attributionControl: false }}).setView([38.38, 38.35], 8);
-                L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png', {{ maxZoom: 14, minZoom: 6 }}).addTo(map);
+                // 1. Esri World Topo Map (API Key gerektirmez, filigransız, yüksek netlik)
+                const map = L.map('radar-organic-map', {{ zoomControl: true, attributionControl: false }}).setView([38.38, 38.45], 8);
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+                    maxZoom: 15, minZoom: 6
+                }}).addTo(map);
 
-                // 2. Şehir ve İstasyon Noktaları
+                // 2. Şehir ve İstasyon Noktaları (Kompakt ve Çakışmayan Etiketler)
                 const towns = [
                     {{ name: "Malatya", lat: 38.355, lon: 38.309 }},
                     {{ name: "Erhaç (LTAT)", lat: 38.431, lon: 38.089 }},
@@ -2080,30 +2087,47 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
                 ];
 
                 towns.forEach(t => {{
+                    const labelIcon = L.divIcon({{
+                        className: 'city-label',
+                        html: t.name,
+                        iconSize: null,
+                        iconAnchor: [-6, 6]
+                    }});
                     L.circleMarker([t.lat, t.lon], {{
-                        radius: 4.5, fillColor: "#0f172a", color: "#ffffff", weight: 2, fillOpacity: 1
-                    }}).addTo(map).bindTooltip(t.name, {{ permanent: true, direction: 'right', offset: [5, 0] }});
+                        radius: 4, fillColor: "#0284c7", color: "#ffffff", weight: 2, fillOpacity: 1
+                    }}).addTo(map);
+                    L.marker([t.lat, t.lon], {{ icon: labelIcon }}).addTo(map);
                 }});
 
-                // 3. Doğal, Amorf (Organik) Kütle Üretici (Gerçek Radar Hücreleri Gibi)
-                function generateOrganicPolygon(centerLat, centerLon, radiusScale, seed) {{
-                    const points = [];
-                    const numPoints = 26;
-                    for (let i = 0; i < numPoints; i++) {{
-                        const angle = (i / numPoints) * 2 * Math.PI;
-                        // Gerçek yağmur bulutu girinti ve çıkıntıları için harmonik dalga
-                        const wave1 = Math.sin(angle * 3 + seed) * 0.22;
-                        const wave2 = Math.cos(angle * 5 - seed) * 0.15;
-                        const wave3 = Math.sin(angle * 2 + 1.2) * 0.18;
-                        const r = radiusScale * (1.0 + wave1 + wave2 + wave3);
-                        const lat = centerLat + (r * 0.78) * Math.sin(angle);
-                        const lon = centerLon + (r * 1.05) * Math.cos(angle);
-                        points.push([lat, lon]);
-                    }}
-                    return points;
+                // 3. Gerçek Radar Gibi Çok Hücreli Organik Yağış Bandı Üretici
+                function createRadarBand(centerLat, centerLon, scale, seed) {{
+                    const polygons = [];
+                    // Ana kütle ve etrafındaki 3 uydu konvektif hücre
+                    const subCells = [
+                        {{ dLat: 0.00, dLon: 0.00, r: scale * 1.0,  s: seed }},
+                        {{ dLat: 0.08, dLon: -0.06, r: scale * 0.65, s: seed + 1.2 }},
+                        {{ dLat: -0.06, dLon: 0.08, r: scale * 0.70, s: seed + 2.5 }},
+                        {{ dLat: 0.12, dLon: 0.09, r: scale * 0.50, s: seed + 3.8 }}
+                    ];
+
+                    subCells.forEach(cell => {{
+                        const pts = [];
+                        const n = 22;
+                        for (let i = 0; i < n; i++) {{
+                            const a = (i / n) * 2 * Math.PI;
+                            // Doğal radar girintileri için harmonik dalga
+                            const w = Math.sin(a * 3 + cell.s) * 0.22 + Math.cos(a * 4 - cell.s) * 0.15;
+                            const rad = cell.r * (1.0 + w);
+                            const lat = (centerLat + cell.dLat) + (rad * 0.75) * Math.sin(a);
+                            const lon = (centerLon + cell.dLon) + (rad * 1.05) * Math.cos(a);
+                            pts.push([lat, lon]);
+                        }}
+                        polygons.push(pts);
+                    }});
+                    return polygons;
                 }}
 
-                // Simülasyon Adımları
+                // Simülasyon Zaman Adımları
                 const steps = [
                     {{ min: 0,  lat: 38.12, lon: 37.95, status: "🎯 T+0 KÜTLE GÜNEYBATI GİRİŞİNDE", color: "#22c55e" }},
                     {{ min: 15, lat: 38.20, lon: 38.08, status: "🎯 T+15 MALATYA ÇANAĞINA TIRMANIŞ", color: "#22c55e" }},
@@ -2111,7 +2135,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
                     {{ min: 45, lat: 38.36, lon: 38.40, status: "⚠️ T+45 BEYDAĞLARI BLOKAJI / FÖN", color: "#f97316" }},
                     {{ min: 60, lat: 38.46, lon: 38.62, status: "↗️ T+60 FIRAT YARIĞINA BÜKÜLME", color: "#f97316" }},
                     {{ min: 90, lat: 38.58, lon: 38.90, status: "↗️ T+90 BASKİL / KEBAN HATTI", color: "#f97316" }},
-                    {{ min: 120, lat: 38.68, lon: 39.20, status: "📍 T+120 ELAZIĞ HAVZASINDA ETKİLİ", color: "#ef4444" }}
+                    {{ min: 120, lat: 38.68, lon: 39.20, status: "📍 T+120 ELAZIĞ HAVZASINDA ETKİLİ", color: "#dc2626" }}
                 ];
 
                 let curIdx = 0;
@@ -2124,28 +2148,32 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
                     activeLayers.forEach(l => map.removeLayer(l));
                     activeLayers = [];
 
-                    // Katman 1: Yeşil Dış Çeper (25-35 dBZ Hafif-Orta Yağış Alanı)
-                    const outerPts = generateOrganicPolygon(st.lat, st.lon, 0.28, idx * 0.7);
-                    const polyOuter = L.polygon(outerPts, {{
-                        color: "#16a34a", weight: 1.5, fillColor: "#22c55e", fillOpacity: 0.58
-                    }}).addTo(map);
-                    activeLayers.push(polyOuter);
+                    // Katman 1: Yeşil Dış Çeper (20-35 dBZ - Hafif/Orta Yağış Alanı)
+                    const outerPolys = createRadarBand(st.lat, st.lon, 0.22, idx * 0.7);
+                    outerPolys.forEach(pts => {{
+                        const p = L.polygon(pts, {{
+                            color: "#15803d", weight: 1.2, fillColor: "#22c55e", fillOpacity: 0.65
+                        }}).addTo(map);
+                        activeLayers.push(p);
+                    }});
 
-                    // Katman 2: Sarı/Turuncu Sağanak Çekirdeği (35-45 dBZ)
-                    const midPts = generateOrganicPolygon(st.lat + 0.02, st.lon - 0.01, 0.16, idx * 0.9 + 1.5);
-                    const polyMid = L.polygon(midPts, {{
-                        color: "#ca8a04", weight: 1.5, fillColor: "#eab308", fillOpacity: 0.75
-                    }}).addTo(map);
-                    activeLayers.push(polyMid);
+                    // Katman 2: Sarı / Turuncu Sağanak Çekirdeği (38-48 dBZ)
+                    const midPolys = createRadarBand(st.lat + 0.02, st.lon - 0.01, 0.12, idx * 0.9 + 1.5);
+                    midPolys.slice(0, 2).forEach(pts => {{
+                        const p = L.polygon(pts, {{
+                            color: "#ca8a04", weight: 1.5, fillColor: "#eab308", fillOpacity: 0.80
+                        }}).addTo(map);
+                        activeLayers.push(p);
+                    }});
 
-                    // Katman 3: Kırmızı Şiddetli Oraj / Dolu Merkezi (>45 dBZ)
-                    const corePts = generateOrganicPolygon(st.lat + 0.03, st.lon - 0.005, 0.08, idx * 1.1 + 3.2);
-                    const polyCore = L.polygon(corePts, {{
-                        color: "#991b1b", weight: 2, fillColor: "#ef4444", fillOpacity: 0.88
+                    // Katman 3: Kırmızı Şiddetli Oraj / Dolu Merkezi (>48 dBZ)
+                    const corePts = createRadarBand(st.lat + 0.03, st.lon, 0.055, idx * 1.1 + 3.0);
+                    const pCore = L.polygon(corePts[0], {{
+                        color: "#991b1b", weight: 2, fillColor: "#dc2626", fillOpacity: 0.92
                     }}).addTo(map);
-                    activeLayers.push(polyCore);
+                    activeLayers.push(pCore);
 
-                    // Rozet ve İlerleme Çubuğunu Güncelle
+                    // Rozet ve Göstergeleri Güncelle
                     document.getElementById('timeBadge').innerText = st.min === 0 ? "T+0 Dk" : `T+${{st.min}} Dk`;
                     document.getElementById('progressFill').style.width = `${{(idx / (steps.length - 1)) * 100}}%`;
                     
@@ -2186,7 +2214,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Organik Kütle Simülatö
         """
         st.components.v1.html(nowcast_organic_html, height=540)
 
-        # 3. Sinoptik Sapma Analiz Kartı
+        # Sinoptik Sapma Analiz Kartı
         cur_wind_angle = float(sel_wind_deg)
         is_akdeniz_flow = (195 <= cur_wind_angle <= 235)
 
