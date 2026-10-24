@@ -8,6 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+from datetime import datetime, timedelta, timezone, time
 
 # Türkiye Zaman Dilimi (UTC+3) Sabiti
 TR_TZ = timezone(timedelta(hours=3))
