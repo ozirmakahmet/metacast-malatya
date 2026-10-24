@@ -2024,18 +2024,25 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                 <div><span class="dbz-box" style="background:#eab308;"></span> Sağanak (35-45 dBZ)</div>
                 <div><span class="dbz-box" style="background:#f97316;"></span> Şiddetli (45-50 dBZ)</div>
                 <div><span class="dbz-box" style="background:#dc2626;"></span> Oraj / Dolu (>50 dBZ)</div>
-                <div style="color: #cbd5e1;">🌧️ Gerçek Reflektivite Katmanı</div>
+                <div style="color: #cbd5e1;">🌧️ Kesintisiz Katman</div>
             </div>
         </div>
 
         <script>
-            // 1. Haritanın Kurulumu (Sınırsız Zoom, Temiz Harita)
-            const map = L.map('radar-real-map', {{ zoomControl: true, attributionControl: false }}).setView([38.45, 38.45], 8);
+            // 1. Haritayı Doğrudan Malatya'ya Odaklama ve Sınırsız Zoom (Hatasız OSM Katmanı)
+            const map = L.map('radar-real-map', {{ 
+                zoomControl: true, 
+                attributionControl: false,
+                maxZoom: 18, 
+                minZoom: 5 
+            }}).setView([38.355, 38.309], 9);
+
             L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                maxZoom: 18, minZoom: 5
+                maxZoom: 18,
+                minZoom: 5
             }}).addTo(map);
 
-            // 2. Canlı ve Nowcast Radar Akış Motoru
+            // 2. Canlı ve Nowcast Radar Akışı
             let radarLayers = [];
             let framesData = [];
             let currentIdx = 0;
@@ -2051,11 +2058,12 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
 
                     if (framesData.length === 0) return;
 
-                    // Karelerin yüklenmesi (TITAN Yumuşak Geçiş Renk Paleti - Tam MGM Standardı)
+                    // Katmanları Ekleme (maxNativeZoom eklenerek yakınlaştırmadaki hata önlenir)
                     framesData.forEach((frame, idx) => {{
                         const layer = L.tileLayer(data.host + frame.path + '/256/{{z}}/{{x}}/{{y}}/1/1_1.png', {{
                             opacity: 0,
                             zIndex: 200,
+                            maxNativeZoom: 12,
                             maxZoom: 18,
                             minZoom: 5
                         }});
@@ -2063,7 +2071,6 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                         radarLayers.push(layer);
                     }});
 
-                    // İlk kareyi göster ve otomatik oynatmayı başlat
                     currentIdx = past.length > 0 ? past.length - 1 : 0;
                     showFrame(currentIdx);
                     startLoop();
@@ -2136,7 +2143,6 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
     </html>
     """
     st.components.v1.html(real_radar_stream_html, height=540)
-
     # MetaCast Fiziksel Kütle Yörüngesi ve Elazığ / Havza Sapma Motoru
     cur_wind_angle = float(sel_wind_deg)
     is_akdeniz_flow = (195 <= cur_wind_angle <= 235)
