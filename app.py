@@ -1385,7 +1385,6 @@ for d_idx, tab in enumerate(day_tabs):
         except Exception:
             pass
 
-        # API zamanı alınamadıysa Malatya gerçek astronomik saatleri
         sr_time_str = sr_dt.strftime("%H:%M") if sr_dt else "06:44"
         ss_time_str = ss_dt.strftime("%H:%M") if ss_dt else "17:47"
         sr_hour = sr_dt.hour if sr_dt else 6
@@ -1401,6 +1400,22 @@ for d_idx, tab in enumerate(day_tabs):
             c_val = hourly_clouds[abs_hour_idx] if 'hourly_clouds' in locals() and len(hourly_clouds) > abs_hour_idx else 10
             cape_val = hourly_capes[abs_hour_idx] if 'hourly_capes' in locals() and len(hourly_capes) > abs_hour_idx else 0
 
+            # Yağış İhtimali (% POP) Belirleme
+            if 'hourly_pop' in locals() and len(hourly_pop) > abs_hour_idx:
+                pop_val = int(hourly_pop[abs_hour_idx])
+            elif 'hourly_precip_probs' in locals() and len(hourly_precip_probs) > abs_hour_idx:
+                pop_val = int(hourly_precip_probs[abs_hour_idx])
+            else:
+                # API listesinde yoksa yağış ve bulut oranından dinamik türet
+                if p_val > 0.5:
+                    pop_val = min(95, int(60 + p_val * 15))
+                elif p_val > 0.05:
+                    pop_val = 45
+                elif c_val > 70:
+                    pop_val = int(c_val * 0.35)
+                else:
+                    pop_val = int(c_val * 0.1)
+
             # 1. Saat Başı Kartı
             icon_h, desc_h = get_weather_icon_and_desc(t_val, p_val, c_val, cape_val, hour=h, sr_dt=sr_dt, ss_dt=ss_dt)
             timeline_items.append({
@@ -1408,6 +1423,8 @@ for d_idx, tab in enumerate(day_tabs):
                 "temp": f"{int(round(t_val))}°",
                 "icon": icon_h,
                 "desc": desc_h,
+                "pop": pop_val,
+                "precip": p_val,
                 "special": False
             })
 
@@ -1433,7 +1450,7 @@ for d_idx, tab in enumerate(day_tabs):
                     "color": "#f97316"
                 })
 
-        # HTML Çıktısı (Girintisiz & Düz Dizilim)
+        # Kartları HTML Şeridi Olarak Ekrana Çiz
         cards_html = ""
         for item in timeline_items:
             if item.get("special"):
@@ -1448,13 +1465,18 @@ for d_idx, tab in enumerate(day_tabs):
                     f'</div>'
                 )
             else:
+                pop_color = "#38bdf8" if item["pop"] >= 20 else "#64748b"
+                precip_sub = f'<div style="font-size: 0.65rem; color: #38bdf8; font-weight: 700;">{item["precip"]:.1f} mm</div>' if item["precip"] > 0.05 else ""
+
                 cards_html += (
                     f'<div style="min-width: 95px; flex-shrink: 0; background: #131722; border: 1px solid rgba(255, 255, 255, 0.08); '
-                    f'border-radius: 12px; padding: 12px 6px; text-align: center;">'
+                    f'border-radius: 12px; padding: 10px 6px; text-align: center;">'
                     f'<div style="font-size: 0.88rem; font-weight: 700; color: #90caf9;">{item["time"]}</div>'
-                    f'<div style="font-size: 1.8rem; margin: 4px 0;">{item["icon"]}</div>'
+                    f'<div style="font-size: 1.8rem; margin: 2px 0;">{item["icon"]}</div>'
                     f'<div style="font-size: 1.15rem; font-weight: 800; color: #ffffff;">{item["temp"]}</div>'
-                    f'<div style="font-size: 0.72rem; color: #b0bec5;">{item["desc"]}</div>'
+                    f'<div style="font-size: 0.70rem; color: #b0bec5; margin-bottom: 4px;">{item["desc"]}</div>'
+                    f'<div style="font-size: 0.72rem; font-weight: 800; color: {pop_color};">💧 %{item["pop"]}</div>'
+                    f'{precip_sub}'
                     f'</div>'
                 )
 
