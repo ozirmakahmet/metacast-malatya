@@ -1267,21 +1267,37 @@ st.caption("Aşağıdaki gün sekmelerine tıklayarak o günün 24 saatlik hava 
 now_real_dt = datetime.now(TR_TZ).replace(tzinfo=None)
 gunler_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
-# 1. Gün Doğumu / Gün Batımı Bilgisi ve Gece/Gündüz Duyarlı İkon Motoru
-try:
-    daily_raw = weather_data.get("daily", {})
-    # API'den gelen gün doğumu ve batımı (Örn: "2026-10-24T06:48")
-    sunrise_list = daily_raw.get("sunrise", [])
-    sunset_list = daily_raw.get("sunset", [])
-except Exception:
-    sunrise_list, sunset_list = [], []
+# ==============================================================================
+# ☀️ / 🌙 ASTRONOMİK GÜN DOĞUMU & BATIMI MOTORU (MALATYA TR TZ KESİN ZAMANLI)
+# ==============================================================================
+@st.cache_data(ttl=3600)
+def get_malatya_astronomy_times():
+    """
+    Malatya merkez koordinatlarına göre Europe/Istanbul saat diliminde
+    kesin gün doğumu ve gün batımı saatlerini çeker.
+    """
+    url = (
+        "https://api.open-meteo.com/v1/forecast?"
+        "latitude=38.355&longitude=38.309&daily=sunrise,sunset&"
+        "timezone=Europe%2FIstanbul&forecast_days=7"
+    )
+    try:
+        r = requests.get(url, timeout=6)
+        if r.status_code == 200:
+            d = r.json().get("daily", {})
+            return d.get("sunrise", []), d.get("sunset", [])
+    except Exception:
+        pass
+    return [], []
 
-def get_weather_icon_and_desc(t, p, c, cape, hour=12, sunrise_time=None, sunset_time=None):
-    # Gece / Gündüz Tespiti
-    if sunrise_time and sunset_time:
-        is_day = (sunrise_time.hour < hour < sunset_time.hour) or \
-                 (hour == sunrise_time.hour and sunrise_time.minute <= 30) or \
-                 (hour == sunset_time.hour and sunset_time.minute >= 30)
+sunrise_list, sunset_list = get_malatya_astronomy_times()
+
+def get_weather_icon_and_desc(t, p, c, cape, hour=12, sr_dt=None, ss_dt=None):
+    # Kesin Gece / Gündüz Tespiti
+    if sr_dt and ss_dt:
+        is_day = (sr_dt.hour < hour < ss_dt.hour) or \
+                 (hour == sr_dt.hour and sr_dt.minute <= 30) or \
+                 (hour == ss_dt.hour and ss_dt.minute >= 30)
     else:
         is_day = (6 <= hour < 18)
 
@@ -1304,67 +1320,72 @@ def get_weather_icon_and_desc(t, p, c, cape, hour=12, sunrise_time=None, sunset_
         else:
             return ("☀️", "Açık / Güneşli") if is_day else ("🌙", "Açık / Gece")
 
-# 2. 7 Günlük Sekmeler ve Saatlik Kart Şeridi
-day_tabs = st.tabs([f"{gunler_tr[(now_real_dt + timedelta(days=i)).weekday()]} ({(now_real_dt + timedelta(days=i)).strftime('%d.%m')})" for i in range(7)])
+# 7 Günlük Sekmeler
+day_tabs = st.tabs([
+    f"{gunler_tr[(now_real_dt + timedelta(days=i)).weekday()]} ({(now_real_dt + timedelta(days=i)).strftime('%d.%m')})" 
+    for i in range(7)
+])
 
 for d_idx, tab in enumerate(day_tabs):
     with tab:
-        # O güne ait gün doğumu ve batımı saatini ayrıştır
-        sr_time, ss_time = None, None
+        sr_dt, ss_dt = None, None
         try:
             if d_idx < len(sunrise_list):
-                sr_time = datetime.fromisoformat(sunrise_list[d_idx]).time()
+                sr_dt = datetime.fromisoformat(sunrise_list[d_idx])
             if d_idx < len(sunset_list):
-                ss_time = datetime.fromisoformat(sunset_list[d_idx]).time()
+                ss_dt = datetime.fromisoformat(sunset_list[d_idx])
         except Exception:
             pass
 
-        # Fallback (Veri eksikse mevsime göre Malatya saati)
-        if not sr_time:
-            from datetime import time as dtime
-            sr_time = dtime(6, 48)
-        if not ss_time:
-            from datetime import time as dtime
-            ss_time = dtime(17, 49)
+        # Yedekleme (Sadece API kesilirse Malatya mevsimsel saati)
+        sr_time_str = sr_dt.strftime("%H:%M") if sr_dt else "06:48"
+        ss_time_str = ss_dt.strftime("%H:%M") if ss_dt else "17:49"
+        sr_hour = sr_dt.hour if sr_dt else 6
+        ss_hour = ss_dt.hour if ss_dt else 17
 
-        sr_str = sr_time.strftime("%H:%M")
-        ss_str = ss_time.strftime("%H:%M")
-
-        # 24 Saatlik Akış Listesi
         day_start_hour = d_idx * 24
         timeline_items = []
 
         for h in range(24):
             abs_hour_idx = day_start_hour + h
-            # Hava değişkenlerini çek
             t_val = hourly_temps[abs_hour_idx] if 'hourly_temps' in locals() and len(hourly_temps) > abs_hour_idx else 14
             p_val = hourly_precips[abs_hour_idx] if 'hourly_precips' in locals() and len(hourly_precips) > abs_hour_idx else 0.0
             c_val = hourly_clouds[abs_hour_idx] if 'hourly_clouds' in locals() and len(hourly_clouds) > abs_hour_idx else 10
             cape_val = hourly_capes[abs_hour_idx] if 'hourly_capes' in locals() and len(hourly_capes) > abs_hour_idx else 0
 
-            # Gün Doğumu tam bu saat aralığında mı?
-            if h == sr_time.hour and sr_time.minute > 0:
-                # Önce o saatin gece kartı
-                icon_h, desc_h = get_weather_icon_and_desc(t_val, p_val, c_val, cape_val, hour=h, sunrise_time=sr_time, sunset_time=ss_time)
-                timeline_items.append({"time": f"{h:02d}:00", "temp": f"{int(round(t_val))}°", "icon": icon_h, "desc": desc_h, "special": False})
-                # Araya Gün Doğumu Kartı
-                timeline_items.append({"time": sr_str, "temp": "Şafak", "icon": "🌅", "desc": "Gün Doğumu", "special": True, "color": "#f59e0b"})
-                continue
+            # 1. Saat Başı Kartı
+            icon_h, desc_h = get_weather_icon_and_desc(t_val, p_val, c_val, cape_val, hour=h, sr_dt=sr_dt, ss_dt=ss_dt)
+            timeline_items.append({
+                "time": f"{h:02d}:00",
+                "temp": f"{int(round(t_val))}°",
+                "icon": icon_h,
+                "desc": desc_h,
+                "special": False
+            })
 
-            # Gün Batımı tam bu saat aralığında mı?
-            if h == ss_time.hour and ss_time.minute > 0:
-                # Önce o saatin gündüz kartı
-                icon_h, desc_h = get_weather_icon_and_desc(t_val, p_val, c_val, cape_val, hour=h, sunrise_time=sr_time, sunset_time=ss_time)
-                timeline_items.append({"time": f"{h:02d}:00", "temp": f"{int(round(t_val))}°", "icon": icon_h, "desc": desc_h, "special": False})
-                # Araya Gün Batımı Kartı
-                timeline_items.append({"time": ss_str, "temp": "Gurub", "icon": "🌇", "desc": "Gün Batımı", "special": True, "color": "#f97316"})
-                continue
+            # 2. Gün Doğumu Kartı (Tam doğduğu saat ile bir sonraki saat arasına yerleştir)
+            if h == sr_hour:
+                timeline_items.append({
+                    "time": sr_time_str,
+                    "temp": "Şafak",
+                    "icon": "🌅",
+                    "desc": "Gün Doğumu",
+                    "special": True,
+                    "color": "#f59e0b"
+                })
 
-            icon_h, desc_h = get_weather_icon_and_desc(t_val, p_val, c_val, cape_val, hour=h, sunrise_time=sr_time, sunset_time=ss_time)
-            timeline_items.append({"time": f"{h:02d}:00", "temp": f"{int(round(t_val))}°", "icon": icon_h, "desc": desc_h, "special": False})
+            # 3. Gün Batımı Kartı (Tam battığı saat ile bir sonraki saat arasına yerleştir)
+            if h == ss_hour:
+                timeline_items.append({
+                    "time": ss_time_str,
+                    "temp": "Gurub",
+                    "icon": "🌇",
+                    "desc": "Gün Batımı",
+                    "special": True,
+                    "color": "#f97316"
+                })
 
-        # Kartları Yatay Şerit Halinde Ekrana Çiz
-        # Kartları HTML Şeridi Olarak Ekrana Çiz (Girinti Hatasını Önleyen Düz Dizilim)
+        # Kartları Tek Satırda Düzgün HTML Olarak Ekrana Basma
         cards_html = ""
         for item in timeline_items:
             if item.get("special"):
