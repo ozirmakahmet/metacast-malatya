@@ -1364,33 +1364,33 @@ for d_idx, tab in enumerate(day_tabs):
             timeline_items.append({"time": f"{h:02d}:00", "temp": f"{int(round(t_val))}°", "icon": icon_h, "desc": desc_h, "special": False})
 
         # Kartları Yatay Şerit Halinde Ekrana Çiz
+        # Kartları HTML Şeridi Olarak Ekrana Çiz (Girinti Hatasını Önleyen Düz Dizilim)
         cards_html = ""
         for item in timeline_items:
             if item.get("special"):
-                cards_html += f"""
-                <div style="min-width: 105px; flex-shrink: 0; background: rgba(245, 158, 11, 0.08); border: 1.5px solid {item['color']}; border-radius: 12px; padding: 12px 6px; text-align: center; box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);">
-                    <div style="font-size: 0.88rem; font-weight: 800; color: {item['color']};">{item['time']}</div>
-                    <div style="font-size: 1.8rem; margin: 4px 0;">{item['icon']}</div>
-                    <div style="font-size: 0.95rem; font-weight: 800; color: #ffffff;">{item['temp']}</div>
-                    <div style="font-size: 0.72rem; font-weight: 700; color: {item['color']};">{item['desc']}</div>
-                </div>
-                """
+                cards_html += (
+                    f'<div style="min-width: 105px; flex-shrink: 0; background: rgba(245, 158, 11, 0.08); '
+                    f'border: 1.5px solid {item["color"]}; border-radius: 12px; padding: 12px 6px; text-align: center; '
+                    f'box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);">'
+                    f'<div style="font-size: 0.88rem; font-weight: 800; color: {item["color"]};">{item["time"]}</div>'
+                    f'<div style="font-size: 1.8rem; margin: 4px 0;">{item["icon"]}</div>'
+                    f'<div style="font-size: 0.95rem; font-weight: 800; color: #ffffff;">{item["temp"]}</div>'
+                    f'<div style="font-size: 0.72rem; font-weight: 700; color: {item["color"]};">{item["desc"]}</div>'
+                    f'</div>'
+                )
             else:
-                cards_html += f"""
-                <div style="min-width: 95px; flex-shrink: 0; background: #131722; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 12px 6px; text-align: center;">
-                    <div style="font-size: 0.88rem; font-weight: 700; color: #90caf9;">{item['time']}</div>
-                    <div style="font-size: 1.8rem; margin: 4px 0;">{item['icon']}</div>
-                    <div style="font-size: 1.15rem; font-weight: 800; color: #ffffff;">{item['temp']}</div>
-                    <div style="font-size: 0.72rem; color: #b0bec5;">{item['desc']}</div>
-                </div>
-                """
+                cards_html += (
+                    f'<div style="min-width: 95px; flex-shrink: 0; background: #131722; border: 1px solid rgba(255, 255, 255, 0.08); '
+                    f'border-radius: 12px; padding: 12px 6px; text-align: center;">'
+                    f'<div style="font-size: 0.88rem; font-weight: 700; color: #90caf9;">{item["time"]}</div>'
+                    f'<div style="font-size: 1.8rem; margin: 4px 0;">{item["icon"]}</div>'
+                    f'<div style="font-size: 1.15rem; font-weight: 800; color: #ffffff;">{item["temp"]}</div>'
+                    f'<div style="font-size: 0.72rem; color: #b0bec5;">{item["desc"]}</div>'
+                    f'</div>'
+                )
 
         st.markdown(
-            f"""
-            <div style="display: flex; gap: 10px; overflow-x: auto; padding: 10px 4px 16px 4px; scrollbar-width: thin;">
-                {cards_html}
-            </div>
-            """,
+            f'<div style="display: flex; gap: 10px; overflow-x: auto; padding: 10px 4px 16px 4px; scrollbar-width: thin;">{cards_html}</div>',
             unsafe_allow_html=True
         )
 
