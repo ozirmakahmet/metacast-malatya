@@ -1462,6 +1462,23 @@ for d_idx, tab in enumerate(day_tabs):
             f'<div style="display: flex; gap: 10px; overflow-x: auto; padding: 10px 4px 16px 4px; scrollbar-width: thin;">{cards_html}</div>',
             unsafe_allow_html=True
         )
+        # ❄️ 24 Saatlik Tahmini Zemin Kar Birikim Kartı
+        if 'hourly_temps' in locals() and 'hourly_precips' in locals() and len(hourly_temps) >= 24:
+            snow_24h_cm, _ = calculate_snow_accumulation_cm(hourly_temps[:24], hourly_precips[:24], hours=24)
+            if snow_24h_cm > 0.0:
+                snow_status = "İnce Beyaz Örtü" if snow_24h_cm < 3.0 else ("Kuvvetli Kar Yağışı" if snow_24h_cm < 10.0 else "Yoğun Kar Fırtınası")
+                snow_color = "#38bdf8" if snow_24h_cm < 3.0 else ("#f59e0b" if snow_24h_cm < 10.0 else "#ef4444")
+                st.markdown(
+                    f"""
+                    <div style="background: rgba(14, 165, 233, 0.06); border: 1.5px solid {snow_color}; border-radius: 12px; padding: 12px 16px; margin: 10px 0; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-weight: 800; color: #fff;">❄️ 24 Saatlik Zemin Kar Birikimi: <span style="color: {snow_color};">{snow_24h_cm} cm</span></div>
+                            <div style="font-size: 0.8rem; color: #94a3b8;">{snow_status} (Kuchera SLR Termodinamik Modeli)</div>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 # ==============================================================================
 # BÖLÜM 1: ⚡ METACAST HİBRİT YAPAY ZEKÂ TAHMİN & KARAR MERKEZİ
 # ==============================================================================
