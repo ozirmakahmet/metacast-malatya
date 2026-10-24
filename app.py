@@ -2078,7 +2078,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
         </div>
 
         <script>
-            // 1. Haritayı Doğrudan Malatya'ya Odaklama ve Sınırsız Zoom (Hatasız OSM Katmanı)
+            // 1. Sınırsız ve Hatasız Altlık Harita (OpenStreetMap)
             const map = L.map('radar-real-map', {{ 
                 zoomControl: true, 
                 attributionControl: false,
@@ -2088,7 +2088,8 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
 
             L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                 maxZoom: 18,
-                minZoom: 5
+                minZoom: 5,
+                attribution: 'OpenStreetMap'
             }}).addTo(map);
 
             // 2. Canlı ve Nowcast Radar Akışı
@@ -2107,12 +2108,12 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
 
                     if (framesData.length === 0) return;
 
-                    // Katmanları Ekleme (maxNativeZoom eklenerek yakınlaştırmadaki hata önlenir)
+                    // maxNativeZoom: 8 sayesinde Malatya merkezine ne kadar yaklaşırsanız yaklaşın radar silinmez
                     framesData.forEach((frame, idx) => {{
                         const layer = L.tileLayer(data.host + frame.path + '/256/{{z}}/{{x}}/{{y}}/1/1_1.png', {{
                             opacity: 0,
-                            zIndex: 200,
-                            maxNativeZoom: 12,
+                            zIndex: 500,
+                            maxNativeZoom: 8,
                             maxZoom: 18,
                             minZoom: 5
                         }});
@@ -2123,7 +2124,8 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                     currentIdx = past.length > 0 ? past.length - 1 : 0;
                     showFrame(currentIdx);
                     startLoop();
-                }});
+                }})
+                .catch(err => console.error("Radar yüklenemedi:", err));
 
             function formatTime(unixSec) {{
                 const d = new Date(unixSec * 1000);
@@ -2171,7 +2173,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
 
             function startLoop() {{
                 if (timer) clearInterval(timer);
-                timer = setInterval(nextFrame, 800);
+                timer = setInterval(nextFrame, 850);
                 document.getElementById('playBtn').innerText = "⏸ Durdur";
                 isPlaying = true;
             }}
@@ -2186,7 +2188,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                 if (isPlaying) stopLoop(); else startLoop();
             }});
 
-            setTimeout(() => {{ map.invalidateSize(); }}, 350);
+            setTimeout(() => {{ map.invalidateSize(); }}, 400);
         </script>
     </body>
     </html>
