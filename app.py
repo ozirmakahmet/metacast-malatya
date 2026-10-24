@@ -1307,6 +1307,38 @@ def get_accurate_sun_times_malatya():
     return [], []
 
 sunrise_list, sunset_list = get_accurate_sun_times_malatya()
+def calculate_snow_accumulation_cm(temps, precips, hours=24):
+    """
+    Kuchera Kar-Su Oranı (SLR) Metodu ile Malatya için tahmini
+    zemin kar birikimini (cm) hesaplar.
+    """
+    total_snow_cm = 0.0
+    hourly_snow = []
+    
+    limit = min(hours, len(temps), len(precips))
+    
+    for i in range(limit):
+        t = temps[i]
+        p = precips[i]
+        
+        # T <= 1.0 °C ve yağış var ise kar birikimi hesaplanır
+        if p > 0.05 and t <= 1.0:
+            if t > 0.0:
+                slr = 6.0   # Sulu, ıslak kar
+            elif -3.0 <= t <= 0.0:
+                slr = 10.0  # Standart kar örtüsü
+            elif -8.0 <= t < -3.0:
+                slr = 14.0  # Kuru ve hafif toz kar
+            else:
+                slr = 18.0  # Çok soğuk, kristalize kar
+            
+            cm_snow = (p * slr) / 10.0
+            total_snow_cm += cm_snow
+            hourly_snow.append(round(cm_snow, 1))
+        else:
+            hourly_snow.append(0.0)
+            
+    return round(total_snow_cm, 1), hourly_snow
 
 def get_weather_icon_and_desc(t, p, c, cape, hour=12, sr_dt=None, ss_dt=None):
     # Anlık Saatin Gece / Gündüz Durumu
