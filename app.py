@@ -1,4 +1,3 @@
-from datetime import datetime, timezone, timedelta
 import json
 import os
 import re
@@ -1268,32 +1267,48 @@ now_real_dt = datetime.now(TR_TZ).replace(tzinfo=None)
 gunler_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
 # ==============================================================================
-# ☀️ / 🌙 ASTRONOMİK GÜN DOĞUMU & BATIMI MOTORU (MALATYA TR TZ KESİN ZAMANLI)
+# ☀️ / 🌙 RESMİ ASTRONOMİK GÜN DOĞUMU & GÜN BATIMI (MALATYA TR TZ)
 # ==============================================================================
-@st.cache_data(ttl=3600)
-def get_malatya_astronomy_times():
+@st.cache_data(ttl=1800)
+def get_accurate_sun_times_malatya():
     """
-    Malatya merkez koordinatlarına göre Europe/Istanbul saat diliminde
-    kesin gün doğumu ve gün batımı saatlerini çeker.
+    Open-Meteo API üzerinden Malatya için 7 günlük kesin
+    gün doğumu ve gün batımı saatlerini Europe/Istanbul formatında çeker.
     """
     url = (
         "https://api.open-meteo.com/v1/forecast?"
-        "latitude=38.355&longitude=38.309&daily=sunrise,sunset&"
+        "latitude=38.3552&longitude=38.3095&"
+        "daily=sunrise,sunset&"
         "timezone=Europe%2FIstanbul&forecast_days=7"
     )
     try:
-        r = requests.get(url, timeout=6)
-        if r.status_code == 200:
-            d = r.json().get("daily", {})
-            return d.get("sunrise", []), d.get("sunset", [])
+        res = requests.get(url, timeout=6)
+        if res.status_code == 200:
+            daily_dict = res.json().get("daily", {})
+            return daily_dict.get("sunrise", []), daily_dict.get("sunset", [])
     except Exception:
         pass
+
+    # Alternatif Kaynak: Sunrise-Sunset.org API (Yedek Hat)
+    try:
+        ss_url = "https://api.sunrise-sunset.org/json?lat=38.3552&lng=38.3095&formatted=0"
+        res_ss = requests.get(ss_url, timeout=5)
+        if res_ss.status_code == 200:
+            d_res = res_ss.json().get("results", {})
+            sr_utc = datetime.fromisoformat(d_res.get("sunrise").replace("Z", "+00:00"))
+            ss_utc = datetime.fromisoformat(d_res.get("sunset").replace("Z", "+00:00"))
+            sr_tr = sr_utc.astimezone(TR_TZ).strftime("%Y-%m-%dT%H:%M")
+            ss_tr = ss_utc.astimezone(TR_TZ).strftime("%Y-%m-%dT%H:%M")
+            return [sr_tr] * 7, [ss_tr] * 7
+    except Exception:
+        pass
+
     return [], []
 
-sunrise_list, sunset_list = get_malatya_astronomy_times()
+sunrise_list, sunset_list = get_accurate_sun_times_malatya()
 
 def get_weather_icon_and_desc(t, p, c, cape, hour=12, sr_dt=None, ss_dt=None):
-    # Kesin Gece / Gündüz Tespiti
+    # Anlık Saatin Gece / Gündüz Durumu
     if sr_dt and ss_dt:
         is_day = (sr_dt.hour < hour < ss_dt.hour) or \
                  (hour == sr_dt.hour and sr_dt.minute <= 30) or \
@@ -1337,9 +1352,9 @@ for d_idx, tab in enumerate(day_tabs):
         except Exception:
             pass
 
-        # Yedekleme (Sadece API kesilirse Malatya mevsimsel saati)
-        sr_time_str = sr_dt.strftime("%H:%M") if sr_dt else "06:48"
-        ss_time_str = ss_dt.strftime("%H:%M") if ss_dt else "17:49"
+        # API zamanı alınamadıysa Malatya gerçek astronomik saatleri
+        sr_time_str = sr_dt.strftime("%H:%M") if sr_dt else "06:44"
+        ss_time_str = ss_dt.strftime("%H:%M") if ss_dt else "17:47"
         sr_hour = sr_dt.hour if sr_dt else 6
         ss_hour = ss_dt.hour if ss_dt else 17
 
@@ -1363,29 +1378,29 @@ for d_idx, tab in enumerate(day_tabs):
                 "special": False
             })
 
-            # 2. Gün Doğumu Kartı (Tam doğduğu saat ile bir sonraki saat arasına yerleştir)
+            # 2. Gün Doğumu Özel Kartı
             if h == sr_hour:
                 timeline_items.append({
                     "time": sr_time_str,
-                    "temp": "Şafak",
+                    "title": "Gün Doğumu",
                     "icon": "🌅",
-                    "desc": "Gün Doğumu",
+                    "desc": "Doğuş Anı",
                     "special": True,
                     "color": "#f59e0b"
                 })
 
-            # 3. Gün Batımı Kartı (Tam battığı saat ile bir sonraki saat arasına yerleştir)
+            # 3. Gün Batımı Özel Kartı
             if h == ss_hour:
                 timeline_items.append({
                     "time": ss_time_str,
-                    "temp": "Gurub",
+                    "title": "Gün Batımı",
                     "icon": "🌇",
-                    "desc": "Gün Batımı",
+                    "desc": "Batış Anı",
                     "special": True,
                     "color": "#f97316"
                 })
 
-        # Kartları Tek Satırda Düzgün HTML Olarak Ekrana Basma
+        # HTML Çıktısı (Girintisiz & Düz Dizilim)
         cards_html = ""
         for item in timeline_items:
             if item.get("special"):
@@ -1395,8 +1410,8 @@ for d_idx, tab in enumerate(day_tabs):
                     f'box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);">'
                     f'<div style="font-size: 0.88rem; font-weight: 800; color: {item["color"]};">{item["time"]}</div>'
                     f'<div style="font-size: 1.8rem; margin: 4px 0;">{item["icon"]}</div>'
-                    f'<div style="font-size: 0.95rem; font-weight: 800; color: #ffffff;">{item["temp"]}</div>'
-                    f'<div style="font-size: 0.72rem; font-weight: 700; color: {item["color"]};">{item["desc"]}</div>'
+                    f'<div style="font-size: 0.82rem; font-weight: 800; color: #ffffff; white-space: nowrap;">{item["title"]}</div>'
+                    f'<div style="font-size: 0.70rem; font-weight: 700; color: {item["color"]};">{item["desc"]}</div>'
                     f'</div>'
                 )
             else:
@@ -1414,7 +1429,6 @@ for d_idx, tab in enumerate(day_tabs):
             f'<div style="display: flex; gap: 10px; overflow-x: auto; padding: 10px 4px 16px 4px; scrollbar-width: thin;">{cards_html}</div>',
             unsafe_allow_html=True
         )
-
 # ==============================================================================
 # BÖLÜM 1: ⚡ METACAST HİBRİT YAPAY ZEKÂ TAHMİN & KARAR MERKEZİ
 # ==============================================================================
