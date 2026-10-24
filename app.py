@@ -1268,109 +1268,75 @@ now_real_dt = datetime.now(TR_TZ).replace(tzinfo=None)
 gunler_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
 # ==============================================================================
-# ☀️ / 🌙 RESMİ ASTRONOMİK GÜN DOĞUMU & GÜN BATIMI (MALATYA TR TZ)
+# ☀️ / 🌙 7 GÜNLÜK HASSAS HAVA DURUMU, ASTRONOMİ & HADİSE MOTORU (MALATYA)
 # ==============================================================================
-@st.cache_data(ttl=1800)
-def get_accurate_sun_times_malatya():
+@st.cache_data(ttl=1200)
+def get_malatya_full_7day_forecast():
     """
-    Open-Meteo API üzerinden Malatya için 7 günlük kesin
-    gün doğumu ve gün batımı saatlerini Europe/Istanbul formatında çeker.
+    Open-Meteo API'sinden Malatya için 7 günlük (168 saat)
+    sıcaklık, yağış ihtimali, yağış miktarı, bulutluluk, WMO hadise kodu
+    ve kesin gün doğumu/batımı saatlerini çeker.
     """
     url = (
         "https://api.open-meteo.com/v1/forecast?"
         "latitude=38.3552&longitude=38.3095&"
+        "hourly=temperature_2m,precipitation_probability,precipitation,cloud_cover,weather_code,cape&"
         "daily=sunrise,sunset&"
         "timezone=Europe%2FIstanbul&forecast_days=7"
     )
     try:
-        res = requests.get(url, timeout=6)
-        if res.status_code == 200:
-            daily_dict = res.json().get("daily", {})
-            return daily_dict.get("sunrise", []), daily_dict.get("sunset", [])
+        r = requests.get(url, timeout=7)
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("daily", {}), data.get("hourly", {})
     except Exception:
         pass
+    return {}, {}
 
-    # Alternatif Kaynak: Sunrise-Sunset.org API (Yedek Hat)
-    try:
-        ss_url = "https://api.sunrise-sunset.org/json?lat=38.3552&lng=38.3095&formatted=0"
-        res_ss = requests.get(ss_url, timeout=5)
-        if res_ss.status_code == 200:
-            d_res = res_ss.json().get("results", {})
-            sr_utc = datetime.fromisoformat(d_res.get("sunrise").replace("Z", "+00:00"))
-            ss_utc = datetime.fromisoformat(d_res.get("sunset").replace("Z", "+00:00"))
-            sr_tr = sr_utc.astimezone(TR_TZ).strftime("%Y-%m-%dT%H:%M")
-            ss_tr = ss_utc.astimezone(TR_TZ).strftime("%Y-%m-%dT%H:%M")
-            return [sr_tr] * 7, [ss_tr] * 7
-    except Exception:
-        pass
+daily_data, hourly_data = get_malatya_full_7day_forecast()
 
-    return [], []
+sunrise_list = daily_data.get("sunrise", [])
+sunset_list = daily_data.get("sunset", [])
 
-sunrise_list, sunset_list = get_accurate_sun_times_malatya()
-def calculate_snow_accumulation_cm(temps, precips, hours=24):
+api_hourly_temps = hourly_data.get("temperature_2m", [])
+api_hourly_precips = hourly_data.get("precipitation", [])
+api_hourly_pops = hourly_data.get("precipitation_probability", [])
+api_hourly_clouds = hourly_data.get("cloud_cover", [])
+api_hourly_codes = hourly_data.get("weather_code", [])
+api_hourly_capes = hourly_data.get("cape", [])
+
+def get_accurate_weather_display(wmo_code, cloud, precip, temp, cape, is_day):
     """
-    Kuchera Kar-Su Oranı (SLR) Metodu ile Malatya için tahmini
-    zemin kar birikimini (cm) hesaplar.
+    Resmi WMO (Dünya Meteoroloji Örgütü) kodları ve gece/gündüz durumuna göre
+    ikon ve Türkçe hadise tanımını belirler.
     """
-    total_snow_cm = 0.0
-    hourly_snow = []
+    # 1. Yağış ve Fırtına Hadiseleri (WMO Öncelikli)
+    if wmo_code in [95, 96, 99] or cape >= 900:
+        return "⛈️", "Gök Gürültülü Oraj"
+    elif wmo_code in [71, 73, 75, 77, 85, 86] or (precip > 0.1 and temp <= 1.0):
+        return "❄️", "Kar Yağışlı"
+    elif wmo_code in [65, 82]:
+        return "🌧️", "Kuvvetli Sağanak"
+    elif wmo_code in [51, 53, 55, 61, 63, 80, 81] or precip > 0.05:
+        return ("🌦️", "Sağanak Yağış") if is_day else ("🌧️", "Yağmurlu")
+    elif wmo_code in [45, 48]:
+        return "🌫️", "Puslu / Sisli"
     
-    limit = min(hours, len(temps), len(precips))
-    
-    for i in range(limit):
-        t = temps[i]
-        p = precips[i]
-        
-        # T <= 1.0 °C ve yağış var ise kar birikimi hesaplanır
-        if p > 0.05 and t <= 1.0:
-            if t > 0.0:
-                slr = 6.0   # Sulu, ıslak kar
-            elif -3.0 <= t <= 0.0:
-                slr = 10.0  # Standart kar örtüsü
-            elif -8.0 <= t < -3.0:
-                slr = 14.0  # Kuru ve hafif toz kar
-            else:
-                slr = 18.0  # Çok soğuk, kristalize kar
-            
-            cm_snow = (p * slr) / 10.0
-            total_snow_cm += cm_snow
-            hourly_snow.append(round(cm_snow, 1))
-        else:
-            hourly_snow.append(0.0)
-            
-    return round(total_snow_cm, 1), hourly_snow
-
-def get_weather_icon_and_desc(t, p, c, cape, hour=12, sr_dt=None, ss_dt=None):
-    # Anlık Saatin Gece / Gündüz Durumu
-    if sr_dt and ss_dt:
-        is_day = (sr_dt.hour < hour < ss_dt.hour) or \
-                 (hour == sr_dt.hour and sr_dt.minute <= 30) or \
-                 (hour == ss_dt.hour and ss_dt.minute >= 30)
+    # 2. Bulut Durumları (WMO 0-3 ve Bulut Örtüsü %)
+    if wmo_code == 3 or cloud >= 80:
+        return "☁️", "Çok Bulutlu"
+    elif wmo_code == 2 or (45 <= cloud < 80):
+        return ("⛅", "Parçalı Bulutlu") if is_day else ("☁️🌙", "Parçalı Bulutlu")
+    elif wmo_code == 1 or (15 <= cloud < 45):
+        return ("🌤️", "Az Bulutlu") if is_day else ("🌤️🌙", "Az Bulutlu")
     else:
-        is_day = (6 <= hour < 18)
+        return ("☀️", "Açık / Güneşli") if is_day else ("🌙", "Açık / Gece")
 
-    if p > 0.1:
-        if t <= 1.5:
-            return "❄️", "Kar Yağışlı"
-        elif cape >= 900 or (t >= 22 and p >= 2.0):
-            return "⚡", "Dolu / Oraj"
-        elif p >= 4.0:
-            return "🌧️", "Kuvvetli Yağmur"
-        else:
-            return "🌦️" if is_day else "🌧️", "Hafif / Orta Yağmur"
-    else:
-        if c > 80:
-            return "☁️", "Çok Bulutlu"
-        elif c > 40:
-            return "⛅", "Parçalı Bulutlu"
-        elif c > 15:
-            return "🌤️" if is_day else "☁️🌙", "Az Bulutlu"
-        else:
-            return ("☀️", "Açık / Güneşli") if is_day else ("🌙", "Açık / Gece")
 
 # 7 Günlük Sekmeler
+now_time = datetime.now(TR_TZ)
 day_tabs = st.tabs([
-    f"{gunler_tr[(now_real_dt + timedelta(days=i)).weekday()]} ({(now_real_dt + timedelta(days=i)).strftime('%d.%m')})" 
+    f"{gunler_tr[(now_time + timedelta(days=i)).weekday()]} ({(now_time + timedelta(days=i)).strftime('%d.%m')})" 
     for i in range(7)
 ])
 
@@ -1395,29 +1361,27 @@ for d_idx, tab in enumerate(day_tabs):
 
         for h in range(24):
             abs_hour_idx = day_start_hour + h
-            t_val = hourly_temps[abs_hour_idx] if 'hourly_temps' in locals() and len(hourly_temps) > abs_hour_idx else 14
-            p_val = hourly_precips[abs_hour_idx] if 'hourly_precips' in locals() and len(hourly_precips) > abs_hour_idx else 0.0
-            c_val = hourly_clouds[abs_hour_idx] if 'hourly_clouds' in locals() and len(hourly_clouds) > abs_hour_idx else 10
-            cape_val = hourly_capes[abs_hour_idx] if 'hourly_capes' in locals() and len(hourly_capes) > abs_hour_idx else 0
 
-            # Yağış İhtimali (% POP) Belirleme
-            if 'hourly_pop' in locals() and len(hourly_pop) > abs_hour_idx:
-                pop_val = int(hourly_pop[abs_hour_idx])
-            elif 'hourly_precip_probs' in locals() and len(hourly_precip_probs) > abs_hour_idx:
-                pop_val = int(hourly_precip_probs[abs_hour_idx])
+            # API'den gerçek verileri çek
+            t_val = api_hourly_temps[abs_hour_idx] if abs_hour_idx < len(api_hourly_temps) else 14.0
+            p_val = api_hourly_precips[abs_hour_idx] if abs_hour_idx < len(api_hourly_precips) else 0.0
+            pop_val = int(api_hourly_pops[abs_hour_idx]) if abs_hour_idx < len(api_hourly_pops) else 0
+            c_val = api_hourly_clouds[abs_hour_idx] if abs_hour_idx < len(api_hourly_clouds) else 0
+            code_val = int(api_hourly_codes[abs_hour_idx]) if abs_hour_idx < len(api_hourly_codes) else 0
+            cape_val = api_hourly_capes[abs_hour_idx] if abs_hour_idx < len(api_hourly_capes) else 0
+
+            # Gündüz / Gece Kontrolü
+            if sr_dt and ss_dt:
+                is_day = (sr_dt.hour < h < ss_dt.hour) or \
+                         (h == sr_dt.hour and sr_dt.minute <= 30) or \
+                         (h == ss_hour and ss_dt.minute >= 30)
             else:
-                # API listesinde yoksa yağış ve bulut oranından dinamik türet
-                if p_val > 0.5:
-                    pop_val = min(95, int(60 + p_val * 15))
-                elif p_val > 0.05:
-                    pop_val = 45
-                elif c_val > 70:
-                    pop_val = int(c_val * 0.35)
-                else:
-                    pop_val = int(c_val * 0.1)
+                is_day = (6 <= h < 18)
+
+            # İkon ve Açıklama Üretimi
+            icon_h, desc_h = get_accurate_weather_display(code_val, c_val, p_val, t_val, cape_val, is_day)
 
             # 1. Saat Başı Kartı
-            icon_h, desc_h = get_weather_icon_and_desc(t_val, p_val, c_val, cape_val, hour=h, sr_dt=sr_dt, ss_dt=ss_dt)
             timeline_items.append({
                 "time": f"{h:02d}:00",
                 "temp": f"{int(round(t_val))}°",
@@ -1474,7 +1438,7 @@ for d_idx, tab in enumerate(day_tabs):
                     f'<div style="font-size: 0.88rem; font-weight: 700; color: #90caf9;">{item["time"]}</div>'
                     f'<div style="font-size: 1.8rem; margin: 2px 0;">{item["icon"]}</div>'
                     f'<div style="font-size: 1.15rem; font-weight: 800; color: #ffffff;">{item["temp"]}</div>'
-                    f'<div style="font-size: 0.70rem; color: #b0bec5; margin-bottom: 4px;">{item["desc"]}</div>'
+                    f'<div style="font-size: 0.70rem; color: #b0bec5; margin-bottom: 4px; white-space: nowrap;">{item["desc"]}</div>'
                     f'<div style="font-size: 0.72rem; font-weight: 800; color: {pop_color};">💧 %{item["pop"]}</div>'
                     f'{precip_sub}'
                     f'</div>'
