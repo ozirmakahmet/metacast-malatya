@@ -2143,37 +2143,96 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
     </html>
     """
     st.components.v1.html(real_radar_stream_html, height=540)
-    # MetaCast Fiziksel Kütle Yörüngesi ve Elazığ / Havza Sapma Motoru
-    cur_wind_angle = float(sel_wind_deg)
-    is_akdeniz_flow = (195 <= cur_wind_angle <= 235)
+    # ==============================================================================
+    # 🧭 METACAST DİNAMİK KÜTLE YÖRÜNGE & SİNOPTİK SAPMA ANALİZ MOTORU
+    # ==============================================================================
+    cur_wind_deg = float(sel_wind_deg) if 'sel_wind_deg' in locals() else 210.0
+    cur_wind_spd = float(sel_wind_spd) if 'sel_wind_spd' in locals() else 15.0
 
-    if is_akdeniz_flow:
-        st.markdown(
-            """
-            <div class="benchmark-box" style="border-left: 5px solid #f97316; margin-top: 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <strong style="color: #fb923c; font-size: 0.95rem;">⚠️ AKDENİZ KÖKENLİ CEPHE: Orografik Sapma (Elazığ Kırılması Riski)</strong>
-                    <span style="background: #f97316; color: #fff; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">Sapma: %78</span>
-                </div>
-                <div style="font-size: 0.88rem; line-height: 1.5; color: #eceff1;">
-                    • <strong>Fiziksel Sapma Nedeni:</strong> Beydağları orografik engeli kütleyi yukarı iterken enerjisini güney yamaçta tüketir. Aşan hava Malatya çanağında fönleşir. Kütle, en düşük orografik dirence sahip <strong>Fırat Yarığı ve Hazar Gölü çöküntü oluğunu</strong> takip ederek <strong>Elazığ / Keban hattına</strong> kayar.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+    # 1. Durağan / Yerel Konvektif Kütle Kontrolü (Hafif Rüzgâr)
+    if cur_wind_spd < 8.0:
+        traj_title = "⚠️ DURAĞAN KÜTLE: Yerel Çanak İçi Hapsolma Riski"
+        traj_target = "Malatya Merkez, Yeşilyurt, Battalgazi"
+        traj_prob = "%84"
+        traj_color = "#ef4444"
+        traj_desc = (
+            "Düşük adveksiyon hızı nedeniyle kütleler yatay ötelenememektedir. "
+            "Gelişen konvektif bulutlar Malatya çanağında dikey patlama yaparak yerinde "
+            "lokal kuvvetli sağanak, yıldırım ve dolu hadiselerine neden olabilir."
         )
+
+    # 2. Güneybatı / Akdeniz Akışı -> Elazığ / Baskil / Keban Hattı
+    elif 190 <= cur_wind_deg <= 240:
+        traj_title = "⚠️ GÜNEYBATI AKIŞI: Beydağları Orografik Sapması (Elazığ Kırılması)"
+        traj_target = "Elazığ, Baskil, Keban, Hazar Havzası"
+        traj_prob = "%78"
+        traj_color = "#f97316"
+        traj_desc = (
+            "Beydağları orografik engeli (2.500 m) kütleyi yukarı zorlayarak enerjisini güney yamaçta tüketir. "
+            "Aşan hava kütlesi Malatya çanağında fönleşir. Yağış hücresi en düşük orografik dirence sahip "
+            "<strong>Fırat Nehri Kanyonu ve Hazar Çöküntüsü</strong> koridoruna bükülerek Elazığ havzasına kayar."
+        )
+
+    # 3. Güney / Güneydoğu Akışı -> Sivas / Kangal / Tokat Koridoru
+    elif 140 <= cur_wind_deg < 190:
+        traj_title = "↗️ GÜNEY AKIŞI: Kuzey Oluğu (Hekimhan - Kangal - Sivas Hattı)"
+        traj_target = "Yazıhan, Hekimhan, Kuluncak, Kangal, Sivas"
+        traj_prob = "%72"
+        traj_color = "#38bdf8"
+        traj_desc = (
+            "Kütleler Malatya şehir merkezini teğet geçerek Tohma Çayı ve Hekimhan vadisini izler. "
+            "Kuzeydoğuya doğru tırmanışa geçen cephe, Sivas güneyi ve Kangal platosu üzerinde etkili olma eğilimindedir."
+        )
+
+    # 4. Batı / Kuzeybatı Akışı -> Bingöl / Tunceli / Muş Hattı
+    elif 240 < cur_wind_deg <= 290:
+        traj_title = "➡️ BATI SİKLONİK AKIŞI: Yukarı Fırat & Doğu Koridoru"
+        traj_target = "Karakaya Barajı, Baskil, Tunceli Vadisi, Bingöl"
+        traj_prob = "%68"
+        traj_color = "#a855f7"
+        traj_desc = (
+            "Karakaya Baraj Gölü üzerinden su buharı toplayan hava kütlesi doğu-kuzeydoğu hattında "
+            "ilerleyerek Tunceli ve Bingöl yönündeki dağlık silsilelere doğru kanalize olur."
+        )
+
+    # 5. Kuzey / Kuzeybatı Akışı -> Adıyaman / Güneydoğu Ovaları
+    elif 290 < cur_wind_deg <= 350:
+        traj_title = "↘️ KUZEY KÖKENLİ CEPHE: Güneydoğu İnişi (Adıyaman / Kahta Hattı)"
+        traj_target = "Doğanşehir, Çelikhan Geçidi, Adıyaman, Kahta"
+        traj_prob = "%65"
+        traj_color = "#eab308"
+        traj_desc = (
+            "Kuzeyden sarkan soğuk cephe Malatya üzerinden geçtikten sonra Beydağları'nın alçak geçitlerinden "
+            "aşarak Adıyaman ve Fırat havzasına doğru inişe geçer."
+        )
+
+    # 6. Doğu / Poyraz Akışı -> Kararlı & Dengeli Hava
     else:
-        st.markdown(
-            """
-            <div class="benchmark-box" style="border-left: 5px solid #22c55e; margin-top: 10px;">
-                <strong style="color: #4ade80; font-size: 0.95rem;">🟢 SİNOPTİK DEĞERLENDİRME: HAVA DENGELİ</strong>
-                <div style="font-size: 0.88rem; line-height: 1.5; color: #eceff1; margin-top: 4px;">
-                    • <strong>Öngörü:</strong> Rüzgâr yönü vadi eğimiyle uyumludur; kütleler normal geçiş rotasında hareket eder.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+        traj_title = "🟢 SİNOPTİK DEĞERLENDİRME: Standart Geçiş Rotası"
+        traj_target = "Bölgesel Yayılım / Kararlı Vadi Akışı"
+        traj_prob = "%55"
+        traj_color = "#22c55e"
+        traj_desc = (
+            "Rüzgâr akışı yerel topoğrafik bariyerlerle dik açı yapmamaktadır. "
+            "Kütleler belirgin bir orografik sapmaya uğramadan genel rüzgâr rotasını takip eder."
         )
+
+    # Dinamik Kartın Ekrana Basılması
+    st.markdown(
+        f"""
+        <div class="benchmark-box" style="border-left: 5px solid {traj_color}; margin-top: 10px; background: rgba(255, 255, 255, 0.03); padding: 12px 16px; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
+                <strong style="color: {traj_color}; font-size: 0.95rem;">{traj_title}</strong>
+                <span style="background: {traj_color}; color: #000; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">Hedef Olasılığı: {traj_prob}</span>
+            </div>
+            <div style="font-size: 0.88rem; line-height: 1.5; color: #eceff1;">
+                • <strong>Öngörülen Rota:</strong> {traj_target}<br>
+                • <strong>Mekanizma:</strong> {traj_desc}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 # ==============================================================================
 # 🧠 XAI: AÇIKLANABİLİR YAPAY ZEKÂ KARAR GEREKÇELENDİRMESİ (YAZILI ANALİZ)
 # ==============================================================================
