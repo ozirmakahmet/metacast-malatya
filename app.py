@@ -787,27 +787,37 @@ if mode == "Model Kıyaslama Arenası":
 # ==============================================================================
 # ❄️ MALATYA ÇANAĞI RADYASYONEL İNVERSİYON & ZİRAİ DON ERKEN UYARI KATMANI
 # ==============================================================================
-# Şartlar: Gece/sabaha karşı saatler, açık gökyüzü (düşük bulut) ve durgun rüzgâr
-is_inversion_active = is_night_now and (c_now <= 30.0) and (mc_g_now <= 12.0)
+try:
+    # Saati ve gece/gündüz durumunu doğrudan sistem saatinden al (hata ihtimalini sıfırlar)
+    _cur_hour = datetime.now().hour
+    _is_night = (_cur_hour >= 20) or (_cur_hour <= 8)
+    
+    _t = locals().get("mc_t_now", None)
+    _g = locals().get("mc_g_now", None)
+    _c = locals().get("c_now", 20.0)
 
-if is_inversion_active:
-    if mc_t_now <= 0.0:
-        st.error(
-            f"🚨 **KUVVETLİ ZİRAİ DON UYARISI ({mc_t_now} °C)**\n\n"
-            f"Malatya çanağında açık hava ve durgun rüzgâr ({mc_g_now} km/s) sebebiyle şiddetli radyasyonel soğuma yaşanıyor. "
-            f"Çanak tabanında zemin sıcaklığı sıfırın altına inmiştir; tarımsal alanlar için acil tedbir önerilir."
-        )
-    elif mc_t_now <= 3.5:
-        st.warning(
-            f"⚠️ **ZİRAİ DON & İNVERSİYON RİSKİ ({mc_t_now} °C)**\n\n"
-            f"Gökyüzünün açık (%{int(c_now)} bulut) ve rüzgârın durgun ({mc_g_now} km/s) olması nedeniyle çanak tabanında soğuk hava göllenmesi (inversiyon) oluşuyor. "
-            f"Zemin seviyesinde don hadisesi meydana gelebilir."
-        )
-    elif mc_t_now <= 6.0:
-        st.info(
-            f"🌡️ **İnversiyon Soğuması Eğilimi ({mc_t_now} °C):** "
-            f"Açık ve sakin gecede çanak içi radyasyonel soğuma devam ediyor. Zemin sıcaklığı ölçülen hava sıcaklığından 2-3 °C daha soğuk hissedilebilir."
-        )
+    if _t is not None and _g is not None:
+        _inversion = _is_night and (_c <= 35.0) and (_g <= 14.0)
+        if _inversion:
+            if _t <= 0.0:
+                st.error(
+                    f"🚨 **KUVVETLİ ZİRAİ DON UYARISI ({_t} °C)**\n\n"
+                    f"Malatya çanağında açık hava ve durgun rüzgâr ({_g} km/s) sebebiyle şiddetli radyasyonel soğuma yaşanıyor. "
+                    f"Çanak tabanında zemin sıcaklığı sıfırın altına inmiştir; tarımsal alanlar için acil tedbir önerilir."
+                )
+            elif _t <= 3.5:
+                st.warning(
+                    f"⚠️ **ZİRAİ DON & İNVERSİYON RİSKİ ({_t} °C)**\n\n"
+                    f"Gökyüzünün açık (%{int(_c)} bulut) ve rüzgârın durgun ({_g} km/s) olması nedeniyle çanak tabanında soğuk hava göllenmesi (inversiyon) oluşuyor. "
+                    f"Zemin seviyesinde don hadisesi meydana gelebilir."
+                )
+            elif _t <= 6.0:
+                st.info(
+                    f"🌡️ **İnversiyon Soğuması Eğilimi ({_t} °C):** "
+                    f"Açık ve sakin gecede çanak içi radyasyonel soğuma devam ediyor. Zemin sıcaklığı ölçülen hava sıcaklığından 2-3 °C daha soğuk hissedilebilir."
+                )
+except Exception:
+    pass
     m1, m2, m3, m4, m5 = st.columns(5)
 
     if "Bileşik" in selected_param:
