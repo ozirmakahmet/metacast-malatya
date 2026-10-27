@@ -656,26 +656,28 @@ if mode == "Model Kıyaslama Arenası":
     ec_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0).iloc[now_idx])
     gfs_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
     icon_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
-    # Gelişmiş Dinamik Ağırlıklandırma (GFS Erhaç açık alan sakin rüzgârında daha başarılı)
-    raw_ensemble_g = (gfs_g_now * 0.45) + (icon_g_now * 0.30) + (ec_g_now * 0.25)
+    # 1. Modellerin Hamle Değerlerini Topla ve Sırala
+    model_gusts = [ec_g_now, gfs_g_now, icon_g_now]
+    model_gusts.sort()
 
-    # Erhaç pisti çanak içi zemin sürtünmesi sönümlemesi (Modellerin sakin havada şişirmesini engeller)
-    if raw_ensemble_g <= 8.0:
-        friction_factor = 0.60
-    elif raw_ensemble_g <= 15.0:
-        friction_factor = 0.72
-    elif raw_ensemble_g <= 25.0:
-        friction_factor = 0.88
+    # 2. Medyan ve Varyans Analizi (Aykırı model sapmasını izole eder)
+    median_gust = model_gusts[1]
+    mean_gust = sum(model_gusts) / 3.0
+    model_spread = model_gusts[2] - model_gusts[0]
+
+    # Modeller arası uçurum 8 km/s üzerindeyse medyan ağırlıklı uzlaşı uygula
+    if model_spread > 8.0:
+        base_gust = (median_gust * 0.70) + (mean_gust * 0.30)
     else:
-        friction_factor = 1.00
+        base_gust = mean_gust
 
-    # Rüzgâr yönü ve Beydağları orografik gölgesi hesabı
+    # 3. Fiziksel Rüzgâr Yönü ve Orografik Bariyer Etkisi (blk_now 3. Yağış bölümünde de kullanılır)
     wdir_now = float(get_clean_series(df_raw, "wind_direction_10m_ecmwf_ifs", 0.0).iloc[now_idx])
     blk_now = float(np.abs(np.cos(np.radians(wdir_now - 215.0))))
-    orographic_factor = (1.0 - 0.28 * blk_now) if (blk_now >= 0.65 and raw_ensemble_g >= 30) else 1.0
+    mountain_drag = (1.0 - 0.22 * blk_now) if (blk_now >= 0.70 and base_gust >= 35.0) else 1.0
 
-    mean_g_now = round(raw_ensemble_g, 1)
-    mc_g_now = round(raw_ensemble_g * friction_factor * orographic_factor, 1)
+    mean_g_now = round(mean_gust, 1)
+    mc_g_now = round(base_gust * mountain_drag, 1)
     # 2. Sıcaklık
     obs_t = float(metar["temp_c"]) if metar["temp_c"] is not None else None
     ec_t_now = float(get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0).iloc[now_idx])
