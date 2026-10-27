@@ -9,6 +9,16 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 from datetime import datetime, timedelta, timezone, time
+# ==============================================================================
+# 📍 METACAST ÇİFT NOKTA KOORDİNAT MİMARİSİ
+# ==============================================================================
+# 1. Kullanıcı Arayüzü & Şehir Yaşamı (Malatya Valilik / Merkez Çanağı)
+LAT_MERKEZ = 38.3552
+LON_MERKEZ = 38.3095
+
+# 2. Hakem İstasyonu & Model Kıyaslama Pisti (Erhaç Havalimanı - LTAT METAR)
+LAT_ERHAC = 38.4350
+LON_ERHAC = 38.0910
 
 # Türkiye Zaman Dilimi (UTC+3) Sabiti
 TR_TZ = timezone(timedelta(hours=3))
@@ -1273,16 +1283,15 @@ gunler_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi
 @st.cache_data(ttl=1200)
 def get_malatya_full_7day_forecast():
     """
-    Open-Meteo API'sinden Malatya için 7 günlük (168 saat)
-    sıcaklık, yağış ihtimali, yağış miktarı, bulutluluk, WMO hadise kodu
-    ve kesin gün doğumu/batımı saatlerini çeker.
+    Malatya Şehir Merkezi (Valilik/Yeşilyurt/Battalgazi) koordinatları üzerinden
+    kentsel sürtünmeyi içeren 7 günlük (168 saat) hava akışını çeker.
     """
     url = (
-        "https://api.open-meteo.com/v1/forecast?"
-        "latitude=38.3552&longitude=38.3095&"
-        "hourly=temperature_2m,precipitation_probability,precipitation,cloud_cover,weather_code,cape&"
-        "daily=sunrise,sunset&"
-        "timezone=Europe%2FIstanbul&forecast_days=7"
+        f"https://api.open-meteo.com/v1/forecast?"
+        f"latitude={LAT_MERKEZ}&longitude={LON_MERKEZ}&"
+        f"hourly=temperature_2m,precipitation_probability,precipitation,cloud_cover,weather_code,cape,wind_speed_10m&"
+        f"daily=sunrise,sunset&"
+        f"timezone=Europe%2FIstanbul&forecast_days=7"
     )
     try:
         r = requests.get(url, timeout=7)
@@ -1292,7 +1301,26 @@ def get_malatya_full_7day_forecast():
     except Exception:
         pass
     return {}, {}
-
+@st.cache_data(ttl=1800)
+def fetch_ensemble_models_erhac():
+    """
+    Erhaç Havalimanı (LTAT) METAR hakem istasyonu ile birebir yarışacak
+    açık ova küresel modellerini (ECMWF, GFS, ICON) çeker.
+    """
+    url = (
+        f"https://api.open-meteo.com/v1/forecast?"
+        f"latitude={LAT_ERHAC}&longitude={LON_ERHAC}&"
+        f"hourly=wind_gusts_10m,wind_speed_10m,temperature_2m,surface_pressure,precipitation&"
+        f"models=ecmwf_ifs025,gfs_seamless,icon_seamless&"
+        f"timezone=Europe%2FIstanbul&forecast_days=2"
+    )
+    try:
+        r = requests.get(url, timeout=7)
+        if r.status_code == 200:
+            return r.json().get("hourly", {})
+    except Exception:
+        pass
+    return {}
 daily_data, hourly_data = get_malatya_full_7day_forecast()
 
 sunrise_list = daily_data.get("sunrise", [])
