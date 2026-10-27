@@ -1465,6 +1465,33 @@ for d_idx, tab in enumerate(day_tabs):
                     """,
                     unsafe_allow_html=True
                 )
+                # ==============================================================================
+# 🧠 METACAST GELİŞMİŞ KALİBRASYON MOTORU (ERHAÇ MİKROKLİMA & ENSEMBLE)
+# ==============================================================================
+def calculate_calibrated_metacast_gust(ecmwf_gust, gfs_gust, icon_gust, base_wind_spd=None):
+    """
+    Erhaç Havalimanı (LTAT) mikrokliması için zemin sürtünmesi (orographic friction)
+    ve dinamik model ağırlıklandırması (ensemble blending) uygular.
+    """
+    # GFS sakin havalarda Erhaç çanağını daha iyi yakaladığı için yüksek ağırlık verilir
+    raw_ensemble = (gfs_gust * 0.45) + (icon_gust * 0.30) + (ecmwf_gust * 0.25)
+
+    # Erhaç pisti çanak içi sürtünme sönümlemesi
+    if raw_ensemble <= 8.0:
+        friction_factor = 0.60
+    elif raw_ensemble <= 15.0:
+        friction_factor = 0.72
+    elif raw_ensemble <= 25.0:
+        friction_factor = 0.88
+    else:
+        friction_factor = 1.00
+
+    calibrated_gust = raw_ensemble * friction_factor
+
+    if base_wind_spd is not None and calibrated_gust < base_wind_spd:
+        calibrated_gust = base_wind_spd * 1.15
+
+    return round(calibrated_gust, 1)
 # ==============================================================================
 # BÖLÜM 1: ⚡ METACAST HİBRİT YAPAY ZEKÂ TAHMİN & KARAR MERKEZİ
 # ==============================================================================
