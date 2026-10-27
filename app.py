@@ -683,12 +683,25 @@ if mode == "Model Kıyaslama Arenası":
     ec_t_now = float(get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0).iloc[now_idx])
     gfs_t_now = float(get_clean_series(df_raw, "temperature_2m_gfs_seamless", 15.0, fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0)).iloc[now_idx])
     icon_t_now = float(get_clean_series(df_raw, "temperature_2m_icon_seamless", 15.0, fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0)).iloc[now_idx])
-    mean_t_now = (ec_t_now + gfs_t_now + icon_t_now) / 3.0
+    # Sıcaklık modellerini topla ve sırala
+    model_temps = sorted([ec_t_now, gfs_t_now, icon_t_now])
+    median_t = model_temps[1]
+    mean_t = sum(model_temps) / 3.0
+    t_spread = model_temps[2] - model_temps[0]
+
+    # Modeller arasında 3.0 °C'den fazla uçurum varsa medyan ağırlıklı uzlaşı uygula
+    if t_spread > 3.0:
+        base_t = (median_t * 0.70) + (mean_t * 0.30)
+    else:
+        base_t = mean_t
+
+    # Gece açık havada radyasyonel soğuma (inversiyon) hesabı
     is_night_now = (now_real_dt.hour >= 21) or (now_real_dt.hour <= 7)
     c_now = float(get_clean_series(df_raw, "cloud_cover_ecmwf_ifs", 20.0).iloc[now_idx])
     inv_cooling = 0.8 if (is_night_now and c_now <= 35) else 0.0
-    mc_t_now = round(mean_t_now - inv_cooling, 1)
 
+    mean_t_now = round(mean_t, 1)
+    mc_t_now = round(base_t - inv_cooling, 1)
     # 3. Yağış (mm)
     obs_precip_now = 0.0
     if metar.get("is_rain") or metar.get("is_snow") or metar.get("is_hail"):
@@ -703,9 +716,23 @@ if mode == "Model Kıyaslama Arenası":
     ec_p_now = float(get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0).iloc[now_idx])
     gfs_p_now = float(get_clean_series(df_raw, "precipitation_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0)).iloc[now_idx])
     icon_p_now = float(get_clean_series(df_raw, "precipitation_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0)).iloc[now_idx])
-    mean_p_now = (ec_p_now + gfs_p_now + icon_p_now) / 3.0
-    rain_shadow = 0.78 if (blk_now >= 0.65 and mean_p_now > 0.2) else 1.0
-    mc_precip_now = round(mean_p_now * rain_shadow, 1)
+    # Yağış modellerini topla ve uzlaşı analizi yap
+    model_precips = sorted([ec_p_now, gfs_p_now, icon_p_now])
+    median_p = model_precips[1]
+    mean_p = sum(model_precips) / 3.0
+    rain_model_count = sum(1 for p in model_precips if p >= 0.1)
+
+    # 3 modelden en az 2'si yağış vermiyorsa tek modelin gürültüsünü filtrele (false-alarm önleyici)
+    if rain_model_count <= 1:
+        base_p = median_p
+    else:
+        base_p = (median_p * 0.60) + (mean_p * 0.40)
+
+    # Beydağları yağış gölgesi etkisi (blk_now rüzgâr bloğundan gelir)
+    rain_shadow = 0.78 if (blk_now >= 0.65 and base_p > 0.2) else 1.0
+
+    mean_p_now = round(mean_p, 1)
+    mc_precip_now = round(base_p * rain_shadow, 1)
 
     # 4. Basınç
     obs_pres = float(metar["altim_hpa"]) if metar["altim_hpa"] else None
