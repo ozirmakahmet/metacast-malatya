@@ -784,6 +784,30 @@ if mode == "Model Kıyaslama Arenası":
         ref_val = 100.0
 
     st.markdown("##### ⚡ Şu Anki Saat İtibarıyla Maç Durumu")
+    # ==============================================================================
+# ❄️ MALATYA ÇANAĞI RADYASYONEL İNVERSİYON & ZİRAİ DON ERKEN UYARI KATMANI
+# ==============================================================================
+# Şartlar: Gece/sabaha karşı saatler, açık gökyüzü (düşük bulut) ve durgun rüzgâr
+is_inversion_active = is_night_now and (c_now <= 30.0) and (mc_g_now <= 12.0)
+
+if is_inversion_active:
+    if mc_t_now <= 0.0:
+        st.error(
+            f"🚨 **KUVVETLİ ZİRAİ DON UYARISI ({mc_t_now} °C)**\n\n"
+            f"Malatya çanağında açık hava ve durgun rüzgâr ({mc_g_now} km/s) sebebiyle şiddetli radyasyonel soğuma yaşanıyor. "
+            f"Çanak tabanında zemin sıcaklığı sıfırın altına inmiştir; tarımsal alanlar için acil tedbir önerilir."
+        )
+    elif mc_t_now <= 3.5:
+        st.warning(
+            f"⚠️ **ZİRAİ DON & İNVERSİYON RİSKİ ({mc_t_now} °C)**\n\n"
+            f"Gökyüzünün açık (%{int(c_now)} bulut) ve rüzgârın durgun ({mc_g_now} km/s) olması nedeniyle çanak tabanında soğuk hava göllenmesi (inversiyon) oluşuyor. "
+            f"Zemin seviyesinde don hadisesi meydana gelebilir."
+        )
+    elif mc_t_now <= 6.0:
+        st.info(
+            f"🌡️ **İnversiyon Soğuması Eğilimi ({mc_t_now} °C):** "
+            f"Açık ve sakin gecede çanak içi radyasyonel soğuma devam ediyor. Zemin sıcaklığı ölçülen hava sıcaklığından 2-3 °C daha soğuk hissedilebilir."
+        )
     m1, m2, m3, m4, m5 = st.columns(5)
 
     if "Bileşik" in selected_param:
