@@ -656,11 +656,26 @@ if mode == "Model Kıyaslama Arenası":
     ec_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0).iloc[now_idx])
     gfs_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
     icon_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
-    mean_g_now = (ec_g_now + gfs_g_now + icon_g_now) / 3.0
+    # Gelişmiş Dinamik Ağırlıklandırma (GFS Erhaç açık alan sakin rüzgârında daha başarılı)
+    raw_ensemble_g = (gfs_g_now * 0.45) + (icon_g_now * 0.30) + (ec_g_now * 0.25)
+
+    # Erhaç pisti çanak içi zemin sürtünmesi sönümlemesi (Modellerin sakin havada şişirmesini engeller)
+    if raw_ensemble_g <= 8.0:
+        friction_factor = 0.60
+    elif raw_ensemble_g <= 15.0:
+        friction_factor = 0.72
+    elif raw_ensemble_g <= 25.0:
+        friction_factor = 0.88
+    else:
+        friction_factor = 1.00
+
+    # Rüzgâr yönü ve Beydağları orografik gölgesi hesabı
     wdir_now = float(get_clean_series(df_raw, "wind_direction_10m_ecmwf_ifs", 0.0).iloc[now_idx])
     blk_now = float(np.abs(np.cos(np.radians(wdir_now - 215.0))))
-    mc_g_now = round(mean_g_now * (1.0 - 0.28 * blk_now), 1) if (blk_now >= 0.65 and mean_g_now >= 30) else round(mean_g_now, 1)
+    orographic_factor = (1.0 - 0.28 * blk_now) if (blk_now >= 0.65 and raw_ensemble_g >= 30) else 1.0
 
+    mean_g_now = round(raw_ensemble_g, 1)
+    mc_g_now = round(raw_ensemble_g * friction_factor * orographic_factor, 1)
     # 2. Sıcaklık
     obs_t = float(metar["temp_c"]) if metar["temp_c"] is not None else None
     ec_t_now = float(get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0).iloc[now_idx])
