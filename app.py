@@ -784,7 +784,7 @@ if mode == "Model Kıyaslama Arenası":
         ref_val = 100.0
 
     st.markdown("##### ⚡ Şu Anki Saat İtibarıyla Maç Durumu")
-    # ==============================================================================
+# ==============================================================================
 # ❄️ MALATYA ÇANAĞI RADYASYONEL İNVERSİYON & ZİRAİ DON ERKEN UYARI KATMANI
 # ==============================================================================
 # Şartlar: Gece/sabaha karşı saatler, açık gökyüzü (düşük bulut) ve durgun rüzgâr
