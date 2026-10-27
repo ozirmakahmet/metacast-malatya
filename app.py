@@ -739,7 +739,19 @@ if mode == "Model Kıyaslama Arenası":
     ec_pres_now = float(get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25).iloc[now_idx])
     gfs_pres_now = float(get_clean_series(df_raw, "surface_pressure_gfs_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
     icon_pres_now = float(get_clean_series(df_raw, "surface_pressure_icon_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
-    mc_pres_now = round((ec_pres_now + gfs_pres_now + icon_pres_now) / 3.0, 1)
+    # Basınç modellerini topla ve sırala
+    model_pressures = sorted([ec_pres_now, gfs_pres_now, icon_pres_now])
+    median_pres = model_pressures[1]
+    mean_pres = sum(model_pressures) / 3.0
+    pres_spread = model_pressures[2] - model_pressures[0]
+
+    # Modeller arasında 3.0 hPa üzerinde tutarsızlık/sapma varsa medyan ağırlıklı uzlaşı uygula
+    if pres_spread > 3.0:
+        base_pres = (median_pres * 0.70) + (mean_pres * 0.30)
+    else:
+        base_pres = mean_pres
+
+    mc_pres_now = round(base_pres, 1)
 
     # Parametre Bazında Seçim (Karakter eşleşmesi garantilendi)
     if "Rüzg" in selected_param:
