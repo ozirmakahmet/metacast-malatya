@@ -161,6 +161,37 @@ def calculate_snow_accumulation_cm(temps, precips, hours=24):
         total_snow_cm += snow_depth_cm
 
     return round(total_snow_cm, 1), valid_hours
+    def transfer_erhac_to_merkez(erhac_temp, erhac_gust, erhac_precip, wind_dir, cloud_cover, hour):
+    """
+    Erhaç Havalimanı (862m) yer ölçümünü Malatya Merkez (950m) ve Beydağları
+    mikroklimasına dönüştüren fiziksel transfer fonksiyonu.
+    """
+    # 1. Sıcaklık Transferi (Adyabatik Lapse-Rate & Gece İnversiyonu):
+    is_night = (hour >= 20) or (hour <= 7)
+    if erhac_temp is not None:
+        if is_night and (cloud_cover <= 35.0) and (erhac_gust <= 15.0):
+            # Gece sakin ve açık havada merkez çanağı daha fazla soğur
+            merkez_temp = round(erhac_temp - 1.2, 1)
+        else:
+            # Standart rakım lapse-rate farkı (~ -0.6°C)
+            merkez_temp = round(erhac_temp - 0.6, 1)
+    else:
+        merkez_temp = None
+
+    # 2. Rüzgâr Hamlesi Transferi (Beydağları Lodos Koridoru):
+    blk = calculate_gaussian_blockage(wind_dir)
+    if blk >= 0.50 and erhac_gust >= 25.0:
+        merkez_gust = round(erhac_gust * (1.0 - 0.35 * blk), 1)
+    else:
+        merkez_gust = round(erhac_gust * 0.95, 1)
+
+    # 3. Yağış Transferi (Beydağları Yamaç Kaldırması):
+    if erhac_precip > 0.05:
+        merkez_precip = round(erhac_precip * 1.18, 1)
+    else:
+        merkez_precip = erhac_precip
+
+    return merkez_temp, merkez_gust, merkez_precip
 
 
 # --- MLOps VERİ GÜNLÜĞÜ (SQLITE) & OTOMATİK ÖĞRENME TETİKLEYİCİSİ ---
