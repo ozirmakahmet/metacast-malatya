@@ -1254,7 +1254,17 @@ if mode == "Canlı Operasyonel":
     date_display = df["time"].iloc[0].strftime("%d %B %Y")
     tag_sub = f"Canlı Model Tahmini (Güncelleme: {last_update})"
 else:
-    st.stop()
+    # Model Arenası veya diğer modlar için güvenli geri dönüş
+    if "df_raw" in locals() and df_raw is not None and not df_raw.empty:
+        df = df_raw.copy().reset_index(drop=True)
+    elif "df" in locals() and df is not None:
+        pass
+    else:
+        st.info("⚡ Model Arenası telemetrisi yükleniyor...")
+        st.stop()
+        
+    date_display = df["time"].iloc[0].strftime("%d %B %Y") if "time" in df.columns else ""
+    tag_sub = "Model Kıyaslama Arenası Telemetrisi"
 # Sayısal modellerin serilerini df indeksine kilitleme
 ecmwf = get_clean_series(df, "wind_gusts_10m_ecmwf_ifs", 10.0)
 gfs = get_clean_series(df, "wind_gusts_10m_gfs_seamless", 10.0, fallback_series=ecmwf)
