@@ -238,7 +238,15 @@ def get_clean_series(df_source, col_name, default_val=0.0, fallback_series=None)
         s = s.fillna(fallback_series)
     return s.fillna(default_val).astype(float)
 
-
+def calculate_gaussian_blockage(wind_dir, peak_angle=215.0, spread=35.0):
+    """
+    Beydağları için Gauss (Çan Eğrisi) orografik blokaj simülasyonu.
+    spread=35.0 parametresi dağın açısal genişliğini (etki alanını) temsil eder.
+    """
+    # Döngüsel açı farkını (-180 ile +180 arasında) bul
+    diff = (wind_dir - peak_angle + 180) % 360 - 180
+    # Gauss Formülü: e^(-(x^2) / (2*sigma^2))
+    return np.exp(-(diff ** 2) / (2 * spread ** 2))
 # --- MLOps VERİ GÜNLÜĞÜ (SQLITE) & OTOMATİK ÖĞRENME TETİKLEYİCİSİ ---
 def init_logger_db():
     os.makedirs("data", exist_ok=True)
@@ -667,7 +675,7 @@ if mode == "Model Kıyaslama Arenası":
         base_gust = mean_gust
 
     wdir_now = float(get_clean_series(df_raw, "wind_direction_10m_ecmwf_ifs", 0.0).iloc[now_idx])
-    blk_now = float(np.abs(np.cos(np.radians(wdir_now - 215.0))))
+    blk_now = float(calculate_gaussian_blockage(wdir_now))
     mountain_drag = (1.0 - 0.22 * blk_now) if (blk_now >= 0.70 and base_gust >= 35.0) else 1.0
 
     mean_g_now = round(mean_gust, 1)
@@ -1154,8 +1162,7 @@ if mode == "What-If Laboratuvarı":
         sim_cape = st.slider("CAPE (J/kg):", 0, 2800, def_cape)
 
     sim_speed = sim_gust * 0.45
-    sim_angle_diff = np.radians(sim_dir - 215.0)
-    sim_blockage = float(np.abs(np.cos(sim_angle_diff)))
+    sim_blockage = float(calculate_gaussian_blockage(sim_dir))
     sim_gust_factor = min(5.0, max(1.0, sim_gust / (sim_speed + 1e-5)))
     sim_is_snow = 1.0 if sim_temp <= 1.5 else 0.0
     sim_hail_pot = 1.0 if (sim_cape >= 900.0 or sim_temp >= 24.0) else 0.0
@@ -1271,8 +1278,7 @@ live_wind_deg = float(wind_dir_series.iloc[peak_idx])
 
 pressure_series = get_clean_series(df, "surface_pressure_ecmwf_ifs", 1013.25)
 pressure_diff = pressure_series.diff(periods=3).fillna(0)
-angle_diff = np.radians(wind_dir_series - 215.0)
-mountain_blockage = np.abs(np.cos(angle_diff))
+mountain_blockage = calculate_gaussian_blockage(wind_dir_series)
 
 w_speed_series = get_clean_series(df, "wind_speed_10m_ecmwf_ifs", 5.0)
 gust_factor = (gust_mean / (w_speed_series + 1e-5)).clip(1.0, 5.0)
