@@ -1245,6 +1245,7 @@ if mode == "Canlı Operasyonel":
             if next_d <= max_date:
                 st.session_state.current_date = next_d
                 st.rerun()
+                
 df = df_raw[df_raw["time"].dt.date == st.session_state.current_date].reset_index(drop=True)
     if df.empty:
         st.session_state.current_date = min_date
