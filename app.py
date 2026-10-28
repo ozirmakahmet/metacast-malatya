@@ -1465,6 +1465,8 @@ else:
 st.markdown(f"<div class='time-window-box'>{time_window_badge}</div>", unsafe_allow_html=True)
 
 st.markdown("---")
+    now_hour = datetime.now(TR_TZ).hour
+cur_idx = now_hour if now_hour < len(df) else int(np.argmin(np.abs(df["time"].dt.hour - now_hour)))
 
 mod_gust_now = float(gust_mean.iloc[cur_idx])
 mod_temp_now = float(temp.iloc[cur_idx])
