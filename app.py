@@ -2,26 +2,23 @@ import json
 import os
 import re
 import sqlite3
+from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import requests
 import streamlit as st
-from datetime import datetime, timedelta, timezone, time
 
 # ==============================================================================
 # 📍 METACAST ÇİFT NOKTA KOORDİNAT MİMARİSİ
 # ==============================================================================
-# 1. Kullanıcı Arayüzü & Şehir Yaşamı (Malatya Valilik / Merkez Çanağı)
 LAT_MERKEZ = 38.3552
 LON_MERKEZ = 38.3095
 
-# 2. Hakem İstasyonu & Model Kıyaslama Pisti (Erhaç Havalimanı - LTAT METAR)
 LAT_ERHAC = 38.4350
 LON_ERHAC = 38.0910
 
-# Türkiye Zaman Dilimi (UTC+3) Sabiti
 TR_TZ = timezone(timedelta(hours=3))
 
 st.set_page_config(
@@ -35,7 +32,6 @@ st.set_page_config(
 st.markdown(
     """
 <style>
-/* Genel Sayfa ve Tipografi Ayarları */
 .block-container {
     padding-top: 2rem !important;
     padding-bottom: 3rem !important;
@@ -50,82 +46,12 @@ div[data-testid="stMetricLabel"] {
     font-size: 0.85rem !important;
     color: #90caf9 !important;
 }
-
-/* 24 Saatlik Yatay Kart Konteyneri */
-.hourly-scroll-container {
-    display: flex;
-    overflow-x: auto;
-    gap: 10px;
-    padding: 8px 4px 14px 4px;
-    margin-bottom: 12px;
-}
-.hourly-card {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    padding: 10px 12px;
-    min-width: 98px;
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    align-items: center;
-    transition: all 0.2s ease-in-out;
-}
-.hourly-card:hover {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: #90caf9;
-    transform: translateY(-2px);
-}
-.hourly-card.active-now {
-    border: 1.5px solid #2196f3;
-    background: rgba(33, 150, 243, 0.12);
-}
-.hourly-time {
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: #90caf9;
-    margin-bottom: 2px;
-}
-.hourly-icon {
-    font-size: 1.6rem;
-    margin: 4px 0;
-}
-.hourly-temp {
-    font-size: 1.1rem;
-    font-weight: 800;
-    color: #ffffff;
-}
-.hourly-desc {
-    font-size: 0.70rem;
-    color: #b0bec5;
-    margin-top: 3px;
-    line-height: 1.2;
-}
-.hourly-precip {
-    font-size: 0.72rem;
-    font-weight: 600;
-    color: #29b6f6;
-    margin-top: 3px;
-}
-
-/* Bilgi ve Uyarı Kutuları */
 .header-box {
     background: linear-gradient(90deg, rgba(33, 150, 243, 0.15), rgba(156, 39, 176, 0.1));
     border: 1px solid rgba(33, 150, 243, 0.3);
     border-radius: 10px;
     padding: 14px 20px;
     margin-bottom: 20px;
-}
-.future-summary-box {
-    background: linear-gradient(90deg, rgba(33, 150, 243, 0.10), rgba(0, 230, 118, 0.06));
-    border-left: 4px solid #00e676;
-    padding: 10px 14px;
-    border-radius: 8px;
-    margin-bottom: 18px;
-    font-size: 0.88rem;
-    line-height: 1.5;
-    color: #eceff1;
 }
 .section-banner-metacast {
     background: linear-gradient(90deg, rgba(33, 150, 243, 0.18), rgba(156, 39, 176, 0.15));
@@ -181,43 +107,6 @@ div[data-testid="stMetricLabel"] {
     padding: 10px 12px;
     height: 100%;
 }
-.ruler-container {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 8px;
-    padding: 8px 16px;
-    margin-top: 4px;
-    margin-bottom: 12px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-family: monospace;
-}
-.ruler-tick {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-}
-.ruler-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background-color: #546e7a;
-    transition: all 0.3s;
-}
-.ruler-dot.active {
-    background-color: #ff9800;
-    box-shadow: 0 0 8px #ff9800;
-    transform: scale(1.3);
-}
-.ruler-line {
-    flex-grow: 1;
-    height: 1.5px;
-    background: rgba(255, 255, 255, 0.12);
-    margin: 0 6px;
-    margin-bottom: 14px;
-}
 </style>
 """,
     unsafe_allow_html=True,
@@ -238,21 +127,13 @@ def get_clean_series(df_source, col_name, default_val=0.0, fallback_series=None)
         s = s.fillna(fallback_series)
     return s.fillna(default_val).astype(float)
 
+
 def calculate_gaussian_blockage(wind_dir, peak_angle=215.0, spread=35.0):
-    """
-    Beydağları için Gauss (Çan Eğrisi) orografik blokaj simülasyonu.
-    spread=35.0 parametresi dağın açısal genişliğini (etki alanını) temsil eder.
-    """
-    # Döngüsel açı farkını (-180 ile +180 arasında) bul
     diff = (wind_dir - peak_angle + 180) % 360 - 180
-    # Gauss Formülü: e^(-(x^2) / (2*sigma^2))
-    return np.exp(-(diff ** 2) / (2 * spread ** 2))
-    def calculate_snow_accumulation_cm(temps, precips, hours=24):
-    """
-    Termodinamik Kuchera SLR (Snow-to-Liquid Ratio) Modeli:
-    Saatlik sıcaklık ve sıvı eşdeğeri yağış (mm) üzerinden zeminde birikecek
-    tahmini kar örtüsü kalınlığını (cm) dinamik oranla hesaplar.
-    """
+    return np.exp(-(diff**2) / (2 * (spread**2)))
+
+
+def calculate_snow_accumulation_cm(temps, precips, hours=24):
     total_snow_cm = 0.0
     valid_hours = min(len(temps), len(precips), hours)
 
@@ -280,6 +161,8 @@ def calculate_gaussian_blockage(wind_dir, peak_angle=215.0, spread=35.0):
         total_snow_cm += snow_depth_cm
 
     return round(total_snow_cm, 1), valid_hours
+
+
 # --- MLOps VERİ GÜNLÜĞÜ (SQLITE) & OTOMATİK ÖĞRENME TETİKLEYİCİSİ ---
 def init_logger_db():
     os.makedirs("data", exist_ok=True)
@@ -368,7 +251,6 @@ def get_all_logs():
 init_logger_db()
 
 
-# --- GERÇEK SENSÖR TELEMETRİSİ DOĞRULAMA (SANITY CHECK) ---
 def validate_telemetry(temp, speed_kmh, gust_kmh, altim_hpa):
     warnings = []
     is_valid = True
@@ -425,7 +307,6 @@ def parse_metar_clouds(raw_metar: str) -> str:
     return " | ".join(parts)
 
 
-# --- GERÇEK METAR VERİSİ (NOAA) ---
 @st.cache_data(ttl=300)
 def fetch_live_metar():
     url = "https://aviationweather.gov/api/data/metar?ids=LTAT&format=json"
@@ -499,7 +380,6 @@ def fetch_live_metar():
     }
 
 
-# --- GERÇEK MODEL TAHMİNİ (OPEN-METEO / BAĞLANTI HATASI KORUMALI) ---
 @st.cache_data(ttl=600)
 def fetch_live_forecast():
     url = "https://api.open-meteo.com/v1/forecast"
@@ -524,7 +404,7 @@ def fetch_live_forecast():
         "forecast_days": 7,
         "timezone": "Europe/Istanbul",
     }
-    
+
     os.makedirs("data", exist_ok=True)
     cache_path = "data/last_forecast_backup.json"
 
@@ -541,7 +421,6 @@ def fetch_live_forecast():
     except Exception:
         pass
 
-    # 1. Kurtarma Katmanı: Diskteki son başarılı kayıt
     if os.path.exists(cache_path):
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
@@ -552,7 +431,6 @@ def fetch_live_forecast():
         except Exception:
             pass
 
-    # 2. Kurtarma Katmanı: Kesinti Anında Dinamik 10 Günlük Sentetik Veri
     now_base = datetime.now(TR_TZ).replace(minute=0, second=0, microsecond=0, tzinfo=None)
     start_time = now_base - timedelta(days=3)
     total_hours = 10 * 24
@@ -587,7 +465,7 @@ def fetch_live_forecast():
 
 
 # ==============================================================================
-# 🎛️ SOL MENÜ (ERGONOMİK VE DERLİ TOPLU SIDEBAR)
+# 🎛️ SOL MENÜ (ERGONOMİK SIDEBAR)
 # ==============================================================================
 st.sidebar.markdown("### ⚡ MetaCast Panel")
 st.sidebar.caption("Malatya Havzası Karar-Destek Motoru")
@@ -608,7 +486,7 @@ nav_choice = st.sidebar.radio(
         "📈 Akademik Rapor",
         "🧪 What-If Laboratuvarı",
     ],
-    label_visibility="collapsed"
+    label_visibility="collapsed",
 )
 
 if nav_choice == "🟢 Canlı Operasyonel":
@@ -623,7 +501,7 @@ elif nav_choice == "📂 Geçmiş Test Vakaları":
             "Fırtına: Yanlış Alarm (De-Warning) Testi",
             "Dolu / Süper Hücre Riski Testi",
             "Kar / Donma Fazı Testi",
-        ]
+        ],
     )
     mode = scenario_pick
 elif nav_choice == "📈 Akademik Rapor":
@@ -631,7 +509,6 @@ elif nav_choice == "📈 Akademik Rapor":
 else:
     mode = "What-If Laboratuvarı"
 
-# Model Ağırlıklarının Yüklenmesi
 try:
     with open("models/metacast_weights.json", "r", encoding="utf-8") as f:
         payload = json.load(f)
@@ -667,7 +544,7 @@ if mode == "Model Kıyaslama Arenası":
             </div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     with st.spinner("Modeller ve yer telemetrisi karşılaştırılıyor..."):
@@ -689,23 +566,31 @@ if mode == "Model Kıyaslama Arenası":
         horizontal=True,
     )
 
-    # 1. Rüzgâr
     obs_g = float(metar["gust_kmh"]) if metar["gust_kmh"] else 0.0
     ec_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0).iloc[now_idx])
-    gfs_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
-    icon_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
-    
-    model_gusts = [ec_g_now, gfs_g_now, icon_g_now]
-    model_gusts.sort()
+    gfs_g_now = float(
+        get_clean_series(
+            df_raw,
+            "wind_gusts_10m_gfs_seamless",
+            0.0,
+            fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0),
+        ).iloc[now_idx]
+    )
+    icon_g_now = float(
+        get_clean_series(
+            df_raw,
+            "wind_gusts_10m_icon_seamless",
+            0.0,
+            fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0),
+        ).iloc[now_idx]
+    )
 
+    model_gusts = sorted([ec_g_now, gfs_g_now, icon_g_now])
     median_gust = model_gusts[1]
     mean_gust = sum(model_gusts) / 3.0
     model_spread = model_gusts[2] - model_gusts[0]
 
-    if model_spread > 8.0:
-        base_gust = (median_gust * 0.70) + (mean_gust * 0.30)
-    else:
-        base_gust = mean_gust
+    base_gust = (median_gust * 0.70) + (mean_gust * 0.30) if model_spread > 8.0 else mean_gust
 
     wdir_now = float(get_clean_series(df_raw, "wind_direction_10m_ecmwf_ifs", 0.0).iloc[now_idx])
     blk_now = float(calculate_gaussian_blockage(wdir_now))
@@ -713,22 +598,32 @@ if mode == "Model Kıyaslama Arenası":
 
     mean_g_now = round(mean_gust, 1)
     mc_g_now = round(base_gust * mountain_drag, 1)
-    
-    # 2. Sıcaklık
+
     obs_t = float(metar["temp_c"]) if metar["temp_c"] is not None else None
     ec_t_now = float(get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0).iloc[now_idx])
-    gfs_t_now = float(get_clean_series(df_raw, "temperature_2m_gfs_seamless", 15.0, fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0)).iloc[now_idx])
-    icon_t_now = float(get_clean_series(df_raw, "temperature_2m_icon_seamless", 15.0, fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0)).iloc[now_idx])
-    
+    gfs_t_now = float(
+        get_clean_series(
+            df_raw,
+            "temperature_2m_gfs_seamless",
+            15.0,
+            fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0),
+        ).iloc[now_idx]
+    )
+    icon_t_now = float(
+        get_clean_series(
+            df_raw,
+            "temperature_2m_icon_seamless",
+            15.0,
+            fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0),
+        ).iloc[now_idx]
+    )
+
     model_temps = sorted([ec_t_now, gfs_t_now, icon_t_now])
     median_t = model_temps[1]
     mean_t = sum(model_temps) / 3.0
     t_spread = model_temps[2] - model_temps[0]
 
-    if t_spread > 3.0:
-        base_t = (median_t * 0.70) + (mean_t * 0.30)
-    else:
-        base_t = mean_t
+    base_t = (median_t * 0.70) + (mean_t * 0.30) if t_spread > 3.0 else mean_t
 
     is_night_now = (now_real_dt.hour >= 21) or (now_real_dt.hour <= 7)
     c_now = float(get_clean_series(df_raw, "cloud_cover_ecmwf_ifs", 20.0).iloc[now_idx])
@@ -736,8 +631,7 @@ if mode == "Model Kıyaslama Arenası":
 
     mean_t_now = round(mean_t, 1)
     mc_t_now = round(base_t - inv_cooling, 1)
-    
-    # 3. Yağış (mm)
+
     obs_precip_now = 0.0
     if metar.get("is_rain") or metar.get("is_snow") or metar.get("is_hail"):
         raw_m = metar.get("raw", "").upper()
@@ -749,43 +643,61 @@ if mode == "Model Kıyaslama Arenası":
             obs_precip_now = 1.6
 
     ec_p_now = float(get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0).iloc[now_idx])
-    gfs_p_now = float(get_clean_series(df_raw, "precipitation_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0)).iloc[now_idx])
-    icon_p_now = float(get_clean_series(df_raw, "precipitation_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0)).iloc[now_idx])
-    
+    gfs_p_now = float(
+        get_clean_series(
+            df_raw,
+            "precipitation_gfs_seamless",
+            0.0,
+            fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0),
+        ).iloc[now_idx]
+    )
+    icon_p_now = float(
+        get_clean_series(
+            df_raw,
+            "precipitation_icon_seamless",
+            0.0,
+            fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0),
+        ).iloc[now_idx]
+    )
+
     model_precips = sorted([ec_p_now, gfs_p_now, icon_p_now])
     median_p = model_precips[1]
     mean_p = sum(model_precips) / 3.0
     rain_model_count = sum(1 for p in model_precips if p >= 0.1)
 
-    if rain_model_count <= 1:
-        base_p = median_p
-    else:
-        base_p = (median_p * 0.60) + (mean_p * 0.40)
-
+    base_p = median_p if rain_model_count <= 1 else (median_p * 0.60) + (mean_p * 0.40)
     rain_shadow = 0.78 if (blk_now >= 0.65 and base_p > 0.2) else 1.0
 
     mean_p_now = round(mean_p, 1)
     mc_precip_now = round(base_p * rain_shadow, 1)
 
-    # 4. Basınç
     obs_pres = float(metar["altim_hpa"]) if metar["altim_hpa"] else None
     ec_pres_now = float(get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25).iloc[now_idx])
-    gfs_pres_now = float(get_clean_series(df_raw, "surface_pressure_gfs_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
-    icon_pres_now = float(get_clean_series(df_raw, "surface_pressure_icon_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
-    
+    gfs_pres_now = float(
+        get_clean_series(
+            df_raw,
+            "surface_pressure_gfs_seamless",
+            1013.25,
+            fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25),
+        ).iloc[now_idx]
+    )
+    icon_pres_now = float(
+        get_clean_series(
+            df_raw,
+            "surface_pressure_icon_seamless",
+            1013.25,
+            fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25),
+        ).iloc[now_idx]
+    )
+
     model_pressures = sorted([ec_pres_now, gfs_pres_now, icon_pres_now])
     median_pres = model_pressures[1]
     mean_pres = sum(model_pressures) / 3.0
     pres_spread = model_pressures[2] - model_pressures[0]
 
-    if pres_spread > 3.0:
-        base_pres = (median_pres * 0.70) + (mean_pres * 0.30)
-    else:
-        base_pres = mean_pres
-
+    base_pres = (median_pres * 0.70) + (mean_pres * 0.30) if pres_spread > 3.0 else mean_pres
     mc_pres_now = round(base_pres, 1)
 
-    # Parametre Bazında Seçim (Karakter eşleşmesi garantilendi)
     if "Rüzg" in selected_param:
         param_unit = "km/s"
         ref_val = obs_g
@@ -802,7 +714,7 @@ if mode == "Model Kıyaslama Arenası":
         param_unit = "hPa"
         ref_val = obs_pres if obs_pres is not None else 1014.0
         v_mc, v_ec, v_gfs, v_icon = mc_pres_now, ec_pres_now, gfs_pres_now, icon_pres_now
-    else:  # Bileşik Genel Başarı
+    else:
         param_unit = "Puan"
         err_mc_total = (abs(mc_g_now - obs_g) * 1.0) + (abs(mc_t_now - (obs_t or mc_t_now)) * 3.0) + (abs(mc_precip_now - obs_precip_now) * 6.0) + (abs(mc_pres_now - (obs_pres or mc_pres_now)) * 0.8)
         err_ec_total = (abs(ec_g_now - obs_g) * 1.0) + (abs(ec_t_now - (obs_t or ec_t_now)) * 3.0) + (abs(ec_p_now - obs_precip_now) * 6.0) + (abs(ec_pres_now - (obs_pres or ec_pres_now)) * 0.8)
@@ -817,13 +729,9 @@ if mode == "Model Kıyaslama Arenası":
 
     st.markdown("##### ⚡ Şu Anki Saat İtibarıyla Maç Durumu")
 
-    # ==============================================================================
-    # ❄️ MALATYA ÇANAĞI RADYASYONEL İNVERSİYON & ZİRAİ DON ERKEN UYARI KATMANI
-    # ==============================================================================
     try:
         _cur_hour = datetime.now().hour
         _is_night = (_cur_hour >= 20) or (_cur_hour <= 8)
-        
         _t = locals().get("mc_t_now", None)
         _g = locals().get("mc_g_now", None)
         _c = locals().get("c_now", 20.0)
@@ -859,7 +767,10 @@ if mode == "Model Kıyaslama Arenası":
         m3.metric("ECMWF", f"{v_ec} Puan", delta=f"{v_ec - 100:+.1f}", delta_color="inverse")
         m4.metric("GFS", f"{v_gfs} Puan", delta=f"{v_gfs - 100:+.1f}", delta_color="inverse")
         m5.metric("ICON", f"{v_icon} Puan", delta=f"{v_icon - 100:+.1f}", delta_color="inverse")
-        winner_name = max({"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon}, key=lambda k: {"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon}[k])
+        winner_name = max(
+            {"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon},
+            key=lambda k: {"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon}[k],
+        )
     else:
         m1.metric("🚩 Erhaç Hakem", f"{ref_val:.1f} {param_unit}", delta="Yer Ölçümü")
         m2.metric("MetaCast", f"{v_mc:.1f} {param_unit}", delta=f"Fark: {v_mc - ref_val:+.1f}", delta_color="inverse")
@@ -875,13 +786,12 @@ if mode == "Model Kıyaslama Arenası":
         winner_name = min(diffs_now, key=diffs_now.get)
 
     if "MetaCast" in winner_name:
-        st.success(f"🏆 **ŞU ANKİ LİDER: MetaCast!** Bu parametrede Erhaç yer istasyonuna en isabetli tahmini MetaCast üretti.")
+        st.success("🏆 **ŞU ANKİ LİDER: MetaCast!** Bu parametrede Erhaç yer istasyonuna en isabetli tahmini MetaCast üretti.")
     else:
         st.info(f"🏆 **ŞU ANKİ LİDER: {winner_name}!** Bu parametrede şu an yer ölçümüne en yakın tahmini {winner_name} verdi.")
 
     st.markdown("---")
 
-    # Tarih Filtresi
     available_arena_dates = sorted(df_raw["time"].dt.date.unique())
     date_options = ["Tüm 7 Günlük Dönem"] + [d.strftime("%d %B %Y") for d in available_arena_dates]
     today_arena_str = datetime.now(TR_TZ).date().strftime("%d %B %Y")
@@ -895,7 +805,7 @@ if mode == "Model Kıyaslama Arenası":
             "Günü Filtreleyin:",
             options=date_options,
             index=default_arena_idx,
-            label_visibility="collapsed"
+            label_visibility="collapsed",
         )
 
     if selected_date_filter == "Tüm 7 Günlük Dönem":
@@ -908,7 +818,6 @@ if mode == "Model Kıyaslama Arenası":
     win_counts = {"MetaCast": 0, "ECMWF": 0, "GFS": 0, "ICON": 0}
     gunler = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
 
-    # Sütun Serileri
     s_ec_g = get_clean_series(df_arena, "wind_gusts_10m_ecmwf_ifs", 10.0)
     s_gfs_g = get_clean_series(df_arena, "wind_gusts_10m_gfs_seamless", 10.0, fallback_series=s_ec_g)
     s_icon_g = get_clean_series(df_arena, "wind_gusts_10m_icon_seamless", 10.0, fallback_series=s_ec_g)
@@ -949,7 +858,7 @@ if mode == "Model Kıyaslama Arenası":
         i_g = float(s_icon_g.iloc[h_i])
         m_mean_g = (e_g + g_g + i_g) / 3.0
         w_dir = float(s_wdir.iloc[h_i])
-        blk = float(np.abs(np.cos(np.radians(w_dir - 215.0))))
+        blk = float(calculate_gaussian_blockage(w_dir))
         mc_g = round(m_mean_g * (1.0 - 0.28 * blk), 1) if (blk >= 0.65 and m_mean_g >= 30) else round(m_mean_g, 1)
 
         e_t = float(s_ec_t.iloc[h_i])
@@ -1016,12 +925,12 @@ if mode == "Model Kıyaslama Arenası":
             elif "Basınç" in selected_param:
                 c_unit = "hPa"
                 c_ref, c_mc, c_ec, c_gfs, c_icon = act_p, mc_p, e_p, g_p, i_p
-            else:  # Bileşik Genel Başarı
+            else:
                 c_unit = "Puan"
-                sc_mc = round(max(0, 100 - (abs(mc_g - act_g)*1.0 + abs(mc_t - act_t)*3.0 + abs(mc_pr - act_pr)*6.0 + abs(mc_p - act_p)*0.8)), 1)
-                sc_ec = round(max(0, 100 - (abs(e_g - act_g)*1.0 + abs(e_t - act_t)*3.0 + abs(e_pr - act_pr)*6.0 + abs(e_p - act_p)*0.8)), 1)
-                sc_gfs = round(max(0, 100 - (abs(g_g - act_g)*1.0 + abs(g_t - act_t)*3.0 + abs(g_pr - act_pr)*6.0 + abs(g_p - act_p)*0.8)), 1)
-                sc_icon = round(max(0, 100 - (abs(i_g - act_g)*1.0 + abs(i_t - act_t)*3.0 + abs(i_pr - act_pr)*6.0 + abs(i_p - act_p)*0.8)), 1)
+                sc_mc = round(max(0, 100 - (abs(mc_g - act_g) * 1.0 + abs(mc_t - act_t) * 3.0 + abs(mc_pr - act_pr) * 6.0 + abs(mc_p - act_p) * 0.8)), 1)
+                sc_ec = round(max(0, 100 - (abs(e_g - act_g) * 1.0 + abs(e_t - act_t) * 3.0 + abs(e_pr - act_pr) * 6.0 + abs(e_p - act_p) * 0.8)), 1)
+                sc_gfs = round(max(0, 100 - (abs(g_g - act_g) * 1.0 + abs(g_t - act_t) * 3.0 + abs(g_pr - act_pr) * 6.0 + abs(g_p - act_p) * 0.8)), 1)
+                sc_icon = round(max(0, 100 - (abs(i_g - act_g) * 1.0 + abs(i_t - act_t) * 3.0 + abs(i_pr - act_pr) * 6.0 + abs(i_p - act_p) * 0.8)), 1)
                 c_ref, c_mc, c_ec, c_gfs, c_icon = 100.0, sc_mc, sc_ec, sc_gfs, sc_icon
 
             if "Bileşik" in selected_param:
@@ -1094,7 +1003,7 @@ if mode == "Model Kıyaslama Arenası":
                 </div>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     c1, c2, c3, c4 = st.columns(4)
@@ -1141,18 +1050,24 @@ if mode == "Akademik Doğrulama Modu":
     col_cm, col_chart = st.columns(2)
     with col_cm:
         z = [[7302, 142], [98, 1242]]
-        x = ['Tahmin: Normal', 'Tahmin: Şiddetli']
-        y = ['Gerçek: Normal', 'Gerçek: Şiddetli']
-        fig_cm = px.imshow(z, text_auto=True, aspect="auto", x=x, y=y,
-                           color_continuous_scale='Blues',
-                           labels=dict(x="Model Tahmini", y="Yer İstasyonu", color="Saat"))
+        x = ["Tahmin: Normal", "Tahmin: Şiddetli"]
+        y = ["Gerçek: Normal", "Gerçek: Şiddetli"]
+        fig_cm = px.imshow(
+            z,
+            text_auto=True,
+            aspect="auto",
+            x=x,
+            y=y,
+            color_continuous_scale="Blues",
+            labels=dict(x="Model Tahmini", y="Yer İstasyonu", color="Saat"),
+        )
         fig_cm.update_layout(title="Kör Test Karmaşıklık Matrisi (8.784 Saat)", height=300, margin=dict(l=10, r=10, t=35, b=10))
         st.plotly_chart(fig_cm, use_container_width=True)
 
     with col_chart:
-        months = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara']
+        months = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"]
         f1_scores = [0.92, 0.89, 0.85, 0.78, 0.75, 0.82, 0.95, 0.96, 0.90, 0.88, 0.91, 0.94]
-        fig_perf = go.Figure([go.Bar(x=months, y=f1_scores, marker_color='#ff9800')])
+        fig_perf = go.Figure([go.Bar(x=months, y=f1_scores, marker_color="#ff9800")])
         fig_perf.update_layout(title="Aylık F1 Başarı Skoru", yaxis=dict(range=[0.5, 1.0]), height=300, margin=dict(l=10, r=10, t=35, b=10))
         st.plotly_chart(fig_perf, use_container_width=True)
 
@@ -1256,7 +1171,13 @@ if mode == "Canlı Operasyonel":
         st.session_state.current_date = today_date if today_date in available_dates else available_dates[0]
 
     st.sidebar.markdown("**📅 Tarih Gezgini**")
-    picked_date = st.sidebar.date_input("Tarih:", value=st.session_state.current_date, min_value=min_date, max_value=max_date, label_visibility="collapsed")
+    picked_date = st.sidebar.date_input(
+        "Tarih:",
+        value=st.session_state.current_date,
+        min_value=min_date,
+        max_value=max_date,
+        label_visibility="collapsed",
+    )
     if picked_date != st.session_state.current_date:
         st.session_state.current_date = picked_date
         st.rerun()
@@ -1274,7 +1195,7 @@ if mode == "Canlı Operasyonel":
             if next_d <= max_date:
                 st.session_state.current_date = next_d
                 st.rerun()
-                
+
     df = df_raw[df_raw["time"].dt.date == st.session_state.current_date].reset_index(drop=True)
     if df.empty:
         st.session_state.current_date = min_date
@@ -1283,7 +1204,6 @@ if mode == "Canlı Operasyonel":
     date_display = df["time"].iloc[0].strftime("%d %B %Y")
     tag_sub = f"Canlı Model Tahmini (Güncelleme: {last_update})"
 else:
-    # Model Arenası veya diğer modlar için güvenli geri dönüş
     if "df_raw" in locals() and df_raw is not None and not df_raw.empty:
         df = df_raw.copy().reset_index(drop=True)
     elif "df" in locals() and df is not None:
@@ -1291,11 +1211,10 @@ else:
     else:
         st.info("⚡ Model Arenası telemetrisi yükleniyor...")
         st.stop()
-        
+
     date_display = df["time"].iloc[0].strftime("%d %B %Y") if "time" in df.columns else ""
     tag_sub = "Model Kıyaslama Arenası Telemetrisi"
 
-# Sayısal modellerin serilerini df indeksine kilitleme
 ecmwf = get_clean_series(df, "wind_gusts_10m_ecmwf_ifs", 10.0)
 gfs = get_clean_series(df, "wind_gusts_10m_gfs_seamless", 10.0, fallback_series=ecmwf)
 icon_gusts = get_clean_series(df, "wind_gusts_10m_icon_seamless", 10.0, fallback_series=ecmwf)
@@ -1322,7 +1241,6 @@ cloud_cover = get_clean_series(df, "cloud_cover_ecmwf_ifs", 20.0, fallback_serie
 
 cape_series = get_clean_series(df, "cape", 0.0)
 dew_point_series = get_clean_series(df, "dew_point_2m_ecmwf_ifs", 10.0, fallback_series=(temp - 4.0))
-dew_point_depression = temp - dew_point_series
 
 night_mask = (df["time"].dt.hour >= 21) | (df["time"].dt.hour <= 7)
 night_temps = temp[night_mask]
@@ -1340,7 +1258,6 @@ else:
 
 is_radiation_frost_danger = night_min_temp <= 2.0 and night_avg_cloud <= 35.0
 
-# Yağış fazları
 precip_types = []
 precip_colors = []
 for t_val, p_val, g_val, c_val in zip(temp.values, precip.values, gust_mean.values, cape_series.values):
@@ -1373,7 +1290,6 @@ X_input = np.column_stack([
 X_norm = (X_input - mean) / std
 probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 
-# --- SAYFA BAŞLIĞI ---
 st.markdown(
     f"""
     <div class="header-box">
@@ -1392,7 +1308,7 @@ st.markdown(
         </div>
     </div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 # ==============================================================================
@@ -1404,15 +1320,9 @@ st.caption("Aşağıdaki gün sekmelerine tıklayarak o günün 24 saatlik hava 
 now_real_dt = datetime.now(TR_TZ).replace(tzinfo=None)
 gunler_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
-# ==============================================================================
-# ☀️ / 🌙 7 GÜNLÜK HASSAS HAVA DURUMU, ASTRONOMİ & HADİSE MOTORU (MALATYA)
-# ==============================================================================
+
 @st.cache_data(ttl=1200)
 def get_malatya_full_7day_forecast():
-    """
-    Malatya Şehir Merkezi (Valilik/Yeşilyurt/Battalgazi) koordinatları üzerinden
-    kentsel sürtünmeyi içeren 7 günlük (168 saat) hava akışını çeker.
-    """
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
         f"latitude={LAT_MERKEZ}&longitude={LON_MERKEZ}&"
@@ -1428,28 +1338,8 @@ def get_malatya_full_7day_forecast():
     except Exception:
         pass
     return {}, {}
-    
-@st.cache_data(ttl=1800)
-def fetch_ensemble_models_erhac():
-    """
-    Erhaç Havalimanı (LTAT) METAR hakem istasyonu ile birebir yarışacak
-    açık ova küresel modellerini (ECMWF, GFS, ICON) çeker.
-    """
-    url = (
-        f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={LAT_ERHAC}&longitude={LON_ERHAC}&"
-        f"hourly=wind_gusts_10m,wind_speed_10m,temperature_2m,surface_pressure,precipitation&"
-        f"models=ecmwf_ifs025,gfs_seamless,icon_seamless&"
-        f"timezone=Europe%2FIstanbul&forecast_days=2"
-    )
-    try:
-        r = requests.get(url, timeout=7)
-        if r.status_code == 200:
-            return r.json().get("hourly", {})
-    except Exception:
-        pass
-    return {}
-    
+
+
 daily_data, hourly_data = get_malatya_full_7day_forecast()
 
 sunrise_list = daily_data.get("sunrise", [])
@@ -1462,11 +1352,8 @@ api_hourly_clouds = hourly_data.get("cloud_cover", [])
 api_hourly_codes = hourly_data.get("weather_code", [])
 api_hourly_capes = hourly_data.get("cape", [])
 
+
 def get_accurate_weather_display(wmo_code, cloud, precip, temp, cape, is_day):
-    """
-    Resmi WMO (Dünya Meteoroloji Örgütü) kodları ve gece/gündüz durumuna göre
-    ikon ve Türkçe hadise tanımını belirler.
-    """
     if wmo_code in [95, 96, 99] or cape >= 900:
         return "⛈️", "Gök Gürültülü Oraj"
     elif wmo_code in [71, 73, 75, 77, 85, 86] or (precip > 0.1 and temp <= 1.0):
@@ -1477,7 +1364,7 @@ def get_accurate_weather_display(wmo_code, cloud, precip, temp, cape, is_day):
         return ("🌦️", "Sağanak Yağış") if is_day else ("🌧️", "Yağmurlu")
     elif wmo_code in [45, 48]:
         return "🌫️", "Puslu / Sisli"
-    
+
     if wmo_code == 3 or cloud >= 80:
         return "☁️", "Çok Bulutlu"
     elif wmo_code == 2 or (45 <= cloud < 80):
@@ -1487,9 +1374,10 @@ def get_accurate_weather_display(wmo_code, cloud, precip, temp, cape, is_day):
     else:
         return ("☀️", "Açık / Güneşli") if is_day else ("🌙", "Açık / Gece")
 
+
 now_time = datetime.now(TR_TZ)
 day_tabs = st.tabs([
-    f"{gunler_tr[(now_time + timedelta(days=i)).weekday()]} ({(now_time + timedelta(days=i)).strftime('%d.%m')})" 
+    f"{gunler_tr[(now_time + timedelta(days=i)).weekday()]} ({(now_time + timedelta(days=i)).strftime('%d.%m')})"
     for i in range(7)
 ])
 
@@ -1523,11 +1411,9 @@ for d_idx, tab in enumerate(day_tabs):
             cape_val = api_hourly_capes[abs_hour_idx] if abs_hour_idx < len(api_hourly_capes) else 0
 
             if sr_dt and ss_dt:
-                is_day = (sr_dt.hour < h < ss_dt.hour) or \
-                         (h == sr_dt.hour and sr_dt.minute <= 30) or \
-                         (h == ss_hour and ss_dt.minute >= 30)
+                is_day = (sr_dt.hour < h < ss_dt.hour) or (h == sr_dt.hour and sr_dt.minute <= 30) or (h == ss_hour and ss_dt.minute >= 30)
             else:
-                is_day = (6 <= h < 18)
+                is_day = 6 <= h < 18
 
             icon_h, desc_h = get_accurate_weather_display(code_val, c_val, p_val, t_val, cape_val, is_day)
 
@@ -1538,7 +1424,7 @@ for d_idx, tab in enumerate(day_tabs):
                 "desc": desc_h,
                 "pop": pop_val,
                 "precip": p_val,
-                "special": False
+                "special": False,
             })
 
             if h == sr_hour:
@@ -1548,7 +1434,7 @@ for d_idx, tab in enumerate(day_tabs):
                     "icon": "🌅",
                     "desc": "Doğuş Anı",
                     "special": True,
-                    "color": "#f59e0b"
+                    "color": "#f59e0b",
                 })
 
             if h == ss_hour:
@@ -1558,7 +1444,7 @@ for d_idx, tab in enumerate(day_tabs):
                     "icon": "🌇",
                     "desc": "Batış Anı",
                     "special": True,
-                    "color": "#f97316"
+                    "color": "#f97316",
                 })
 
         cards_html = ""
@@ -1572,7 +1458,7 @@ for d_idx, tab in enumerate(day_tabs):
                     f'<div style="font-size: 1.8rem; margin: 4px 0;">{item["icon"]}</div>'
                     f'<div style="font-size: 0.82rem; font-weight: 800; color: #ffffff; white-space: nowrap;">{item["title"]}</div>'
                     f'<div style="font-size: 0.70rem; font-weight: 700; color: {item["color"]};">{item["desc"]}</div>'
-                    f'</div>'
+                    f"</div>"
                 )
             else:
                 pop_color = "#38bdf8" if item["pop"] >= 20 else "#64748b"
@@ -1586,16 +1472,15 @@ for d_idx, tab in enumerate(day_tabs):
                     f'<div style="font-size: 1.15rem; font-weight: 800; color: #ffffff;">{item["temp"]}</div>'
                     f'<div style="font-size: 0.70rem; color: #b0bec5; margin-bottom: 4px; white-space: nowrap;">{item["desc"]}</div>'
                     f'<div style="font-size: 0.72rem; font-weight: 800; color: {pop_color};">💧 %{item["pop"]}</div>'
-                    f'{precip_sub}'
-                    f'</div>'
+                    f"{precip_sub}"
+                    f"</div>"
                 )
 
         st.markdown(
             f'<div style="display: flex; gap: 10px; overflow-x: auto; padding: 10px 4px 16px 4px; scrollbar-width: thin;">{cards_html}</div>',
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
-        # ❄️ 24 Saatlik Termodinamik Kuchera Zemin Kar Birikim Kartı
         day_slice_temps = api_hourly_temps[day_start_hour:day_start_hour + 24]
         day_slice_precips = api_hourly_precips[day_start_hour:day_start_hour + 24]
 
@@ -1603,9 +1488,13 @@ for d_idx, tab in enumerate(day_tabs):
             snow_24h_cm, _ = calculate_snow_accumulation_cm(day_slice_temps, day_slice_precips, hours=24)
             if snow_24h_cm > 0.0:
                 snow_status = (
-                    "İnce Beyaz Örtü (Buzlanma Tehlikesi)" if snow_24h_cm < 3.0
-                    else ("Kuvvetli Kar Yağışı (Trafik ve Tipi Riski)" if snow_24h_cm < 10.0
-                    else "🚨 Yoğun Kar Fırtınası (Afet Protokolü)")
+                    "İnce Beyaz Örtü (Buzlanma Tehlikesi)"
+                    if snow_24h_cm < 3.0
+                    else (
+                        "Kuvvetli Kar Yağışı (Trafik ve Tipi Riski)"
+                        if snow_24h_cm < 10.0
+                        else "🚨 Yoğun Kar Fırtınası (Afet Protokolü)"
+                    )
                 )
                 snow_color = "#38bdf8" if snow_24h_cm < 3.0 else ("#f59e0b" if snow_24h_cm < 10.0 else "#ef4444")
                 st.markdown(
@@ -1616,34 +1505,18 @@ for d_idx, tab in enumerate(day_tabs):
                             <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 2px;">{snow_status} • <em>Kuchera SLR Dinamik Kristalizasyon Modeli</em></div>
                         </div>
                         <div style="text-align: right;">
-                            <span style="background: {snow_color}; color:
-
-# ==============================================================================
-# 🧠 METACAST GELİŞMİŞ KALİBRASYON MOTORU (ERHAÇ MİKROKLİMA & ENSEMBLE)
-# ==============================================================================
-def calculate_calibrated_metacast_gust(ecmwf_gust, gfs_gust, icon_gust, base_wind_spd=None):
-    raw_ensemble = (gfs_gust * 0.45) + (icon_gust * 0.30) + (ecmwf_gust * 0.25)
-
-    if raw_ensemble <= 8.0:
-        friction_factor = 0.60
-    elif raw_ensemble <= 15.0:
-        friction_factor = 0.72
-    elif raw_ensemble <= 25.0:
-        friction_factor = 0.88
-    else:
-        friction_factor = 1.00
-
-    calibrated_gust = raw_ensemble * friction_factor
-
-    if base_wind_spd is not None and calibrated_gust < base_wind_spd:
-        calibrated_gust = base_wind_spd * 1.15
-
-    return round(calibrated_gust, 1)
+                            <span style="background: {snow_color}; color: #000; font-weight: 800; font-size: 0.74rem; padding: 3px 8px; border-radius: 4px;">KAR ÖRTÜSÜ</span>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
 # ==============================================================================
 # BÖLÜM 1: ⚡ METACAST HİBRİT YAPAY ZEKÂ TAHMİN & KARAR MERKEZİ
 # ==============================================================================
 st.markdown('<div class="section-banner-metacast"><h4 style="margin: 0; color: #90caf9;">⚡ BÖLÜM 1: MetaCast Hibrit Yapay Zekâ Tahmin & Karar Merkezi</h4></div>', unsafe_allow_html=True)
+
 if "Yanlış Alarm" in mode:
     risk_score = 24.5
 elif is_radiation_frost_danger:
@@ -1662,36 +1535,33 @@ with col2:
     st.caption(f"Yön: **{live_wind_deg:.0f}°** | Sapma: ±{gust_std.mean():.1f} km/s")
 
 with col3:
-    # --- İBRELİ AFET RİSKİ GÖSTERGESİ (GAUGE) ---
     gauge_bar_color = "#22c55e" if risk_score < 35 else ("#ff9800" if risk_score < 65 else "#ef4444")
-    fig_gauge = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=round(risk_score, 1),
-        number={"suffix": "%", "font": {"size": 22, "color": "#ffffff", "family": "Arial Black"}},
-        title={"text": "Bileşik Afet Riski (PIML)", "font": {"size": 11, "color": "#90caf9"}},
-        gauge={
-            "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "#546e7a", "tickfont": {"size": 9, "color": "#94a3b8"}},
-            "bar": {"color": gauge_bar_color, "thickness": 0.28},
-            "bgcolor": "rgba(255, 255, 255, 0.03)",
-            "borderwidth": 1,
-            "bordercolor": "rgba(255, 255, 255, 0.1)",
-            "steps": [
-                {"range": [0, 35], "color": "rgba(34, 197, 94, 0.15)"},
-                {"range": [35, 65], "color": "rgba(255, 152, 0, 0.15)"},
-                {"range": [65, 100], "color": "rgba(239, 68, 68, 0.20)"},
-            ],
-            "threshold": {
-                "line": {"color": "#ffffff", "width": 2},
-                "thickness": 0.75,
-                "value": risk_score
-            }
-        }
-    ))
+    fig_gauge = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=round(risk_score, 1),
+            number={"suffix": "%", "font": {"size": 22, "color": "#ffffff", "family": "Arial Black"}},
+            title={"text": "Bileşik Afet Riski (PIML)", "font": {"size": 11, "color": "#90caf9"}},
+            gauge={
+                "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "#546e7a", "tickfont": {"size": 9, "color": "#94a3b8"}},
+                "bar": {"color": gauge_bar_color, "thickness": 0.28},
+                "bgcolor": "rgba(255, 255, 255, 0.03)",
+                "borderwidth": 1,
+                "bordercolor": "rgba(255, 255, 255, 0.1)",
+                "steps": [
+                    {"range": [0, 35], "color": "rgba(34, 197, 94, 0.15)"},
+                    {"range": [35, 65], "color": "rgba(255, 152, 0, 0.15)"},
+                    {"range": [65, 100], "color": "rgba(239, 68, 68, 0.20)"},
+                ],
+                "threshold": {"line": {"color": "#ffffff", "width": 2}, "thickness": 0.75, "value": risk_score},
+            },
+        )
+    )
     fig_gauge.update_layout(
         height=125,
         margin=dict(l=10, r=10, t=25, b=5),
         paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#ffffff")
+        font=dict(color="#ffffff"),
     )
     st.plotly_chart(fig_gauge, use_container_width=True, config={"displayModeBar": False})
 
@@ -1731,12 +1601,18 @@ m3.metric("Yer Hamlesi", f"{metar['gust_kmh']} km/s")
 m4.metric("Basınç", f"{int(metar['altim_hpa'])} hPa" if metar["altim_hpa"] else "1014 hPa")
 
 active_badges = []
-if metar["is_hail"]: active_badges.append("<span style='background:#e91e63; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>DOLU</span>")
-if metar["is_ts"]: active_badges.append("<span style='background:#ff9800; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>ORAJ</span>")
-if metar["is_snow"]: active_badges.append("<span style='background:#2196f3; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>KAR</span>")
-if metar["is_rain"] and not metar["is_snow"]: active_badges.append("<span style='background:#0288d1; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>YAĞMUR</span>")
-if metar["is_fog"]: active_badges.append("<span style='background:#78909c; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>SİS</span>")
-if not active_badges: active_badges.append("<span style='background:#4caf50; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>SAKİN</span>")
+if metar["is_hail"]:
+    active_badges.append("<span style='background:#e91e63; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>DOLU</span>")
+if metar["is_ts"]:
+    active_badges.append("<span style='background:#ff9800; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>ORAJ</span>")
+if metar["is_snow"]:
+    active_badges.append("<span style='background:#2196f3; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>KAR</span>")
+if metar["is_rain"] and not metar["is_snow"]:
+    active_badges.append("<span style='background:#0288d1; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>YAĞMUR</span>")
+if metar["is_fog"]:
+    active_badges.append("<span style='background:#78909c; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>SİS</span>")
+if not active_badges:
+    active_badges.append("<span style='background:#4caf50; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>SAKİN</span>")
 
 with m5:
     st.markdown("<p style='font-size:0.8rem; color:#9aa0a6; margin:0;'>Anlık Durum</p>", unsafe_allow_html=True)
@@ -1805,37 +1681,33 @@ log_validation_entry(mode, mod_gust_now, obs_gust, delta_wind, mod_temp_now, obs
 
 v_col1, v_col2 = st.columns(2)
 with v_col1:
-    st.markdown(
-        f"""
-    <div class="card-box">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            st.markdown('<strong style="color: #90caf9;">📊 Model Doğruluk & Güvenilirlik</strong>', unsafe_allow_html=True)
-
-            <span style="font-weight: 700; color: #fff;">%{model_reliability_score:.0f}</span>
-        </div>
-        <div style="font-size: 0.85rem; color: #cfd8dc; margin-bottom: 6px;">Durum: <strong>{rel_status}</strong></div>
-        <div style="font-size: 0.82rem; color: #b0bec5;">{delta_display}</div>
-    </div>
-    """,
-        unsafe_allow_html=True,
+    html_v1 = (
+        '<div class="card-box">'
+        '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">'
+        '<strong style="color: #90caf9;">📊 Model Doğruluk & Güvenilirlik</strong>'
+        f'<span style="font-weight: 700; color: #fff;">%{model_reliability_score:.0f}</span>'
+        "</div>"
+        f'<div style="font-size: 0.85rem; color: #cfd8dc; margin-bottom: 6px;">Durum: <strong>{rel_status}</strong></div>'
+        f'<div style="font-size: 0.82rem; color: #b0bec5;">{delta_display}</div>'
+        "</div>"
     )
+    st.markdown(html_v1, unsafe_allow_html=True)
 
 with v_col2:
-    st.markdown(
-        f"""
-    <div class="card-box">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <strong style="color: #ffb74d;">🛡️ İstasyon Bağımsız Gözlemi</strong>
-            <span style="background: {indep_badge_color}; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">{indep_level}</span>
-        </div>
-        <div style="font-size: 0.85rem; color: #eceff1; margin-top: 4px;">• {'<br>• '.join(indep_hazards)}</div>
-    </div>
-    """,
-        unsafe_allow_html=True,
+    hazards_joined = "<br>• ".join(indep_hazards)
+    html_v2 = (
+        '<div class="card-box">'
+        '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">'
+        '<strong style="color: #ffb74d;">🛡️ İstasyon Bağımsız Gözlemi</strong>'
+        f'<span style="background: {indep_badge_color}; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">{indep_level}</span>'
+        "</div>"
+        f'<div style="font-size: 0.85rem; color: #eceff1; margin-top: 4px;">• {hazards_joined}</div>'
+        "</div>"
     )
+    st.markdown(html_v2, unsafe_allow_html=True)
 
 # ==============================================================================
-# 🧭 DİNAMİK AFET RİSK HARİTASI VE 15 DAKİKALIK KESİNTİSİZ SAYI DOĞRUSU
+# 🧭 DİNAMİK AFET RİSK HARİTASI VE 15 DAKİKALIK SAYI DOĞRUSU
 # ==============================================================================
 st.markdown("---")
 st.markdown("##### 🧭 Dinamik Afet Risk Haritası & Sayı Doğrusu Zaman Çizelgesi")
@@ -1872,7 +1744,7 @@ with t_slider_col:
         options=time_slots,
         value=st.session_state.selected_time_slot,
         key="time_stepper_slider",
-        label_visibility="collapsed"
+        label_visibility="collapsed",
     )
     if sel_time != st.session_state.selected_time_slot:
         st.session_state.selected_time_slot = sel_time
@@ -1892,7 +1764,7 @@ with t_slider_col:
             <span>23:45</span>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 current_sel_h = int(st.session_state.selected_time_slot.split(":")[0])
@@ -1903,10 +1775,12 @@ is_now_selected = (is_viewing_today and current_sel_h == cur_real_h and current_
 frac = current_sel_m / 60.0
 next_h = min(current_sel_h + 1, len(df) - 1)
 
+
 def interp_val(series):
     v1 = float(series.iloc[current_sel_h])
     v2 = float(series.iloc[next_h])
     return v1 + (v2 - v1) * frac
+
 
 w_deg1 = float(wind_dir_series.iloc[current_sel_h])
 w_deg2 = float(wind_dir_series.iloc[next_h])
@@ -1946,19 +1820,23 @@ with c_map1:
         if st_info["type"] == "tulga":
             loc_g += 3.5
             loc_t += 0.4
-            if loc_g >= 38.0: loc_r = max(loc_r, 68.0)
+            if loc_g >= 38.0:
+                loc_r = max(loc_r, 68.0)
         elif st_info["type"] == "dogansehir":
             loc_g += 12.0
             loc_t -= 1.8
-            if loc_g >= 45: loc_r = max(loc_r, 75.0)
+            if loc_g >= 45:
+                loc_r = max(loc_r, 75.0)
         elif st_info["type"] == "battalgazi":
             loc_t -= 0.8
-            if loc_t <= 1.0 and is_radiation_frost_danger: loc_r = max(loc_r, 88.0)
+            if loc_t <= 1.0 and is_radiation_frost_danger:
+                loc_r = max(loc_r, 88.0)
         elif st_info["type"] == "yesilyurt":
             loc_g += 5.0
             loc_t += 0.9
         elif st_info["type"] == "erhac":
-            if loc_g >= 50: loc_r = max(loc_r, 80.0)
+            if loc_g >= 50:
+                loc_r = max(loc_r, 80.0)
 
         if loc_r >= 65.0:
             pt_colors.append("#f44336")
@@ -1977,14 +1855,14 @@ with c_map1:
     trace_points = go.Scattermap(
         lat=lats,
         lon=lons,
-        mode='markers+text',
+        mode="markers+text",
         marker=dict(size=14, color=pt_colors),
         text=[s["name"] for s in stations],
         textposition="top right",
         textfont=dict(color="#ffffff", size=11, family="Arial Black"),
         hovertext=hover_texts,
         hoverinfo="text",
-        name="İstasyonlar"
+        name="İstasyonlar",
     )
 
     fig_map = go.Figure(data=[trace_points])
@@ -1997,13 +1875,13 @@ with c_map1:
                 dict(
                     sourcetype="raster",
                     source=["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"],
-                    below="traces"
+                    below="traces",
                 )
-            ]
+            ],
         ),
         showlegend=False,
         height=390,
-        margin=dict(l=0, r=0, t=5, b=0)
+        margin=dict(l=0, r=0, t=5, b=0),
     )
     st.plotly_chart(fig_map, use_container_width=True)
 
@@ -2014,7 +1892,8 @@ with c_map1:
             <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; border-radius: 50%; background-color: #ff9800;"></div> Dikkat (%35-65)</div>
             <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 10px; height: 10px; border-radius: 50%; background-color: #f44336;"></div> Kritik Afet (>%65)</div>
         </div>
-        """, unsafe_allow_html=True
+        """,
+        unsafe_allow_html=True,
     )
 
 with c_map2:
@@ -2032,7 +1911,7 @@ with c_map2:
             <span style="background-color: {time_badge_color}; color: #000; font-size: 0.72rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">{time_badge_text}</span>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     st.markdown(
@@ -2053,7 +1932,7 @@ with c_map2:
             </div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     h_c1, h_c2 = st.columns(2)
@@ -2071,8 +1950,7 @@ with c_map2:
     else:
         hazards_summary.append("☀️ <strong>Yağış Yok:</strong> Zemin kuru.")
 
-    angle_diff_sel = np.radians(sel_wind_deg - 215.0)
-    blockage_sel = float(np.abs(np.cos(angle_diff_sel)))
+    blockage_sel = float(calculate_gaussian_blockage(sel_wind_deg))
     if blockage_sel >= 0.70 and sel_gust >= 40.0:
         hazards_summary.append(f"⛰️ <strong>Beydağları Blokajı:</strong> Rüzgâr ({sel_wind_deg:.0f}°) dağa çarparak sönümleniyor.")
     elif sel_gust >= 50.0:
@@ -2088,69 +1966,14 @@ with c_map2:
             • {'<br>• '.join(hazards_summary)}
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 st.markdown("---")
 
 # ==============================================================================
-# 🛰️ BÖLGESEL CANLI RADAR & METACAST CONVLSTM ONNX NOWCASTER
+# 🛰️ BÖLGESEL CANLI RADAR & NOWCASTING AKIŞI
 # ==============================================================================
-@st.cache_data(ttl=600)
-def run_onnx_radar_nowcasting():
-    model_path = "models/metacast_nowcaster.onnx"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    
-    try:
-        r_meta = requests.get("https://api.rainviewer.com/public/weather-maps.json", headers=headers, timeout=6)
-        meta_json = r_meta.json()
-        host = meta_json.get("host", "https://tilecache.rainviewer.com")
-        past_frames = meta_json.get("radar", {}).get("past", [])
-    except Exception:
-        host, past_frames = "https://tilecache.rainviewer.com", []
-
-    collected = []
-    if len(past_frames) >= 4:
-        for f in past_frames[-4:]:
-            tile_url = f"{host}{f['path']}/256/6/38/24/2/1_1.png"
-            try:
-                res = requests.get(tile_url, headers=headers, timeout=5)
-                if res.status_code == 200:
-                    from PIL import Image
-                    from io import BytesIO
-                    img = Image.open(BytesIO(res.content)).convert("RGBA")
-                    arr = np.array(img)
-                    alpha = arr[:, :, 3]
-                    rgb_m = arr[:, :, 0:3].mean(axis=-1)
-                    dbz = np.zeros((256, 256), dtype=np.float32)
-                    mask = alpha > 25
-                    dbz[mask] = (rgb_m[mask] / 255.0) * 55.0 + 10.0
-                    collected.append(np.clip(dbz, 0.0, 65.0) / 65.0)
-            except Exception:
-                pass
-
-    while len(collected) < 4:
-        collected.append(np.zeros((256, 256), dtype=np.float32))
-
-    input_tensor = np.array(collected, dtype=np.float32).reshape(1, 4, 1, 256, 256)
-    predictions = None
-
-    if os.path.exists(model_path):
-        try:
-            import onnxruntime as ort
-            sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
-            input_name = sess.get_inputs()[0].name
-            output_name = sess.get_outputs()[0].name
-            pred_raw = sess.run([output_name], {input_name: input_tensor})[0]
-            predictions = pred_raw[0, :, 0, :, :] * 65.0
-        except Exception:
-            predictions = None
-
-    if predictions is None:
-        predictions = np.zeros((4, 256, 256), dtype=np.float32)
-
-    return predictions
-
 with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akışı", expanded=True):
     st.caption("🔴 Gerçek meteoroloji radar istasyonlarının anlık yansıtırlık (dBZ) akışı ve kütle hareket simülasyonu:")
     now_tsi_str = datetime.now(TR_TZ).strftime("%d.%m.%Y %H:%M TSİ")
@@ -2300,15 +2123,11 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
     """
     st.components.v1.html(real_radar_stream_html, height=540)
 
-    # ==============================================================================
-    # 🧭 METACAST DİNAMİK KÜTLE YÖRÜNGE, EKO FİLTRESİ & SİNOPTİK ANALİZ MOTORU
-    # ==============================================================================
-    cur_wind_deg = float(sel_wind_deg) if 'sel_wind_deg' in locals() else 210.0
-    cur_wind_spd = float(sel_wind_spd) if 'sel_wind_spd' in locals() else 15.0
-
-    current_p = float(sel_precip) if 'sel_precip' in locals() else 0.0
-    current_c = float(sel_cloud) if 'sel_cloud' in locals() else 0.0
-    upcoming_p = any(p > 0.05 for p in hourly_precips[:4]) if 'hourly_precips' in locals() and len(hourly_precips) >= 4 else False
+    cur_wind_deg = float(sel_wind_deg)
+    cur_wind_spd = float(sel_speed)
+    current_p = float(sel_precip)
+    current_c = float(sel_cloud)
+    upcoming_p = any(p > 0.05 for p in api_hourly_precips[:4]) if len(api_hourly_precips) >= 4 else False
 
     has_active_radar_echo = (current_p > 0.05) or (current_c >= 55.0) or upcoming_p
 
@@ -2326,7 +2145,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                 </div>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
     else:
         if cur_wind_spd < 8.0:
@@ -2334,57 +2153,31 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
             traj_target = "Malatya Merkez, Yeşilyurt, Battalgazi"
             traj_prob = "%84"
             traj_color = "#ef4444"
-            traj_desc = (
-                "Düşük adveksiyon hızı nedeniyle kütleler yatay ötelenememektedir. "
-                "Gelişen konvektif bulutlar Malatya çanağında dikey patlama yaparak yerinde "
-                "lokal kuvvetli sağanak, yıldırım ve dolu hadiselerine neden olabilir."
-            )
+            traj_desc = "Düşük adveksiyon hızı nedeniyle kütleler yatay ötelenememektedir. Gelişen bulutlar yerinde patlayarak lokal sağanak ve dolu yapabilir."
         elif 190 <= cur_wind_deg <= 240:
             traj_title = "⚠️ GÜNEYBATI AKIŞI: Beydağları Orografik Sapması (Elazığ Kırılması)"
             traj_target = "Elazığ, Baskil, Keban, Hazar Havzası"
             traj_prob = "%78"
             traj_color = "#f97316"
-            traj_desc = (
-                "Beydağları orografik engeli (2.500 m) kütleyi yukarı zorlayarak enerjisini güney yamaçta tüketir. "
-                "Aşan hava kütlesi Malatya çanağında fönleşir. Yağış hücresi en düşük orografik dirence sahip "
-                "<strong>Fırat Nehri Kanyonu ve Hazar Çöküntüsü</strong> koridoruna bükülerek Elazığ havzasına kayar."
-            )
+            traj_desc = "Beydağları orografik engeli kütleyi yukarı zorlayarak enerjisini güney yamaçta tüketir. Kütle Fırat Nehri Kanyonu koridoruna bükülerek Elazığ'a kayar."
         elif 140 <= cur_wind_deg < 190:
             traj_title = "↗️ GÜNEY AKIŞI: Kuzey Oluğu (Hekimhan - Kangal - Sivas Hattı)"
             traj_target = "Yazıhan, Hekimhan, Kuluncak, Kangal, Sivas"
             traj_prob = "%72"
             traj_color = "#38bdf8"
-            traj_desc = (
-                "Kütleler Malatya şehir merkezini teğet geçerek Tohma Çayı ve Hekimhan vadisini izler. "
-                "Kuzeydoğuya doğru tırmanışa geçen cephe, Sivas güneyi ve Kangal platosu üzerinde etkili olma eğilimindedir."
-            )
+            traj_desc = "Kütleler şehir merkezini teğet geçerek Tohma Çayı ve Hekimhan vadisini izler."
         elif 240 < cur_wind_deg <= 290:
             traj_title = "➡️ BATI SİKLONİK AKIŞI: Yukarı Fırat & Doğu Koridoru"
             traj_target = "Karakaya Barajı, Baskil, Tunceli Vadisi, Bingöl"
             traj_prob = "%68"
             traj_color = "#a855f7"
-            traj_desc = (
-                "Karakaya Baraj Gölü üzerinden su buharı toplayan hava kütlesi doğu-kuzeydoğu hattında "
-                "ilerleyerek Tunceli ve Bingöl yönündeki dağlık silsilelere doğru kanalize olur."
-            )
-        elif 290 < cur_wind_deg <= 350:
-            traj_title = "↘️ KUZEY KÖKENLİ CEPHE: Güneydoğu İnişi (Adıyaman / Kahta Hattı)"
-            traj_target = "Doğanşehir, Çelikhan Geçidi, Adıyaman, Kahta"
-            traj_prob = "%65"
-            traj_color = "#eab308"
-            traj_desc = (
-                "Kuzeyden sarkan soğuk cephe Malatya üzerinden geçtikten sonra Beydağları'nın alçak geçitlerinden "
-                "aşarak Adıyaman ve Fırat havzasına doğru inişe geçer."
-            )
+            traj_desc = "Karakaya Baraj Gölü üzerinden nem toplayan hava kütlesi doğu dağlarına yönelir."
         else:
             traj_title = "🟢 SİNOPTİK DEĞERLENDİRME: Standart Geçiş Rotası"
             traj_target = "Bölgesel Yayılım / Kararlı Vadi Akışı"
             traj_prob = "%55"
             traj_color = "#22c55e"
-            traj_desc = (
-                "Rüzgâr akışı yerel topoğrafik bariyerlerle dik açı yapmamaktadır. "
-                "Kütleler belirgin bir orografik sapmaya uğramadan genel rüzgâr rotasını takip eder."
-            )
+            traj_desc = "Rüzgâr akışı belirgin bir orografik sapmaya uğramadan genel rotasını takip eder."
 
         st.markdown(
             f"""
@@ -2399,7 +2192,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                 </div>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
 # ==============================================================================
@@ -2416,38 +2209,38 @@ feature_info = [
         "name": "Rüzgâr Taban Hızı",
         "val": float(feature_contributions[0]),
         "pos_desc": "Sürekli taban rüzgârı yüksek; fırtına zeminini sürekli besliyor.",
-        "neg_desc": "Taban rüzgârı sakin; atmosferde sürekli bir fırtına akışı bulunmuyor."
+        "neg_desc": "Taban rüzgârı sakin; atmosferde sürekli bir fırtına akışı bulunmuyor.",
     },
     {
         "name": "3 Saatlik Basınç Düşüşü (ΔP)",
         "val": float(feature_contributions[1]),
         "pos_desc": "Basınç hızla düşüyor; havzaya dinamik bir alçak basınç / cephe yaklaşıyor.",
-        "neg_desc": "Basınç dengeli veya yükselişte; atmosferik stabilite korunuyor."
+        "neg_desc": "Basınç dengeli veya yükselişte; atmosferik stabilite korunuyor.",
     },
     {
         "name": "Beydağları Blokajı (215°)",
         "val": float(feature_contributions[2]),
         "pos_desc": "Hava koridoru açık; rüzgâr dağ engeline takılmadan ovaya iniyor.",
-        "neg_desc": "Rüzgâr Beydağları duvarına dik çarpıyor; kütle ovaya inemeden dağda sönümleniyor (De-Warning)."
+        "neg_desc": "Rüzgâr Beydağları duvarına dik çarpıyor; kütle ovaya inemeden dağda sönümleniyor (De-Warning).",
     },
     {
         "name": "Hamle Çarpanı (Gust Factor)",
         "val": float(feature_contributions[3]),
         "pos_desc": "Ani rüzgâr darbeleri taban hızın çok üzerinde; savurucu türbülans baskısı yüksek.",
-        "neg_desc": "Rüzgâr esişi düzenli; sert hamle patlamaları beklenmiyor."
+        "neg_desc": "Rüzgâr esişi düzenli; sert hamle patlamaları beklenmiyor.",
     },
     {
         "name": "Kar & Donma Fazı",
         "val": float(feature_contributions[4]),
         "pos_desc": "Sıcaklık donma eşiğinde; yağış kar fazına geçip zemin buzlanması riski üretiyor.",
-        "neg_desc": "Sıcaklık donma eşiğinin üzerinde; zemin buzlanması veya kar tehdidi yok."
+        "neg_desc": "Sıcaklık donma eşiğinin üzerinde; zemin buzlanması veya kar tehdidi yok.",
     },
     {
         "name": "Konvektif Dolu İndeksi (CAPE)",
         "val": float(feature_contributions[5]),
         "pos_desc": "Yüksek termodinamik enerji; ani dolu ve süper hücre patlaması riski mevcut.",
-        "neg_desc": "Atmosfer konvektif olarak stabil; dolu veya fırtına bulutu enerjisi yok."
-    }
+        "neg_desc": "Atmosfer konvektif olarak stabil; dolu veya fırtına bulutu enerjisi yok.",
+    },
 ]
 
 shields = sorted([f for f in feature_info if f["val"] < 0], key=lambda x: x["val"])
@@ -2470,7 +2263,7 @@ st.markdown(
         {verdict_text}
     </div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 xai_col1, xai_col2 = st.columns(2)
@@ -2500,7 +2293,7 @@ with xai_col1:
             {shield_items_html}
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 with xai_col2:
@@ -2528,7 +2321,7 @@ with xai_col2:
             {danger_items_html}
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 # ==============================================================================
@@ -2603,14 +2396,7 @@ with r5:
 # ==============================================================================
 # BÖLÜM 2: 🌐 KÜRESEL SAYISAL HAVA TAHMİN MODELLERİ (NWP VERİLERİ)
 # ==============================================================================
-st.markdown(
-    """
-    <div class="section-banner-nwp">
-        <h4 style="margin: 0; color: #a5d6a7;">🌐 BÖLÜM 2: Küresel Sayısal Hava Tahmin Modelleri (NWP Ham Verileri)</h4>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+st.markdown('<div class="section-banner-nwp"><h4 style="margin: 0; color: #a5d6a7;">🌐 BÖLÜM 2: Küresel Sayısal Hava Tahmin Modelleri (NWP Ham Verileri)</h4></div>', unsafe_allow_html=True)
 
 total_precip = float(precip.sum())
 dom_type = "☀️ Yağış Yok" if total_precip <= 0.05 else ("⚡ Dolu" if hail_potential.sum() > 0 else ("❄️ Kar" if is_snow_phase.sum() > 0 else "💧 Yağmur"))
@@ -2648,7 +2434,7 @@ fig_weather.update_layout(
     template="plotly_white",
     height=330,
     margin=dict(l=10, r=10, t=10, b=20),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
 )
 st.plotly_chart(fig_weather, use_container_width=True)
 
