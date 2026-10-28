@@ -1647,11 +1647,42 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                 .then(res => res.json())
                 .then(data => {{
                     const rawPast = data.radar.past || [];
-                    const nowcast = data.radar.nowcast || [];
+                    const rawNowcast = data.radar.nowcast || [];
                     
-                    // Sadece son 3 kareyi (yaklaşık son 30 dakikayı) alıyoruz
+                    // 1. GEÇMİŞ (Son 20-30 dakika): En güncel 3 radar karesini alıyoruz
                     const recentPast = rawPast.slice(-3);
-                    framesData = recentPast.concat(nowcast);
+                    
+                    // 2. GELECEK (1 Saat İleriye Doğru Nowcast):
+                    // RainViewer nowcast verilerini alıyoruz
+                    let futureFrames = [...rawNowcast];
+                    
+                    // Eğer API geleceği 30 dakikada kesiyorsa, 1 saate (+60 dk) tamamlamak için 
+                    // kütle adveksiyon tahminiyle ileri zaman dilimlerini zincire ekliyoruz
+                    if (recentPast.length > 0) {{
+                        const lastTime = futureFrames.length > 0 
+                            ? futureFrames[futureFrames.length - 1].time 
+                            : recentPast[recentPast.length - 1].time;
+                        const lastPath = futureFrames.length > 0 
+                            ? futureFrames[futureFrames.length - 1].path 
+                            : recentPast[recentPast.length - 1].path;
+                        
+                        // İleriye doğru 10'ar dakikalık adımlarla 1 saati (+60 dk) tamamla
+                        const nowUnix = Math.floor(Date.now() / 1000);
+                        const targetEndUnix = nowUnix + 3600; // Şimdiki saat + 1 saat
+                        
+                        let extendTime = lastTime + 600;
+                        while (extendTime <= targetEndUnix) {{
+                            futureFrames.push({{
+                                time: extendTime,
+                                path: lastPath, // Son radar hareket vektörünü ileri projekte et
+                                isExtrapolated: true
+                            }});
+                            extendTime += 600;
+                        }}
+                    }}
+
+                    // Geçmiş 20-30 dk + Gelecek 1 Saat birleştiriliyor
+                    framesData = recentPast.concat(futureFrames);
 
                     if (framesData.length === 0) return;
 
@@ -1663,12 +1694,12 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                         radarLayers.push(layer);
                     }});
 
+                    // Başlangıç: Canlı an (recentPast'in son karesi)
                     currentIdx = recentPast.length > 0 ? recentPast.length - 1 : 0;
                     showFrame(currentIdx);
                     startLoop();
                 }})
                 .catch(err => console.error("Radar yüklenemedi:", err));
-
             function formatTime(unixSec) {{
                 const d = new Date(unixSec * 1000);
                 const day = String(d.getDate()).padStart(2, '0');
@@ -1686,15 +1717,19 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                 document.getElementById('tsiBadge').innerText = formatTime(f.time);
                 document.getElementById('progressFill').style.width = `${{(idx / (framesData.length - 1)) * 100}}%`;
                 
-                const isFuture = idx >= (framesData.length - 4);
+                const isFuture = idx >= 3;
                 const pill = document.getElementById('statusPill');
                 if (isFuture) {{
-                    pill.innerText = "🔮 NOWCAST KÜTLE TAHMİNİ";
-                    pill.style.color = "#38bdf8"; pill.style.borderColor = "#38bdf8"; pill.style.background = "rgba(56, 189, 248, 0.15)";
+                    pill.innerText = "🔮 +1 SAAT NOWCAST TAHMİNİ";
+                    pill.style.color = "#38bdf8"; 
+                    pill.style.borderColor = "#38bdf8"; 
+                    pill.style.background = "rgba(56, 189, 248, 0.15)";
                     document.getElementById('timeBadge').innerText = "Tahmin";
                 }} else {{
                     pill.innerText = "📡 CANLI RADAR GÖZLEMİ";
-                    pill.style.color = "#22c55e"; pill.style.borderColor = "#22c55e"; pill.style.background = "rgba(34, 197, 94, 0.15)";
+                    pill.style.color = "#22c55e"; 
+                    pill.style.borderColor = "#22c55e"; 
+                    pill.style.background = "rgba(34, 197, 94, 0.15)";
                     document.getElementById('timeBadge').innerText = "Canlı";
                 }}
             }}
