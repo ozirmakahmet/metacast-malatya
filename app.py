@@ -1643,14 +1643,7 @@ def calculate_calibrated_metacast_gust(ecmwf_gust, gfs_gust, icon_gust, base_win
 # ==============================================================================
 # BÖLÜM 1: ⚡ METACAST HİBRİT YAPAY ZEKÂ TAHMİN & KARAR MERKEZİ
 # ==============================================================================
-st.markdown(
-    """"
-    <div class="section-banner-metacast">
-        <h4 style="margin: 0; color: #90caf9;">⚡ BÖLÜM 1: MetaCast Hibrit Yapay Zekâ Tahmin & Karar Merkezi</h4>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+st.markdown('<div class="section-banner-metacast"><h4 style="margin: 0; color: #90caf9;">⚡ BÖLÜM 1: MetaCast Hibrit Yapay Zekâ Tahmin & Karar Merkezi</h4></div>', unsafe_allow_html=True)
 if "Yanlış Alarm" in mode:
     risk_score = 24.5
 elif is_radiation_frost_danger:
