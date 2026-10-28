@@ -818,7 +818,7 @@ try:
                 )
 except Exception:
     pass
-    m1, m2, m3, m4, m5 = st.columns(5)
+m1, m2, m3, m4, m5 = st.columns(5)
 
     if "Bileşik" in selected_param:
         m1.metric("🚩 Erhaç Hakem", "100 Puan", delta="Kusursuz Hedef")
