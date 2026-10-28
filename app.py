@@ -163,18 +163,12 @@ def calculate_snow_accumulation_cm(temps, precips, hours=24):
     return round(total_snow_cm, 1), valid_hours
     
     def transfer_erhac_to_merkez(erhac_temp, erhac_gust, erhac_precip, wind_dir, cloud_cover, hour):
-    """
-    Erhaç Havalimanı (862m) yer ölçümünü Malatya Merkez (950m) ve Beydağları
-    mikroklimasına dönüştüren fiziksel transfer fonksiyonu.
-    """
     # 1. Sıcaklık Transferi (Adyabatik Lapse-Rate & Gece İnversiyonu):
     is_night = (hour >= 20) or (hour <= 7)
     if erhac_temp is not None:
         if is_night and (cloud_cover <= 35.0) and (erhac_gust <= 15.0):
-            # Gece sakin ve açık havada merkez çanağı daha fazla soğur
             merkez_temp = round(erhac_temp - 1.2, 1)
         else:
-            # Standart rakım lapse-rate farkı (~ -0.6°C)
             merkez_temp = round(erhac_temp - 0.6, 1)
     else:
         merkez_temp = None
