@@ -164,19 +164,15 @@ def calculate_snow_accumulation_cm(temps, precips, hours=24):
 
 
 def transfer_erhac_to_merkez(erhac_temp, erhac_gust, erhac_precip, wind_dir, cloud_cover, hour):
-    """Erhaç yer ölçümünü Malatya Merkez mikroklimasına dönüştüren transfer fonksiyonu."""
     is_night = (hour >= 20) or (hour <= 7)
     inversion = is_night and (cloud_cover <= 35.0) and (erhac_gust <= 15.0)
     delta_t = -1.2 if inversion else -0.6
     merkez_temp = round(erhac_temp + delta_t, 1) if erhac_temp is not None else None
-
     blk = float(calculate_gaussian_blockage(wind_dir))
     wind_drag = (1.0 - 0.35 * blk) if (blk >= 0.50 and erhac_gust >= 25.0) else 0.95
     merkez_gust = round(erhac_gust * wind_drag, 1)
-
     precip_mult = 1.18 if erhac_precip > 0.05 else 1.0
     merkez_precip = round(erhac_precip * precip_mult, 1)
-
     return merkez_temp, merkez_gust, merkez_precip
 
 
@@ -1384,11 +1380,9 @@ with col1:
         value=date_display,
         help="Şu an bu tarihin 24 saatlik verisini inceliyorsunuz."
     )
-    # Zirve yerine daha anlaşılır bir ifade:
     st.caption(f"⚠️ En Riskli Saat: **{peak_time.split('-')[-1].strip()}**")
 
 with col2:
-    # Dereceyi (örn: 18°) herkesin anlayacağı yön ismine çevirelim:
     compass_dirs = ["Kuzey", "Kuzeydoğu", "Doğu", "Güneydoğu", "Güney", "Güneybatı (Lodos)", "Batı", "Kuzeybatı"]
     dir_idx = int((live_wind_deg + 22.5) % 360 // 45)
     wind_dir_name = compass_dirs[dir_idx]
@@ -1425,7 +1419,7 @@ with col3:
     )
     fig_gauge.update_layout(
         height=130, 
-        margin=dict(l=10, r=10, t=35, b=5), # Grafiğin üstten kesilmemesi için t=35 yapıldı
+        margin=dict(l=10, r=10, t=35, b=5),
         paper_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#ffffff"),
     )
@@ -1441,7 +1435,6 @@ with col4:
     )
     st.caption(f"En Soğuk Saat: **{night_min_time}**")
 
-# Alt kısımdaki Markdown hatasını düzelttik ve dili sadeleştirdik:
 if is_radiation_frost_danger:
     frost_indices = df.index[night_mask & (temp <= 2.0)].tolist()
     if frost_indices:
@@ -1466,8 +1459,56 @@ st.markdown(f"<div class='time-window-box'>{time_window_badge}</div>", unsafe_al
 
 st.markdown("---")
 
-    now_hour = datetime.now(TR_TZ).hour
+now_hour = datetime.now(TR_TZ).hour
 cur_idx = now_hour if now_hour < len(df) else int(np.argmin(np.abs(df["time"].dt.hour - now_hour)))
+
+merkez_t_est, merkez_g_est, merkez_p_est = transfer_erhac_to_merkez(
+    erhac_temp=metar["temp_c"],
+    erhac_gust=float(metar["gust_kmh"]),
+    erhac_precip=0.0,
+    wind_dir=float(metar["wdir_deg"]),
+    cloud_cover=float(cloud_cover.iloc[cur_idx]) if not cloud_cover.empty else 20.0,
+    hour=now_hour
+)
+
+st.markdown(
+    f"""
+    <div style="background: rgba(33, 150, 243, 0.05); border: 1px dashed rgba(33, 150, 243, 0.3); padding: 10px 14px; border-radius: 6px; margin-bottom: 15px; font-size: 0.88rem; color: #eceff1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div><strong>🏢 Şehir Merkezi Mikroklima Transferi:</strong> Erhaç anlık verisi, Beydağları orografisi ve rakım lapse-rate formülü ile merkeze uyarlandı.</div>
+        <div style="font-size: 0.95rem;">Sıcaklık: <strong style="color:#ffb74d;">{merkez_t_est}°C</strong> | Hamle: <strong style="color:#90caf9;">{merkez_g_est} km/s</strong></div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+m1, m2, m3, m4, m5 = st.columns([2.0, 0.8, 0.8, 0.8, 1.4])
+m1.markdown(f"📡 **Erhaç (LTAT) METAR:** `{metar['raw']}`")
+m1.caption(f"☁️ Bulut: {metar['cloud_desc']}")
+m2.metric("Termometre", f"{metar['temp_c']}°C" if metar["temp_c"] is not None else "--")
+m3.metric("Yer Hamlesi", f"{metar['gust_kmh']} km/s")
+m4.metric("Basınç", f"{int(metar['altim_hpa'])} hPa" if metar["altim_hpa"] else "1014 hPa")
+
+active_badges = []
+if metar["is_hail"]:
+    active_badges.append("<span style='background:#e91e63; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>DOLU</span>")
+if metar["is_ts"]:
+    active_badges.append("<span style='background:#ff9800; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>ORAJ</span>")
+if metar["is_snow"]:
+    active_badges.append("<span style='background:#2196f3; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>KAR</span>")
+if metar["is_rain"] and not metar["is_snow"]:
+    active_badges.append("<span style='background:#0288d1; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>YAĞMUR</span>")
+if metar["is_fog"]:
+    active_badges.append("<span style='background:#78909c; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>SİS</span>")
+if not active_badges:
+    active_badges.append("<span style='background:#4caf50; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>SAKİN</span>")
+
+with m5:
+    st.markdown("<p style='font-size:0.8rem; color:#9aa0a6; margin:0;'>Anlık Durum</p>", unsafe_allow_html=True)
+    st.markdown(f"<div style='margin-top:4px;'>{' '.join(active_badges)}</div>", unsafe_allow_html=True)
+    vis_str = f"{metar['visib_m']} m" if metar["visib_m"] and metar["visib_m"] < 9999 else "Açık (>10 km)"
+    st.caption(f"Görüş: {vis_str}")
+
+st.markdown("---")
 
 mod_gust_now = float(gust_mean.iloc[cur_idx])
 mod_temp_now = float(temp.iloc[cur_idx])
