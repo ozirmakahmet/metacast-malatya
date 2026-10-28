@@ -161,29 +161,24 @@ def calculate_snow_accumulation_cm(temps, precips, hours=24):
         total_snow_cm += snow_depth_cm
 
     return round(total_snow_cm, 1), valid_hours
-    
-    def transfer_erhac_to_merkez(erhac_temp, erhac_gust, erhac_precip, wind_dir, cloud_cover, hour):
+
+
+def transfer_erhac_to_merkez(erhac_temp, erhac_gust, erhac_precip, wind_dir, cloud_cover, hour):
+    """Erhaç yer ölçümünü Malatya Merkez mikroklimasına dönüştüren transfer fonksiyonu."""
     is_night = (hour >= 20) or (hour <= 7)
-    if erhac_temp is not None:
-        if is_night and (cloud_cover <= 35.0) and (erhac_gust <= 15.0):
-            merkez_temp = round(erhac_temp - 1.2, 1)
-        else:
-            merkez_temp = round(erhac_temp - 0.6, 1)
-    else:
-        merkez_temp = None
+    inversion = is_night and (cloud_cover <= 35.0) and (erhac_gust <= 15.0)
+    delta_t = -1.2 if inversion else -0.6
+    merkez_temp = round(erhac_temp + delta_t, 1) if erhac_temp is not None else None
 
     blk = float(calculate_gaussian_blockage(wind_dir))
-    if blk >= 0.50 and erhac_gust >= 25.0:
-        merkez_gust = round(erhac_gust * (1.0 - 0.35 * blk), 1)
-    else:
-        merkez_gust = round(erhac_gust * 0.95, 1)
+    wind_drag = (1.0 - 0.35 * blk) if (blk >= 0.50 and erhac_gust >= 25.0) else 0.95
+    merkez_gust = round(erhac_gust * wind_drag, 1)
 
-    if erhac_precip > 0.05:
-        merkez_precip = round(erhac_precip * 1.18, 1)
-    else:
-        merkez_precip = erhac_precip
+    precip_mult = 1.18 if erhac_precip > 0.05 else 1.0
+    merkez_precip = round(erhac_precip * precip_mult, 1)
 
     return merkez_temp, merkez_gust, merkez_precip
+
 
 # --- MLOps VERİ GÜNLÜĞÜ (SQLITE) & OTOMATİK ÖĞRENME TETİKLEYİCİSİ ---
 def init_logger_db():
@@ -209,17 +204,7 @@ def init_logger_db():
     conn.close()
 
 
-def log_validation_entry(
-    mode,
-    m_gust,
-    o_gust,
-    d_wind,
-    m_temp,
-    o_temp,
-    d_temp,
-    rel_score,
-    hazards_str,
-):
+def log_validation_entry(mode, m_gust, o_gust, d_wind, m_temp, o_temp, d_temp, rel_score, hazards_str):
     try:
         conn = sqlite3.connect("data/metacast_logs.db")
         cursor = conn.cursor()
@@ -261,9 +246,7 @@ def log_validation_entry(
 def get_all_logs():
     try:
         conn = sqlite3.connect("data/metacast_logs.db")
-        df_logs = pd.read_sql_query(
-            "SELECT * FROM validation_logs ORDER BY id DESC LIMIT 100", conn
-        )
+        df_logs = pd.read_sql_query("SELECT * FROM validation_logs ORDER BY id DESC LIMIT 100", conn)
         conn.close()
         return df_logs
     except Exception:
@@ -311,13 +294,7 @@ def parse_metar_clouds(raw_metar: str) -> str:
     if not matches:
         return "Bulut Kaydı Yok"
 
-    desc_map = {
-        "FEW": "Az Bulutlu",
-        "SCT": "Parçalı Bulutlu",
-        "BKN": "Çok Bulutlu",
-        "OVC": "Kapalı",
-        "VV": "Dikey Görüş Kısıtlı",
-    }
+    desc_map = {"FEW": "Az Bulutlu", "SCT": "Parçalı Bulutlu", "BKN": "Çok Bulutlu", "OVC": "Kapalı", "VV": "Dikey Görüş Kısıtlı"}
 
     parts = []
     for coverage, alt_hundreds, modifier in matches:
@@ -348,9 +325,7 @@ def fetch_live_metar():
             raw_metar = data.get("rawOb", "METAR LTAT")
             obs_time = data.get("reportTime", "")
 
-            is_valid, temp_c, speed_kmh, gust_kmh, altim_hpa, telemetry_warnings = (
-                validate_telemetry(raw_temp, raw_speed_kmh, raw_gust_kmh, raw_altim)
-            )
+            is_valid, temp_c, speed_kmh, gust_kmh, altim_hpa, telemetry_warnings = validate_telemetry(raw_temp, raw_speed_kmh, raw_gust_kmh, raw_altim)
 
             raw_upper = raw_metar.upper()
             is_hail = any(x in raw_upper for x in [" GR ", " GS ", "+GR", "+GS"])
@@ -383,21 +358,10 @@ def fetch_live_metar():
         pass
 
     return {
-        "status": "offline",
-        "speed_kmh": 0.0,
-        "gust_kmh": 0.0,
-        "wdir_deg": 0,
-        "temp_c": None,
-        "altim_hpa": None,
-        "visib_m": None,
-        "is_hail": False,
-        "is_ts": False,
-        "is_fog": False,
-        "is_snow": False,
-        "is_rain": False,
-        "cloud_desc": "İstasyon Bağlantısı Yok",
-        "warnings": ["NOAA İstasyon verisi çevrimdışı."],
-        "raw": "LTAT İstasyonu Çevrimdışı (Fail-Safe Modu)",
+        "status": "offline", "speed_kmh": 0.0, "gust_kmh": 0.0, "wdir_deg": 0, "temp_c": None,
+        "altim_hpa": None, "visib_m": None, "is_hail": False, "is_ts": False, "is_fog": False,
+        "is_snow": False, "is_rain": False, "cloud_desc": "İstasyon Bağlantısı Yok",
+        "warnings": ["NOAA İstasyon verisi çevrimdışı."], "raw": "LTAT İstasyonu Çevrimdışı (Fail-Safe Modu)",
         "time": datetime.now(TR_TZ).strftime("%H:%M"),
     }
 
@@ -408,19 +372,7 @@ def fetch_live_forecast():
     params = {
         "latitude": 38.3552,
         "longitude": 38.3095,
-        "hourly": [
-            "wind_gusts_10m",
-            "wind_speed_10m",
-            "wind_direction_10m",
-            "surface_pressure",
-            "temperature_2m",
-            "relative_humidity_2m",
-            "dew_point_2m",
-            "precipitation",
-            "cloud_cover",
-            "cape",
-            "weather_code",
-        ],
+        "hourly": ["wind_gusts_10m", "wind_speed_10m", "wind_direction_10m", "surface_pressure", "temperature_2m", "relative_humidity_2m", "dew_point_2m", "precipitation", "cloud_cover", "cape", "weather_code"],
         "models": ["ecmwf_ifs", "gfs_seamless", "icon_seamless"],
         "past_days": 3,
         "forecast_days": 7,
@@ -501,13 +453,7 @@ st.sidebar.markdown("**Mod Seçimi**")
 
 nav_choice = st.sidebar.radio(
     "Çalışma Modu:",
-    [
-        "🟢 Canlı Operasyonel",
-        "🥊 Model Arenası",
-        "📂 Geçmiş Test Vakaları",
-        "📈 Akademik Rapor",
-        "🧪 What-If Laboratuvarı",
-    ],
+    ["🟢 Canlı Operasyonel", "🥊 Model Arenası", "📂 Geçmiş Test Vakaları", "📈 Akademik Rapor", "🧪 What-If Laboratuvarı"],
     label_visibility="collapsed",
 )
 
@@ -516,15 +462,7 @@ if nav_choice == "🟢 Canlı Operasyonel":
 elif nav_choice == "🥊 Model Arenası":
     mode = "Model Kıyaslama Arenası"
 elif nav_choice == "📂 Geçmiş Test Vakaları":
-    scenario_pick = st.sidebar.selectbox(
-        "Senaryo Seçin:",
-        [
-            "🌸 Zirai Don: Gece Açık Hava & Radyasyonel Soğuma",
-            "Fırtına: Yanlış Alarm (De-Warning) Testi",
-            "Dolu / Süper Hücre Riski Testi",
-            "Kar / Donma Fazı Testi",
-        ],
-    )
+    scenario_pick = st.sidebar.selectbox("Senaryo Seçin:", ["🌸 Zirai Don: Gece Açık Hava & Radyasyonel Soğuma", "Fırtına: Yanlış Alarm (De-Warning) Testi", "Dolu / Süper Hücre Riski Testi", "Kar / Donma Fazı Testi"])
     mode = scenario_pick
 elif nav_choice == "📈 Akademik Rapor":
     mode = "Akademik Doğrulama Modu"
@@ -561,7 +499,7 @@ if mode == "Model Kıyaslama Arenası":
         <div class="benchmark-box">
             <h5 style="margin: 0 0 6px 0; color: #ffb74d;">🎯 Bilimsel Doğrulama Protokolü</h5>
             <div style="font-size: 0.90rem; line-height: 1.5; color: #eceff1;">
-                • <strong>Hakem (Zemin Gerçeği):</strong> <code>Erhaç Havalimanı (LTAT) Yer İstasyonu</code> kesin fiziksel telemetrisidir (Termometre, Anemometre, Altimetre).<br>
+                • <strong>Hakem (Zemin Gerçeği):</strong> <code>Erhaç Havalimanı (LTAT) Yer İstasyonu</code> kesin fiziksel telemetrisidir.<br>
                 • <strong>Kural:</strong> İleri tarihli saatlerde henüz yer ölçümü yapılamayacağından yalnızca model tahminleri sunulur; maç skoru geçmiş ve anlık saatler üzerinden hesaplanır.
             </div>
         </div>
@@ -576,36 +514,12 @@ if mode == "Model Kıyaslama Arenası":
     cur_h = now_real_dt.hour
     now_idx = cur_h if cur_h < len(df_raw) else 0
 
-    selected_param = st.radio(
-        "Kıyaslanacak Meteorolojik Durum:",
-        [
-            "💨 Rüzgâr Hamlesi (km/s)",
-            "🌡️ Hava Sıcaklığı (°C)",
-            "🌧️ Yağış Miktarı (mm)",
-            "⏱️ Yüzey Basıncı (hPa)",
-            "🏆 Bileşik Genel Başarı (Tüm Parametreler)",
-        ],
-        horizontal=True,
-    )
+    selected_param = st.radio("Kıyaslanacak Meteorolojik Durum:", ["💨 Rüzgâr Hamlesi (km/s)", "🌡️ Hava Sıcaklığı (°C)", "🌧️ Yağış Miktarı (mm)", "⏱️ Yüzey Basıncı (hPa)", "🏆 Bileşik Genel Başarı (Tüm Parametreler)"], horizontal=True)
 
     obs_g = float(metar["gust_kmh"]) if metar["gust_kmh"] else 0.0
     ec_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0).iloc[now_idx])
-    gfs_g_now = float(
-        get_clean_series(
-            df_raw,
-            "wind_gusts_10m_gfs_seamless",
-            0.0,
-            fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0),
-        ).iloc[now_idx]
-    )
-    icon_g_now = float(
-        get_clean_series(
-            df_raw,
-            "wind_gusts_10m_icon_seamless",
-            0.0,
-            fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0),
-        ).iloc[now_idx]
-    )
+    gfs_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
+    icon_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
 
     model_gusts = sorted([ec_g_now, gfs_g_now, icon_g_now])
     median_gust = model_gusts[1]
@@ -613,32 +527,15 @@ if mode == "Model Kıyaslama Arenası":
     model_spread = model_gusts[2] - model_gusts[0]
 
     base_gust = (median_gust * 0.70) + (mean_gust * 0.30) if model_spread > 8.0 else mean_gust
-
     wdir_now = float(get_clean_series(df_raw, "wind_direction_10m_ecmwf_ifs", 0.0).iloc[now_idx])
     blk_now = float(calculate_gaussian_blockage(wdir_now))
     mountain_drag = (1.0 - 0.22 * blk_now) if (blk_now >= 0.70 and base_gust >= 35.0) else 1.0
-
-    mean_g_now = round(mean_gust, 1)
     mc_g_now = round(base_gust * mountain_drag, 1)
 
     obs_t = float(metar["temp_c"]) if metar["temp_c"] is not None else None
     ec_t_now = float(get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0).iloc[now_idx])
-    gfs_t_now = float(
-        get_clean_series(
-            df_raw,
-            "temperature_2m_gfs_seamless",
-            15.0,
-            fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0),
-        ).iloc[now_idx]
-    )
-    icon_t_now = float(
-        get_clean_series(
-            df_raw,
-            "temperature_2m_icon_seamless",
-            15.0,
-            fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0),
-        ).iloc[now_idx]
-    )
+    gfs_t_now = float(get_clean_series(df_raw, "temperature_2m_gfs_seamless", 15.0, fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0)).iloc[now_idx])
+    icon_t_now = float(get_clean_series(df_raw, "temperature_2m_icon_seamless", 15.0, fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0)).iloc[now_idx])
 
     model_temps = sorted([ec_t_now, gfs_t_now, icon_t_now])
     median_t = model_temps[1]
@@ -646,12 +543,9 @@ if mode == "Model Kıyaslama Arenası":
     t_spread = model_temps[2] - model_temps[0]
 
     base_t = (median_t * 0.70) + (mean_t * 0.30) if t_spread > 3.0 else mean_t
-
     is_night_now = (now_real_dt.hour >= 21) or (now_real_dt.hour <= 7)
     c_now = float(get_clean_series(df_raw, "cloud_cover_ecmwf_ifs", 20.0).iloc[now_idx])
     inv_cooling = 0.8 if (is_night_now and c_now <= 35) else 0.0
-
-    mean_t_now = round(mean_t, 1)
     mc_t_now = round(base_t - inv_cooling, 1)
 
     obs_precip_now = 0.0
@@ -665,22 +559,8 @@ if mode == "Model Kıyaslama Arenası":
             obs_precip_now = 1.6
 
     ec_p_now = float(get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0).iloc[now_idx])
-    gfs_p_now = float(
-        get_clean_series(
-            df_raw,
-            "precipitation_gfs_seamless",
-            0.0,
-            fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0),
-        ).iloc[now_idx]
-    )
-    icon_p_now = float(
-        get_clean_series(
-            df_raw,
-            "precipitation_icon_seamless",
-            0.0,
-            fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0),
-        ).iloc[now_idx]
-    )
+    gfs_p_now = float(get_clean_series(df_raw, "precipitation_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0)).iloc[now_idx])
+    icon_p_now = float(get_clean_series(df_raw, "precipitation_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0)).iloc[now_idx])
 
     model_precips = sorted([ec_p_now, gfs_p_now, icon_p_now])
     median_p = model_precips[1]
@@ -689,28 +569,12 @@ if mode == "Model Kıyaslama Arenası":
 
     base_p = median_p if rain_model_count <= 1 else (median_p * 0.60) + (mean_p * 0.40)
     rain_shadow = 0.78 if (blk_now >= 0.65 and base_p > 0.2) else 1.0
-
-    mean_p_now = round(mean_p, 1)
     mc_precip_now = round(base_p * rain_shadow, 1)
 
     obs_pres = float(metar["altim_hpa"]) if metar["altim_hpa"] else None
     ec_pres_now = float(get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25).iloc[now_idx])
-    gfs_pres_now = float(
-        get_clean_series(
-            df_raw,
-            "surface_pressure_gfs_seamless",
-            1013.25,
-            fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25),
-        ).iloc[now_idx]
-    )
-    icon_pres_now = float(
-        get_clean_series(
-            df_raw,
-            "surface_pressure_icon_seamless",
-            1013.25,
-            fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25),
-        ).iloc[now_idx]
-    )
+    gfs_pres_now = float(get_clean_series(df_raw, "surface_pressure_gfs_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
+    icon_pres_now = float(get_clean_series(df_raw, "surface_pressure_icon_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
 
     model_pressures = sorted([ec_pres_now, gfs_pres_now, icon_pres_now])
     median_pres = model_pressures[1]
@@ -750,37 +614,6 @@ if mode == "Model Kıyaslama Arenası":
         ref_val = 100.0
 
     st.markdown("##### ⚡ Şu Anki Saat İtibarıyla Maç Durumu")
-
-    try:
-        _cur_hour = datetime.now().hour
-        _is_night = (_cur_hour >= 20) or (_cur_hour <= 8)
-        _t = locals().get("mc_t_now", None)
-        _g = locals().get("mc_g_now", None)
-        _c = locals().get("c_now", 20.0)
-
-        if _t is not None and _g is not None:
-            _inversion = _is_night and (_c <= 35.0) and (_g <= 14.0)
-            if _inversion:
-                if _t <= 0.0:
-                    st.error(
-                        f"🚨 **KUVVETLİ ZİRAİ DON UYARISI ({_t} °C)**\n\n"
-                        f"Malatya çanağında açık hava ve durgun rüzgâr ({_g} km/s) sebebiyle şiddetli radyasyonel soğuma yaşanıyor. "
-                        f"Çanak tabanında zemin sıcaklığı sıfırın altına inmiştir; tarımsal alanlar için acil tedbir önerilir."
-                    )
-                elif _t <= 3.5:
-                    st.warning(
-                        f"⚠️ **ZİRAİ DON & İNVERSİYON RİSKİ ({_t} °C)**\n\n"
-                        f"Gökyüzünün açık (%{int(_c)} bulut) ve rüzgârın durgun ({_g} km/s) olması nedeniyle çanak tabanında soğuk hava göllenmesi (inversiyon) oluşuyor. "
-                        f"Zemin seviyesinde don hadisesi meydana gelebilir."
-                    )
-                elif _t <= 6.0:
-                    st.info(
-                        f"🌡️ **İnversiyon Soğuması Eğilimi ({_t} °C):** "
-                        f"Açık ve sakin gecede çanak içi radyasyonel soğuma devam ediyor. Zemin sıcaklığı ölçülen hava sıcaklığından 2-3 °C daha soğuk hissedilebilir."
-                    )
-    except Exception:
-        pass
-
     m1, m2, m3, m4, m5 = st.columns(5)
 
     if "Bileşik" in selected_param:
@@ -789,22 +622,14 @@ if mode == "Model Kıyaslama Arenası":
         m3.metric("ECMWF", f"{v_ec} Puan", delta=f"{v_ec - 100:+.1f}", delta_color="inverse")
         m4.metric("GFS", f"{v_gfs} Puan", delta=f"{v_gfs - 100:+.1f}", delta_color="inverse")
         m5.metric("ICON", f"{v_icon} Puan", delta=f"{v_icon - 100:+.1f}", delta_color="inverse")
-        winner_name = max(
-            {"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon},
-            key=lambda k: {"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon}[k],
-        )
+        winner_name = max({"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon}, key=lambda k: {"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon}[k])
     else:
         m1.metric("🚩 Erhaç Hakem", f"{ref_val:.1f} {param_unit}", delta="Yer Ölçümü")
         m2.metric("MetaCast", f"{v_mc:.1f} {param_unit}", delta=f"Fark: {v_mc - ref_val:+.1f}", delta_color="inverse")
         m3.metric("ECMWF", f"{v_ec:.1f} {param_unit}", delta=f"Fark: {v_ec - ref_val:+.1f}", delta_color="inverse")
         m4.metric("GFS", f"{v_gfs:.1f} {param_unit}", delta=f"Fark: {v_gfs - ref_val:+.1f}", delta_color="inverse")
         m5.metric("ICON", f"{v_icon:.1f} {param_unit}", delta=f"Fark: {v_icon - ref_val:+.1f}", delta_color="inverse")
-        diffs_now = {
-            "MetaCast (Hibrit)": abs(v_mc - ref_val),
-            "ECMWF (Avrupa)": abs(v_ec - ref_val),
-            "GFS (ABD)": abs(v_gfs - ref_val),
-            "ICON (Almanya)": abs(v_icon - ref_val),
-        }
+        diffs_now = {"MetaCast (Hibrit)": abs(v_mc - ref_val), "ECMWF (Avrupa)": abs(v_ec - ref_val), "GFS (ABD)": abs(v_gfs - ref_val), "ICON (Almanya)": abs(v_icon - ref_val)}
         winner_name = min(diffs_now, key=diffs_now.get)
 
     if "MetaCast" in winner_name:
@@ -823,12 +648,7 @@ if mode == "Model Kıyaslama Arenası":
     with col_filter_title:
         st.markdown("##### 📊 Model Karşılaştırma Karnesi")
     with col_filter_select:
-        selected_date_filter = st.selectbox(
-            "Günü Filtreleyin:",
-            options=date_options,
-            index=default_arena_idx,
-            label_visibility="collapsed",
-        )
+        selected_date_filter = st.selectbox("Günü Filtreleyin:", options=date_options, index=default_arena_idx, label_visibility="collapsed")
 
     if selected_date_filter == "Tüm 7 Günlük Dönem":
         df_arena = df_raw.copy().reset_index(drop=True)
@@ -856,6 +676,8 @@ if mode == "Model Kıyaslama Arenası":
     s_ec_p = get_clean_series(df_arena, "surface_pressure_ecmwf_ifs", 1013.25)
     s_gfs_p = get_clean_series(df_arena, "surface_pressure_gfs_seamless", 1013.25, fallback_series=s_ec_p)
     s_icon_p = get_clean_series(df_arena, "surface_pressure_icon_seamless", 1013.25, fallback_series=s_ec_p)
+    
+    s_c_cover = get_clean_series(df_arena, "cloud_cover_ecmwf_ifs", 20.0, fallback_series=get_clean_series(df_arena, "cloud_cover", 20.0))
     s_dew_p = get_clean_series(df_arena, "dew_point_2m_ecmwf_ifs", 10.0, fallback_series=(s_ec_t - 4.0))
 
     logs_df = get_all_logs()
@@ -871,91 +693,44 @@ if mode == "Model Kıyaslama Arenası":
     verified_rounds = 0
     tot_obs_pr, tot_mc_pr, tot_ec_pr, tot_gfs_pr, tot_icon_pr = 0.0, 0.0, 0.0, 0.0, 0.0
 
-    # YENİ BLOK: METACAST BAĞIMSIZ PIML ÇIKARIM MOTORU (NO ARITHMETIC MEAN)
-    s_c_cover = get_clean_series(df_arena, "cloud_cover_ecmwf_ifs", 20.0, fallback_series=get_clean_series(df_arena, "cloud_cover", 20.0))
-    s_dew_p = get_clean_series(df_arena, "dew_point_2m_ecmwf_ifs", 10.0, fallback_series=(s_ec_t - 4.0))
-
+    # METACAST BAĞIMSIZ PIML ÇIKARIM MOTORU
     for h_i in range(len(df_arena)):
         dt_val = df_arena["time"].iloc[h_i]
         gun_adi = gunler[dt_val.weekday()]
         row_time_display = f"{dt_val.strftime('%d.%m')} {gun_adi} • {dt_val.strftime('%H:00')}"
 
-        e_g = float(s_ec_g.iloc[h_i])
-        g_g = float(s_gfs_g.iloc[h_i])
-        i_g = float(s_icon_g.iloc[h_i])
+        e_g, g_g, i_g = float(s_ec_g.iloc[h_i]), float(s_gfs_g.iloc[h_i]), float(s_icon_g.iloc[h_i])
         w_dir = float(s_wdir.iloc[h_i])
+        e_t, g_t, i_t = float(s_ec_t.iloc[h_i]), float(s_gfs_t.iloc[h_i]), float(s_icon_t.iloc[h_i])
+        e_pr, g_pr, i_pr = float(s_ec_pr.iloc[h_i]), float(s_gfs_pr.iloc[h_i]), float(s_icon_pr.iloc[h_i])
+        e_p, g_p, i_p = float(s_ec_p.iloc[h_i]), float(s_gfs_p.iloc[h_i]), float(s_icon_p.iloc[h_i])
+        c_cov, d_pt = float(s_c_cover.iloc[h_i]), float(s_dew_p.iloc[h_i])
 
-        e_t = float(s_ec_t.iloc[h_i])
-        g_t = float(s_gfs_t.iloc[h_i])
-        i_t = float(s_icon_t.iloc[h_i])
-
-        e_pr = float(s_ec_pr.iloc[h_i])
-        g_pr = float(s_gfs_pr.iloc[h_i])
-        i_pr = float(s_icon_pr.iloc[h_i])
-
-        e_p = float(s_ec_p.iloc[h_i])
-        g_p = float(s_gfs_p.iloc[h_i])
-        i_p = float(s_icon_p.iloc[h_i])
-
-        c_cov = float(s_c_cover.iloc[h_i])
-        d_pt = float(s_dew_p.iloc[h_i])
-
-        # ----------------------------------------------------------------------
-        # 1. 💨 METACAST BAĞIMSIZ RÜZGÂR KESTİRİMİ (OROGRAFİK SÖNÜMLEME + SÜRTÜNME)
-        # ----------------------------------------------------------------------
-        # Modellerin basit ortalaması yerine medyan konsensüsü ve uç değer filtrelemesi
+        # 1. Rüzgâr Kestirimi
         g_sorted = sorted([e_g, g_g, i_g])
-        med_g = g_sorted[1]
-        spread_g = g_sorted[2] - g_sorted[0]
-        # Uç değer varsa medyana ağırlık verilir, saçmalayan model elenir
+        med_g, spread_g = g_sorted[1], g_sorted[2] - g_sorted[0]
         base_gust_val = (med_g * 0.75) + ((g_sorted[0] + g_sorted[2]) * 0.125) if spread_g > 10.0 else (e_g * 0.40 + i_g * 0.35 + g_g * 0.25)
-        
-        # Gauss Orografik Bariyer Etkisi (Beydağları 215° koridoru)
         blk = float(calculate_gaussian_blockage(w_dir))
-        # Zemin pürüzlülüğü ve dağ engeli sönümlemesi
         drag_k = 1.0 - (0.32 * blk) if (blk >= 0.50 and base_gust_val >= 25.0) else 1.0
         mc_g = round(base_gust_val * drag_k, 1)
 
-        # ----------------------------------------------------------------------
-        # 2. 🌡️ METACAST BAĞIMSIZ SICAKLIK & ENVERZİYON MODELİ
-        # ----------------------------------------------------------------------
+        # 2. Sıcaklık Modeli
         t_sorted = sorted([e_t, g_t, i_t])
         base_t_val = (t_sorted[1] * 0.70) + ((t_sorted[0] + t_sorted[2]) * 0.15) if (t_sorted[2] - t_sorted[0]) > 3.0 else (e_t * 0.45 + i_t * 0.35 + g_t * 0.20)
-        
-        # Çanak içi gece radyasyonel soğuma (İnversiyon göllenmesi)
         is_night_h = (dt_val.hour >= 20) or (dt_val.hour <= 7)
-        # Bulut örtüsü azaldıkça ve rüzgar dindikçe yer radyasyonu hızla uzaya kaçar
-        if is_night_h and c_cov <= 35.0 and mc_g <= 15.0:
-            rad_cooling = 1.6 * (1.0 - c_cov / 100.0) * np.exp(-0.05 * mc_g)
-        else:
-            rad_cooling = 0.0
+        rad_cooling = 1.6 * (1.0 - c_cov / 100.0) * np.exp(-0.05 * mc_g) if (is_night_h and c_cov <= 35.0 and mc_g <= 15.0) else 0.0
         mc_t = round(base_t_val - rad_cooling, 1)
 
-        # ----------------------------------------------------------------------
-        # 3. 🌧️ METACAST BAĞIMSIZ YAĞIŞ ÇIKARIMI (PIML INFERENCE)
-        # ----------------------------------------------------------------------
-        # 1. Modeller konsensüs matrisi ve uç değer filtrelemesi
+        # 3. Yağış Modeli
         p_sorted = sorted([e_pr, g_pr, i_pr])
         rain_models_count = sum(1 for p_val in p_sorted if p_val >= 0.1)
-
-        # Modellerden sadece biri saçmalayıp uç değer veriyorsa medyanı baz al, diğer durumlarda ağırlıklandır
-        if rain_models_count <= 1:
-            synoptic_weight = p_sorted[1]
-        else:
-            synoptic_weight = (e_pr * 0.50) + (i_pr * 0.30) + (g_pr * 0.20)
-
-        # 2. Çiy noktası farkı (Virga etkisi: Kuru atmosfer tabakasında buharlaşma)
+        synoptic_weight = p_sorted[1] if rain_models_count <= 1 else (e_pr * 0.50) + (i_pr * 0.30) + (g_pr * 0.20)
         dp_dep = max(0.0, mc_t - d_pt)
         evap_factor = float(np.exp(-0.15 * dp_dep)) if synoptic_weight > 0 else 1.0
-
-        # 3. Beydağları orografik yağmur gölgesi (Gauss sönümlemesi)
         rain_orography = (1.0 - 0.40 * blk) if blk >= 0.50 else 1.0
-
-        # 4. MetaCast nihai bağımsız kestirimi
         mc_pr = round(float(synoptic_weight * evap_factor * rain_orography), 1)
-        # ----------------------------------------------------------------------
-        # 4. ⏱️ METACAST BAROMETRİK BASINÇ MODELİ
-        # ----------------------------------------------------------------------
+
+        # 4. Basınç Modeli
         p_sorted = sorted([e_p, g_p, i_p])
         mc_p = round(p_sorted[1], 1) if (p_sorted[2] - p_sorted[0]) > 2.5 else round((e_p * 0.45 + i_p * 0.35 + g_p * 0.20), 1)
 
@@ -964,10 +739,7 @@ if mode == "Model Kıyaslama Arenası":
 
         if dt_hour_str == now_hour_str and obs_g > 0:
             is_past = True
-            act_g = obs_g
-            act_t = obs_t if obs_t is not None else mc_t
-            act_pr = obs_precip_now
-            act_p = obs_pres if obs_pres is not None else mc_p
+            act_g, act_t, act_pr, act_p = obs_g, (obs_t if obs_t is not None else mc_t), obs_precip_now, (obs_pres if obs_pres is not None else mc_p)
         elif dt_hour_str in past_logs_dict:
             is_past = True
             act_g = past_logs_dict[dt_hour_str]["gust"] or round(mc_g + (np.sin(h_i * 0.7) * 1.5), 1)
@@ -1699,10 +1471,29 @@ with m5:
     vis_str = f"{metar['visib_m']} m" if metar["visib_m"] and metar["visib_m"] < 9999 else "Açık (>10 km)"
     st.caption(f"Görüş: {vis_str}")
 
-st.markdown("---")
-
+# --- YENİ EKLENTİ: ERHAÇ -> ŞEHİR MERKEZİ TRANSFER GÖSTERİMİ ---
 now_hour = datetime.now(TR_TZ).hour
 cur_idx = now_hour if now_hour < len(df) else int(np.argmin(np.abs(df["time"].dt.hour - now_hour)))
+
+merkez_t_est, merkez_g_est, merkez_p_est = transfer_erhac_to_merkez(
+    erhac_temp=metar["temp_c"],
+    erhac_gust=float(metar["gust_kmh"]),
+    erhac_precip=0.0,
+    wind_dir=float(metar["wdir_deg"]),
+    cloud_cover=float(cloud_cover.iloc[cur_idx]) if not cloud_cover.empty else 20.0,
+    hour=now_hour
+)
+
+st.markdown(
+    f"""
+    <div style="background: rgba(33, 150, 243, 0.05); border: 1px dashed rgba(33, 150, 243, 0.3); padding: 10px 14px; border-radius: 6px; margin-top: 15px; font-size: 0.88rem; color: #eceff1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div><strong>🏢 Şehir Merkezi Mikroklima Transferi:</strong> Erhaç anlık verisi, Beydağları orografisi ve rakım lapse-rate formülü ile merkeze uyarlandı.</div>
+        <div style="font-size: 0.95rem;">Sıcaklık: <strong style="color:#ffb74d;">{merkez_t_est}°C</strong> | Hamle: <strong style="color:#90caf9;">{merkez_g_est} km/s</strong></div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+st.markdown("---")
 
 mod_gust_now = float(gust_mean.iloc[cur_idx])
 mod_temp_now = float(temp.iloc[cur_idx])
