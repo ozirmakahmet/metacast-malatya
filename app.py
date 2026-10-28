@@ -834,6 +834,7 @@ if mode == "Model Kıyaslama Arenası":
     s_ec_p = get_clean_series(df_arena, "surface_pressure_ecmwf_ifs", 1013.25)
     s_gfs_p = get_clean_series(df_arena, "surface_pressure_gfs_seamless", 1013.25, fallback_series=s_ec_p)
     s_icon_p = get_clean_series(df_arena, "surface_pressure_icon_seamless", 1013.25, fallback_series=s_ec_p)
+    s_dew_p = get_clean_series(df_arena, "dew_point_2m_ecmwf_ifs", 10.0, fallback_series=(s_ec_t - 4.0))
 
     logs_df = get_all_logs()
     past_logs_dict = {}
@@ -909,26 +910,27 @@ if mode == "Model Kıyaslama Arenası":
         mc_t = round(base_t_val - rad_cooling, 1)
 
         # ----------------------------------------------------------------------
-        # 3. 🌧️ METACAST BAĞIMSIZ YAĞIŞ ÇIKARIMI (BUHARLAŞMA + YAĞMUR GÖLGESİ)
+        # 3. 🌧️ METACAST BAĞIMSIZ YAĞIŞ ÇIKARIMI (PIML INFERENCE)
         # ----------------------------------------------------------------------
-        # Modellerin sinoptik ağırlığı: ECMWF ve ICON Malatya'da yüksek doğruluğa sahiptir, GFS konveksiyonu abartır
+        # 1. Modeller konsensüs matrisi ve uç değer filtrelemesi
         p_sorted = sorted([e_pr, g_pr, i_pr])
         rain_models_count = sum(1 for p_val in p_sorted if p_val >= 0.1)
 
+        # Modellerden sadece biri saçmalayıp uç değer veriyorsa medyanı baz al, diğer durumlarda ağırlıklandır
         if rain_models_count <= 1:
-            # Sadece tek bir model uç değer veriyorsa (örn. GFS 20 mm, diğerleri 0), medyanı alarak hayalet yağışı bastır
-            synoptic_pr = p_sorted[1]
+            synoptic_weight = p_sorted[1]
         else:
-            synoptic_pr = (e_pr * 0.45) + (i_pr * 0.35) + (g_pr * 0.20)
+            synoptic_weight = (e_pr * 0.50) + (i_pr * 0.30) + (g_pr * 0.20)
 
-        # Çiy noktası açığı (Virga etkisi: Kuru atmosfer tabakasında yağışın buharlaşması)
-        dp_depression = max(0.0, mc_t - d_pt)
-        virga_factor = float(np.exp(-0.12 * dp_depression)) if synoptic_pr > 0 else 1.0
+        # 2. Çiy noktası farkı (Virga etkisi: Kuru atmosfer tabakasında buharlaşma)
+        dp_dep = max(0.0, mc_t - d_pt)
+        evap_factor = float(np.exp(-0.15 * dp_dep)) if synoptic_weight > 0 else 1.0
 
-        # Beydağları yağmur gölgesi etkisi (Fön kurutması)
-        rain_shadow = (1.0 - 0.35 * blk) if (blk >= 0.60 and synoptic_pr > 0.2) else 1.0
-        mc_pr = round(synoptic_pr * virga_factor * rain_shadow, 1)
+        # 3. Beydağları orografik yağmur gölgesi (Gauss sönümlemesi)
+        rain_orography = (1.0 - 0.40 * blk) if blk >= 0.50 else 1.0
 
+        # 4. MetaCast nihai bağımsız kestirimi
+        mc_pr = round(float(synoptic_weight * evap_factor * rain_orography), 1)
         # ----------------------------------------------------------------------
         # 4. ⏱️ METACAST BAROMETRİK BASINÇ MODELİ
         # ----------------------------------------------------------------------
