@@ -1884,7 +1884,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
             .play-btn {{ background: #0284c7; border: none; color: #fff; font-size: 0.92rem; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; transition: background 0.2s; }}
             .play-btn:hover {{ background: #0369a1; }}
             .track-bar {{ position: relative; flex-grow: 1; height: 6px; background: rgba(255,255,255,0.15); border-radius: 3px; }}
-            .progress-fill {{ position: absolute; left: 0; top: 0; height: 100%; width: 0%; background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); border-radius: 3px; transition: width 0.2s ease; }}
+            .progress-fill {{ position: absolute; left: 0; top: 0; height: 100%; width: 0%; background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); border-radius: 3px; transition: width width 0.2s ease; }}
             .status-pill {{ padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e; }}
             #radar-real-map {{ height: 460px; width: 100%; border-radius: 8px; position: relative; }}
             .top-tsi-badge {{ position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: #ffffff; color: #0f172a; padding: 5px 20px; border-radius: 20px; font-size: 0.90rem; font-weight: 800; box-shadow: 0 4px 15px rgba(0,0,0,0.35); z-index: 1000; letter-spacing: 0.4px; border: 1px solid #cbd5e1; }}
@@ -1917,13 +1917,13 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
         </div>
 
         <script>
-            // MaxZoom 11 olarak sınırlandırıldı, zemin hatasız CartoDB ile değiştirildi.
             const map = L.map('radar-real-map', {{ zoomControl: true, attributionControl: false, maxZoom: 11, minZoom: 5 }}).setView([38.355, 38.309], 8);
             
-            L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+            // API Anahtarı GEREKTİRMEYEN ücretsiz OpenStreetMap zemini
+            L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                 maxZoom: 11,
                 minZoom: 5,
-                attribution: 'CartoDB'
+                attribution: '&copy; OpenStreetMap'
             }}).addTo(map);
 
             let radarLayers = [];
@@ -2013,7 +2013,6 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
     </html>
     """
     st.components.v1.html(real_radar_stream_html, height=540)
-
     cur_wind_deg = float(sel_wind_deg)
     cur_wind_spd = float(sel_speed)
     current_p = float(sel_precip)
