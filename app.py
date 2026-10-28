@@ -1255,7 +1255,6 @@ if mode == "Canlı Operasyonel":
     tag_sub = f"Canlı Model Tahmini (Güncelleme: {last_update})"
 else:
     df, date_display, tag_sub = generate_scenario(mode)
-
 # Sayısal modellerin serilerini df indeksine kilitleme
 ecmwf = get_clean_series(df, "wind_gusts_10m_ecmwf_ifs", 10.0)
 gfs = get_clean_series(df, "wind_gusts_10m_gfs_seamless", 10.0, fallback_series=ecmwf)
