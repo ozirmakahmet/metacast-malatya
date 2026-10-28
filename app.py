@@ -883,7 +883,8 @@ if mode == "Model Kıyaslama Arenası":
     st.caption("MetaCast'in son günlerdeki tüm meteorolojik tahminleri ile yer istasyonunda gerçekleşen kesin ölçümlerin karnesi:")
 
     daily_summary = []
-    past_dates = [d for d in available_arena_dates if d <= today_date]
+    # Günleri baştan sona kronolojik olarak sıralıyoruz
+    past_dates = sorted(list(set([d for d in available_arena_dates if d <= today_date])))
     
     for d_date in past_dates:
         d_df = df_raw[df_raw["time"].dt.date == d_date]
@@ -950,10 +951,10 @@ if mode == "Model Kıyaslama Arenası":
             "Tarih": d_date.strftime("%d %B %Y"),
             "Sıcaklık (Tahmin / Gerçek)": f"{mc_daily_t} / {real_t} °C",
             "Pik Rüzgâr (Tahmin / Gerçek)": f"{mc_daily_g} / {real_g} km/s",
-            "Basınç (Tahmin / Gerçek)": f"{mc_daily_p} / {real_p} hPa",
             "Yağış İhtimali": f"%{pop_rate}",
             "Yağış Miktarı (Tahmin / Gerçek)": f"{mc_daily_pr} / {real_pr} mm",
             "Beklenen Yağış Cinsi": precip_phase,
+            "Basınç (Tahmin / Gerçek)": f"{mc_daily_p} / {real_p} hPa",
             "Tutarlılık": f"%{acc:.1f}",
             "Durum": durum
         })
@@ -975,7 +976,6 @@ if mode == "Model Kıyaslama Arenası":
         """, unsafe_allow_html=True
     )
     st.stop()
-
 # ==============================================================================
 # 📈 AKADEMİK DOĞRULAMA (BENCHMARK) RAPORU
 # ==============================================================================
