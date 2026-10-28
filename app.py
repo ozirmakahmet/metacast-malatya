@@ -1366,7 +1366,8 @@ for d_idx, tab in enumerate(day_tabs):
 # ==============================================================================
 # BÖLÜM 1: ⚡ METACAST HİBRİT YAPAY ZEKÂ TAHMİN & KARAR MERKEZİ
 # ==============================================================================
-st.markdown('<div class="section-banner-metacast"><h4 style="margin: 0; color: #90caf9;">⚡ BÖLÜM 1: MetaCast Hibrit Yapay Zekâ Tahmin & Karar Merkezi</h4></div>', unsafe_allow_html=True)
+st.markdown('<div class="section-banner-metacast"><h4 style="margin: 0; color: #90caf9;">⚡ BÖLÜM 1: Günlük Hava Durumu Özeti ve Tehlike Durumu</h4></div>', unsafe_allow_html=True)
+st.caption("Yapay zekânın gün içindeki hava olaylarını tarayarak çıkardığı en anlaşılır ve basit özet raporu:")
 
 if "Yanlış Alarm" in mode:
     risk_score = 24.5
@@ -1378,12 +1379,26 @@ else:
 col1, col2, col3, col4 = st.columns([1.2, 1.2, 1.4, 1.2])
 
 with col1:
-    st.metric("İncelenen Tarih", date_display)
-    st.caption(f"Zirve: **{peak_time}**")
+    st.metric(
+        label="🗓️ Seçili Tarih", 
+        value=date_display,
+        help="Şu an bu tarihin 24 saatlik verisini inceliyorsunuz."
+    )
+    # Zirve yerine daha anlaşılır bir ifade:
+    st.caption(f"⚠️ En Riskli Saat: **{peak_time.split('-')[-1].strip()}**")
 
 with col2:
-    st.metric("Beklenen Pik Rüzgâr", f"{peak_gust:.1f} km/s")
-    st.caption(f"Yön: **{live_wind_deg:.0f}°** | Sapma: ±{gust_std.mean():.1f} km/s")
+    # Dereceyi (örn: 18°) herkesin anlayacağı yön ismine çevirelim:
+    compass_dirs = ["Kuzey", "Kuzeydoğu", "Doğu", "Güneydoğu", "Güney", "Güneybatı (Lodos)", "Batı", "Kuzeybatı"]
+    dir_idx = int((live_wind_deg + 22.5) % 360 // 45)
+    wind_dir_name = compass_dirs[dir_idx]
+
+    st.metric(
+        label="💨 En Şiddetli Rüzgâr", 
+        value=f"{peak_gust:.1f} km/s",
+        help="Gün içindeki en sert rüzgâr hamlesidir. 50 km/s üzeri çatılara ve ağaçlara zarar verebilir."
+    )
+    st.caption(f"Yön: **{wind_dir_name}** | Yanılma Payı: ±{gust_std.mean():.1f} km/s")
 
 with col3:
     gauge_bar_color = "#22c55e" if risk_score < 35 else ("#ff9800" if risk_score < 65 else "#ef4444")
@@ -1392,7 +1407,7 @@ with col3:
             mode="gauge+number",
             value=round(risk_score, 1),
             number={"suffix": "%", "font": {"size": 22, "color": "#ffffff", "family": "Arial Black"}},
-            title={"text": "Bileşik Afet Riski (PIML)", "font": {"size": 11, "color": "#90caf9"}},
+            title={"text": "Genel Tehlike Oranı", "font": {"size": 13, "color": "#90caf9"}},
             gauge={
                 "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "#546e7a", "tickfont": {"size": 9, "color": "#94a3b8"}},
                 "bar": {"color": gauge_bar_color, "thickness": 0.28},
@@ -1409,26 +1424,33 @@ with col3:
         )
     )
     fig_gauge.update_layout(
-        height=125,
-        margin=dict(l=10, r=10, t=25, b=5),
+        height=130, 
+        margin=dict(l=10, r=10, t=35, b=5), # Grafiğin üstten kesilmemesi için t=35 yapıldı
         paper_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#ffffff"),
     )
     st.plotly_chart(fig_gauge, use_container_width=True, config={"displayModeBar": False})
 
 with col4:
-    st.metric("Gece Min Sıcaklık", f"{night_min_temp:.1f}°C", delta="Don Riski" if night_min_temp <= 0.0 else None, delta_color="inverse")
+    st.metric(
+        label="🌡️ Gecenin En Düşük Sıcaklığı", 
+        value=f"{night_min_temp:.1f}°C", 
+        delta="❄️ Don Tehlikesi!" if night_min_temp <= 0.0 else "Don riski yok", 
+        delta_color="inverse" if night_min_temp <= 0.0 else "normal",
+        help="Özellikle çiftçiler için gece beklenen en soğuk hava değeridir."
+    )
     st.caption(f"En Soğuk Saat: **{night_min_time}**")
 
+# Alt kısımdaki Markdown hatasını düzelttik ve dili sadeleştirdik:
 if is_radiation_frost_danger:
     frost_indices = df.index[night_mask & (temp <= 2.0)].tolist()
     if frost_indices:
         f_start = df["time"].iloc[frost_indices[0]].strftime("%H:00")
         f_end = (df["time"].iloc[frost_indices[-1]] + pd.Timedelta(hours=1)).strftime("%H:00")
         f_dur = len(frost_indices)
-        time_window_badge = f"⏱️ **Kritik Zirai Don:** `{f_start} - {f_end}` ({f_dur} Saat) | Pik: `{night_min_time} ({night_min_temp:.1f}°C)`"
+        time_window_badge = f"⏱️ <b>Zirai Don İçin Dikkat Edilmesi Gereken Saatler:</b> <span style='background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;'>{f_start} ile {f_end} arası</span> | 🔴 En Soğuk An: <b>{night_min_time} ({night_min_temp:.1f}°C)</b>"
     else:
-        time_window_badge = f"⏱️ **Zirai Don:** Gece saatleri riskli | Min: `{night_min_temp:.1f}°C`"
+        time_window_badge = f"⏱️ <b>Zirai Don Riski:</b> Gece saatlerine dikkat ediniz. | En düşük: <b>{night_min_temp:.1f}°C</b>"
 else:
     active_indices = df.index[(gust_mean >= 30.0) | (precip >= 0.5)].tolist()
     if active_indices:
@@ -1436,63 +1458,12 @@ else:
         end_idx = active_indices[-1]
         start_time_str = df["time"].iloc[start_idx].strftime("%H:00")
         end_time_str = (df["time"].iloc[end_idx] + pd.Timedelta(hours=1)).strftime("%H:00") if end_idx < len(df) - 1 else "23:59"
-        duration_hours = len(active_indices)
-        time_window_badge = f"⏱️ **Kritik Hadise Aralığı:** `{start_time_str} - {end_time_str}` ({duration_hours} Saat) | Pik: `{df['time'].iloc[peak_idx].strftime('%H:00')}`"
+        time_window_badge = f"⏱️ <b>Fırtına/Yağış İçin Dikkat Edilmesi Gereken Saatler:</b> <span style='background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;'>{start_time_str} ile {end_time_str} arası</span> | 🔴 Fırtına Zirvesi: <b>{df['time'].iloc[peak_idx].strftime('%H:00')}</b>"
     else:
-        time_window_badge = "⏱️ **Hadise Aralığı:** `Aktif Etki Yok` | 🌿 Atmosfer Stabil"
+        time_window_badge = "⏱️ <b>Hava Durumu Sakin:</b> Gün boyunca tehlikeli bir afet veya sert rüzgâr beklenmiyor."
 
 st.markdown(f"<div class='time-window-box'>{time_window_badge}</div>", unsafe_allow_html=True)
 
-st.markdown("---")
-m1, m2, m3, m4, m5 = st.columns([2.0, 0.8, 0.8, 0.8, 1.4])
-m1.markdown(f"📡 **Erhaç (LTAT) METAR:** `{metar['raw']}`")
-m1.caption(f"☁️ Bulut: {metar['cloud_desc']}")
-m2.metric("Termometre", f"{metar['temp_c']}°C" if metar["temp_c"] is not None else "--")
-m3.metric("Yer Hamlesi", f"{metar['gust_kmh']} km/s")
-m4.metric("Basınç", f"{int(metar['altim_hpa'])} hPa" if metar["altim_hpa"] else "1014 hPa")
-
-active_badges = []
-if metar["is_hail"]:
-    active_badges.append("<span style='background:#e91e63; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>DOLU</span>")
-if metar["is_ts"]:
-    active_badges.append("<span style='background:#ff9800; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>ORAJ</span>")
-if metar["is_snow"]:
-    active_badges.append("<span style='background:#2196f3; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>KAR</span>")
-if metar["is_rain"] and not metar["is_snow"]:
-    active_badges.append("<span style='background:#0288d1; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>YAĞMUR</span>")
-if metar["is_fog"]:
-    active_badges.append("<span style='background:#78909c; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>SİS</span>")
-if not active_badges:
-    active_badges.append("<span style='background:#4caf50; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:700;'>SAKİN</span>")
-
-with m5:
-    st.markdown("<p style='font-size:0.8rem; color:#9aa0a6; margin:0;'>Anlık Durum</p>", unsafe_allow_html=True)
-    st.markdown(f"<div style='margin-top:4px;'>{' '.join(active_badges)}</div>", unsafe_allow_html=True)
-    vis_str = f"{metar['visib_m']} m" if metar["visib_m"] and metar["visib_m"] < 9999 else "Açık (>10 km)"
-    st.caption(f"Görüş: {vis_str}")
-
-# --- YENİ EKLENTİ: ERHAÇ -> ŞEHİR MERKEZİ TRANSFER GÖSTERİMİ ---
-now_hour = datetime.now(TR_TZ).hour
-cur_idx = now_hour if now_hour < len(df) else int(np.argmin(np.abs(df["time"].dt.hour - now_hour)))
-
-merkez_t_est, merkez_g_est, merkez_p_est = transfer_erhac_to_merkez(
-    erhac_temp=metar["temp_c"],
-    erhac_gust=float(metar["gust_kmh"]),
-    erhac_precip=0.0,
-    wind_dir=float(metar["wdir_deg"]),
-    cloud_cover=float(cloud_cover.iloc[cur_idx]) if not cloud_cover.empty else 20.0,
-    hour=now_hour
-)
-
-st.markdown(
-    f"""
-    <div style="background: rgba(33, 150, 243, 0.05); border: 1px dashed rgba(33, 150, 243, 0.3); padding: 10px 14px; border-radius: 6px; margin-top: 15px; font-size: 0.88rem; color: #eceff1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-        <div><strong>🏢 Şehir Merkezi Mikroklima Transferi:</strong> Erhaç anlık verisi, Beydağları orografisi ve rakım lapse-rate formülü ile merkeze uyarlandı.</div>
-        <div style="font-size: 0.95rem;">Sıcaklık: <strong style="color:#ffb74d;">{merkez_t_est}°C</strong> | Hamle: <strong style="color:#90caf9;">{merkez_g_est} km/s</strong></div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
 st.markdown("---")
 
 mod_gust_now = float(gust_mean.iloc[cur_idx])
