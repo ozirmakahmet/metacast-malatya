@@ -1245,7 +1245,6 @@ if mode == "Canlı Operasyonel":
             if next_d <= max_date:
                 st.session_state.current_date = next_d
                 st.rerun()
-
 df = df_raw[df_raw["time"].dt.date == st.session_state.current_date].reset_index(drop=True)
     if df.empty:
         st.session_state.current_date = min_date
@@ -1257,7 +1256,6 @@ else:
     df = df_raw[df_raw["time"].dt.date == min_date].reset_index(drop=True)
     date_display = df["time"].iloc[0].strftime("%d %B %Y")
     tag_sub = "Model Arenası"
-
 # Sayısal modellerin serilerini df indeksine kilitleme
 ecmwf = get_clean_series(df, "wind_gusts_10m_ecmwf_ifs", 10.0)
 gfs = get_clean_series(df, "wind_gusts_10m_gfs_seamless", 10.0, fallback_series=ecmwf)
