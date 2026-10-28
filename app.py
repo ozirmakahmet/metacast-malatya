@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 from datetime import datetime, timedelta, timezone, time
+
 # ==============================================================================
 # 📍 METACAST ÇİFT NOKTA KOORDİNAT MİMARİSİ
 # ==============================================================================
@@ -613,10 +614,6 @@ elif metar["status"] == "degraded" and metar["warnings"]:
 # ==============================================================================
 # 🥊 MODEL KIYASLAMA ARENASI
 # ==============================================================================
-# --- 🥊 MODEL KIYASLAMA ARENASI (ÇOKLU METEOROLOJİK PARAMETRE DESTEĞİ) ---
-# --- 🥊 MODEL KIYASLAMA ARENASI (YAĞIŞ MİKTARI VE ÇOKLU PARAMETRE DESTEĞİ) ---
-# --- 🥊 MODEL KIYASLAMA ARENASI (YAĞIŞ ŞAMPİYONLUĞU & ÇOKLU PARAMETRE) ---
-# --- 🥊 MODEL KIYASLAMA ARENASI (DÜZELTİLMİŞ FİZİKSEL BİRİM KARŞILAŞTIRMASI) ---
 if mode == "Model Kıyaslama Arenası":
     st.subheader("🥊 Model Kıyaslama Arenası: Kim Daha İyi Tutturdu?")
     st.markdown(
@@ -656,52 +653,49 @@ if mode == "Model Kıyaslama Arenası":
     ec_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0).iloc[now_idx])
     gfs_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
     icon_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
-    # 1. Modellerin Hamle Değerlerini Topla ve Sırala
+    
     model_gusts = [ec_g_now, gfs_g_now, icon_g_now]
     model_gusts.sort()
 
-    # 2. Medyan ve Varyans Analizi (Aykırı model sapmasını izole eder)
     median_gust = model_gusts[1]
     mean_gust = sum(model_gusts) / 3.0
     model_spread = model_gusts[2] - model_gusts[0]
 
-    # Modeller arası uçurum 8 km/s üzerindeyse medyan ağırlıklı uzlaşı uygula
     if model_spread > 8.0:
         base_gust = (median_gust * 0.70) + (mean_gust * 0.30)
     else:
         base_gust = mean_gust
 
-    # 3. Fiziksel Rüzgâr Yönü ve Orografik Bariyer Etkisi (blk_now 3. Yağış bölümünde de kullanılır)
     wdir_now = float(get_clean_series(df_raw, "wind_direction_10m_ecmwf_ifs", 0.0).iloc[now_idx])
     blk_now = float(np.abs(np.cos(np.radians(wdir_now - 215.0))))
     mountain_drag = (1.0 - 0.22 * blk_now) if (blk_now >= 0.70 and base_gust >= 35.0) else 1.0
 
     mean_g_now = round(mean_gust, 1)
     mc_g_now = round(base_gust * mountain_drag, 1)
+    
     # 2. Sıcaklık
     obs_t = float(metar["temp_c"]) if metar["temp_c"] is not None else None
     ec_t_now = float(get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0).iloc[now_idx])
     gfs_t_now = float(get_clean_series(df_raw, "temperature_2m_gfs_seamless", 15.0, fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0)).iloc[now_idx])
     icon_t_now = float(get_clean_series(df_raw, "temperature_2m_icon_seamless", 15.0, fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0)).iloc[now_idx])
-    # Sıcaklık modellerini topla ve sırala
+    
     model_temps = sorted([ec_t_now, gfs_t_now, icon_t_now])
     median_t = model_temps[1]
     mean_t = sum(model_temps) / 3.0
     t_spread = model_temps[2] - model_temps[0]
 
-    # Modeller arasında 3.0 °C'den fazla uçurum varsa medyan ağırlıklı uzlaşı uygula
     if t_spread > 3.0:
         base_t = (median_t * 0.70) + (mean_t * 0.30)
     else:
         base_t = mean_t
 
-    # Gece açık havada radyasyonel soğuma (inversiyon) hesabı
     is_night_now = (now_real_dt.hour >= 21) or (now_real_dt.hour <= 7)
     c_now = float(get_clean_series(df_raw, "cloud_cover_ecmwf_ifs", 20.0).iloc[now_idx])
     inv_cooling = 0.8 if (is_night_now and c_now <= 35) else 0.0
 
     mean_t_now = round(mean_t, 1)
     mc_t_now = round(base_t - inv_cooling, 1)
+    
     # 3. Yağış (mm)
     obs_precip_now = 0.0
     if metar.get("is_rain") or metar.get("is_snow") or metar.get("is_hail"):
@@ -716,19 +710,17 @@ if mode == "Model Kıyaslama Arenası":
     ec_p_now = float(get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0).iloc[now_idx])
     gfs_p_now = float(get_clean_series(df_raw, "precipitation_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0)).iloc[now_idx])
     icon_p_now = float(get_clean_series(df_raw, "precipitation_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "precipitation_ecmwf_ifs", 0.0)).iloc[now_idx])
-    # Yağış modellerini topla ve uzlaşı analizi yap
+    
     model_precips = sorted([ec_p_now, gfs_p_now, icon_p_now])
     median_p = model_precips[1]
     mean_p = sum(model_precips) / 3.0
     rain_model_count = sum(1 for p in model_precips if p >= 0.1)
 
-    # 3 modelden en az 2'si yağış vermiyorsa tek modelin gürültüsünü filtrele (false-alarm önleyici)
     if rain_model_count <= 1:
         base_p = median_p
     else:
         base_p = (median_p * 0.60) + (mean_p * 0.40)
 
-    # Beydağları yağış gölgesi etkisi (blk_now rüzgâr bloğundan gelir)
     rain_shadow = 0.78 if (blk_now >= 0.65 and base_p > 0.2) else 1.0
 
     mean_p_now = round(mean_p, 1)
@@ -739,13 +731,12 @@ if mode == "Model Kıyaslama Arenası":
     ec_pres_now = float(get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25).iloc[now_idx])
     gfs_pres_now = float(get_clean_series(df_raw, "surface_pressure_gfs_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
     icon_pres_now = float(get_clean_series(df_raw, "surface_pressure_icon_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
-    # Basınç modellerini topla ve sırala
+    
     model_pressures = sorted([ec_pres_now, gfs_pres_now, icon_pres_now])
     median_pres = model_pressures[1]
     mean_pres = sum(model_pressures) / 3.0
     pres_spread = model_pressures[2] - model_pressures[0]
 
-    # Modeller arasında 3.0 hPa üzerinde tutarsızlık/sapma varsa medyan ağırlıklı uzlaşı uygula
     if pres_spread > 3.0:
         base_pres = (median_pres * 0.70) + (mean_pres * 0.30)
     else:
@@ -784,50 +775,51 @@ if mode == "Model Kıyaslama Arenası":
         ref_val = 100.0
 
     st.markdown("##### ⚡ Şu Anki Saat İtibarıyla Maç Durumu")
-# ==============================================================================
-# ❄️ MALATYA ÇANAĞI RADYASYONEL İNVERSİYON & ZİRAİ DON ERKEN UYARI KATMANI
-# ==============================================================================
-try:
-    # Saati ve gece/gündüz durumunu doğrudan sistem saatinden al (hata ihtimalini sıfırlar)
-    _cur_hour = datetime.now().hour
-    _is_night = (_cur_hour >= 20) or (_cur_hour <= 8)
-    
-    _t = locals().get("mc_t_now", None)
-    _g = locals().get("mc_g_now", None)
-    _c = locals().get("c_now", 20.0)
 
-    if _t is not None and _g is not None:
-        _inversion = _is_night and (_c <= 35.0) and (_g <= 14.0)
-        if _inversion:
-            if _t <= 0.0:
-                st.error(
-                    f"🚨 **KUVVETLİ ZİRAİ DON UYARISI ({_t} °C)**\n\n"
-                    f"Malatya çanağında açık hava ve durgun rüzgâr ({_g} km/s) sebebiyle şiddetli radyasyonel soğuma yaşanıyor. "
-                    f"Çanak tabanında zemin sıcaklığı sıfırın altına inmiştir; tarımsal alanlar için acil tedbir önerilir."
-                )
-            elif _t <= 3.5:
-                st.warning(
-                    f"⚠️ **ZİRAİ DON & İNVERSİYON RİSKİ ({_t} °C)**\n\n"
-                    f"Gökyüzünün açık (%{int(_c)} bulut) ve rüzgârın durgun ({_g} km/s) olması nedeniyle çanak tabanında soğuk hava göllenmesi (inversiyon) oluşuyor. "
-                    f"Zemin seviyesinde don hadisesi meydana gelebilir."
-                )
-            elif _t <= 6.0:
-                st.info(
-                    f"🌡️ **İnversiyon Soğuması Eğilimi ({_t} °C):** "
-                    f"Açık ve sakin gecede çanak içi radyasyonel soğuma devam ediyor. Zemin sıcaklığı ölçülen hava sıcaklığından 2-3 °C daha soğuk hissedilebilir."
-                )
-except Exception:
-    pass
-m1, m2, m3, m4, m5 = st.columns(5)
+    # ==============================================================================
+    # ❄️ MALATYA ÇANAĞI RADYASYONEL İNVERSİYON & ZİRAİ DON ERKEN UYARI KATMANI
+    # ==============================================================================
+    try:
+        _cur_hour = datetime.now().hour
+        _is_night = (_cur_hour >= 20) or (_cur_hour <= 8)
+        
+        _t = locals().get("mc_t_now", None)
+        _g = locals().get("mc_g_now", None)
+        _c = locals().get("c_now", 20.0)
 
-if "Bileşik" in selected_param:
+        if _t is not None and _g is not None:
+            _inversion = _is_night and (_c <= 35.0) and (_g <= 14.0)
+            if _inversion:
+                if _t <= 0.0:
+                    st.error(
+                        f"🚨 **KUVVETLİ ZİRAİ DON UYARISI ({_t} °C)**\n\n"
+                        f"Malatya çanağında açık hava ve durgun rüzgâr ({_g} km/s) sebebiyle şiddetli radyasyonel soğuma yaşanıyor. "
+                        f"Çanak tabanında zemin sıcaklığı sıfırın altına inmiştir; tarımsal alanlar için acil tedbir önerilir."
+                    )
+                elif _t <= 3.5:
+                    st.warning(
+                        f"⚠️ **ZİRAİ DON & İNVERSİYON RİSKİ ({_t} °C)**\n\n"
+                        f"Gökyüzünün açık (%{int(_c)} bulut) ve rüzgârın durgun ({_g} km/s) olması nedeniyle çanak tabanında soğuk hava göllenmesi (inversiyon) oluşuyor. "
+                        f"Zemin seviyesinde don hadisesi meydana gelebilir."
+                    )
+                elif _t <= 6.0:
+                    st.info(
+                        f"🌡️ **İnversiyon Soğuması Eğilimi ({_t} °C):** "
+                        f"Açık ve sakin gecede çanak içi radyasyonel soğuma devam ediyor. Zemin sıcaklığı ölçülen hava sıcaklığından 2-3 °C daha soğuk hissedilebilir."
+                    )
+    except Exception:
+        pass
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+
+    if "Bileşik" in selected_param:
         m1.metric("🚩 Erhaç Hakem", "100 Puan", delta="Kusursuz Hedef")
         m2.metric("MetaCast", f"{v_mc} Puan", delta=f"{v_mc - 100:+.1f}", delta_color="inverse")
         m3.metric("ECMWF", f"{v_ec} Puan", delta=f"{v_ec - 100:+.1f}", delta_color="inverse")
         m4.metric("GFS", f"{v_gfs} Puan", delta=f"{v_gfs - 100:+.1f}", delta_color="inverse")
         m5.metric("ICON", f"{v_icon} Puan", delta=f"{v_icon - 100:+.1f}", delta_color="inverse")
         winner_name = max({"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon}, key=lambda k: {"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon}[k])
-else:
+    else:
         m1.metric("🚩 Erhaç Hakem", f"{ref_val:.1f} {param_unit}", delta="Yer Ölçümü")
         m2.metric("MetaCast", f"{v_mc:.1f} {param_unit}", delta=f"Fark: {v_mc - ref_val:+.1f}", delta_color="inverse")
         m3.metric("ECMWF", f"{v_ec:.1f} {param_unit}", delta=f"Fark: {v_ec - ref_val:+.1f}", delta_color="inverse")
@@ -991,13 +983,11 @@ else:
                 sc_icon = round(max(0, 100 - (abs(i_g - act_g)*1.0 + abs(i_t - act_t)*3.0 + abs(i_pr - act_pr)*6.0 + abs(i_p - act_p)*0.8)), 1)
                 c_ref, c_mc, c_ec, c_gfs, c_icon = 100.0, sc_mc, sc_ec, sc_gfs, sc_icon
 
-            # Farkların Sözlüğü
             if "Bileşik" in selected_param:
                 diffs_row = {"MetaCast": round(100 - c_mc, 1), "ECMWF": round(100 - c_ec, 1), "GFS": round(100 - c_gfs, 1), "ICON": round(100 - c_icon, 1)}
             else:
                 diffs_row = {"MetaCast": round(abs(c_mc - c_ref), 1), "ECMWF": round(abs(c_ec - c_ref), 1), "GFS": round(abs(c_gfs - c_ref), 1), "ICON": round(abs(c_icon - c_ref), 1)}
 
-            # Kazananı ve Eşitlik (Beraberlik) Durumunu Belirleme
             if "Yağış" in selected_param and c_ref == 0.0 and max(c_mc, c_ec, c_gfs, c_icon) <= 0.05:
                 row_winner_txt = "🤝 Konsensüs (Kuru)"
             else:
@@ -1035,7 +1025,6 @@ else:
                 "MetaCast Sapması": "--",
             })
 
-    # Yağış Parametresine Özel Toplam Birikim Şampiyonu Kartı
     if "Yağış" in selected_param and verified_rounds > 0:
         precip_errors = {
             "MetaCast (Hibrit)": abs(tot_mc_pr - tot_obs_pr),
@@ -1265,6 +1254,7 @@ else:
         
     date_display = df["time"].iloc[0].strftime("%d %B %Y") if "time" in df.columns else ""
     tag_sub = "Model Kıyaslama Arenası Telemetrisi"
+
 # Sayısal modellerin serilerini df indeksine kilitleme
 ecmwf = get_clean_series(df, "wind_gusts_10m_ecmwf_ifs", 10.0)
 gfs = get_clean_series(df, "wind_gusts_10m_gfs_seamless", 10.0, fallback_series=ecmwf)
@@ -1399,6 +1389,7 @@ def get_malatya_full_7day_forecast():
     except Exception:
         pass
     return {}, {}
+    
 @st.cache_data(ttl=1800)
 def fetch_ensemble_models_erhac():
     """
@@ -1419,6 +1410,7 @@ def fetch_ensemble_models_erhac():
     except Exception:
         pass
     return {}
+    
 daily_data, hourly_data = get_malatya_full_7day_forecast()
 
 sunrise_list = daily_data.get("sunrise", [])
@@ -1436,7 +1428,6 @@ def get_accurate_weather_display(wmo_code, cloud, precip, temp, cape, is_day):
     Resmi WMO (Dünya Meteoroloji Örgütü) kodları ve gece/gündüz durumuna göre
     ikon ve Türkçe hadise tanımını belirler.
     """
-    # 1. Yağış ve Fırtına Hadiseleri (WMO Öncelikli)
     if wmo_code in [95, 96, 99] or cape >= 900:
         return "⛈️", "Gök Gürültülü Oraj"
     elif wmo_code in [71, 73, 75, 77, 85, 86] or (precip > 0.1 and temp <= 1.0):
@@ -1448,7 +1439,6 @@ def get_accurate_weather_display(wmo_code, cloud, precip, temp, cape, is_day):
     elif wmo_code in [45, 48]:
         return "🌫️", "Puslu / Sisli"
     
-    # 2. Bulut Durumları (WMO 0-3 ve Bulut Örtüsü %)
     if wmo_code == 3 or cloud >= 80:
         return "☁️", "Çok Bulutlu"
     elif wmo_code == 2 or (45 <= cloud < 80):
@@ -1458,8 +1448,6 @@ def get_accurate_weather_display(wmo_code, cloud, precip, temp, cape, is_day):
     else:
         return ("☀️", "Açık / Güneşli") if is_day else ("🌙", "Açık / Gece")
 
-
-# 7 Günlük Sekmeler
 now_time = datetime.now(TR_TZ)
 day_tabs = st.tabs([
     f"{gunler_tr[(now_time + timedelta(days=i)).weekday()]} ({(now_time + timedelta(days=i)).strftime('%d.%m')})" 
@@ -1488,7 +1476,6 @@ for d_idx, tab in enumerate(day_tabs):
         for h in range(24):
             abs_hour_idx = day_start_hour + h
 
-            # API'den gerçek verileri çek
             t_val = api_hourly_temps[abs_hour_idx] if abs_hour_idx < len(api_hourly_temps) else 14.0
             p_val = api_hourly_precips[abs_hour_idx] if abs_hour_idx < len(api_hourly_precips) else 0.0
             pop_val = int(api_hourly_pops[abs_hour_idx]) if abs_hour_idx < len(api_hourly_pops) else 0
@@ -1496,7 +1483,6 @@ for d_idx, tab in enumerate(day_tabs):
             code_val = int(api_hourly_codes[abs_hour_idx]) if abs_hour_idx < len(api_hourly_codes) else 0
             cape_val = api_hourly_capes[abs_hour_idx] if abs_hour_idx < len(api_hourly_capes) else 0
 
-            # Gündüz / Gece Kontrolü
             if sr_dt and ss_dt:
                 is_day = (sr_dt.hour < h < ss_dt.hour) or \
                          (h == sr_dt.hour and sr_dt.minute <= 30) or \
@@ -1504,10 +1490,8 @@ for d_idx, tab in enumerate(day_tabs):
             else:
                 is_day = (6 <= h < 18)
 
-            # İkon ve Açıklama Üretimi
             icon_h, desc_h = get_accurate_weather_display(code_val, c_val, p_val, t_val, cape_val, is_day)
 
-            # 1. Saat Başı Kartı
             timeline_items.append({
                 "time": f"{h:02d}:00",
                 "temp": f"{int(round(t_val))}°",
@@ -1518,7 +1502,6 @@ for d_idx, tab in enumerate(day_tabs):
                 "special": False
             })
 
-            # 2. Gün Doğumu Özel Kartı
             if h == sr_hour:
                 timeline_items.append({
                     "time": sr_time_str,
@@ -1529,7 +1512,6 @@ for d_idx, tab in enumerate(day_tabs):
                     "color": "#f59e0b"
                 })
 
-            # 3. Gün Batımı Özel Kartı
             if h == ss_hour:
                 timeline_items.append({
                     "time": ss_time_str,
@@ -1540,7 +1522,6 @@ for d_idx, tab in enumerate(day_tabs):
                     "color": "#f97316"
                 })
 
-        # Kartları HTML Şeridi Olarak Ekrana Çiz
         cards_html = ""
         for item in timeline_items:
             if item.get("special"):
@@ -1574,7 +1555,7 @@ for d_idx, tab in enumerate(day_tabs):
             f'<div style="display: flex; gap: 10px; overflow-x: auto; padding: 10px 4px 16px 4px; scrollbar-width: thin;">{cards_html}</div>',
             unsafe_allow_html=True
         )
-        # ❄️ 24 Saatlik Tahmini Zemin Kar Birikim Kartı
+
         if 'hourly_temps' in locals() and 'hourly_precips' in locals() and len(hourly_temps) >= 24:
             snow_24h_cm, _ = calculate_snow_accumulation_cm(hourly_temps[:24], hourly_precips[:24], hours=24)
             if snow_24h_cm > 0.0:
@@ -1591,18 +1572,13 @@ for d_idx, tab in enumerate(day_tabs):
                     """,
                     unsafe_allow_html=True
                 )
-                # ==============================================================================
+
+# ==============================================================================
 # 🧠 METACAST GELİŞMİŞ KALİBRASYON MOTORU (ERHAÇ MİKROKLİMA & ENSEMBLE)
 # ==============================================================================
 def calculate_calibrated_metacast_gust(ecmwf_gust, gfs_gust, icon_gust, base_wind_spd=None):
-    """
-    Erhaç Havalimanı (LTAT) mikrokliması için zemin sürtünmesi (orographic friction)
-    ve dinamik model ağırlıklandırması (ensemble blending) uygular.
-    """
-    # GFS sakin havalarda Erhaç çanağını daha iyi yakaladığı için yüksek ağırlık verilir
     raw_ensemble = (gfs_gust * 0.45) + (icon_gust * 0.30) + (ecmwf_gust * 0.25)
 
-    # Erhaç pisti çanak içi sürtünme sönümlemesi
     if raw_ensemble <= 8.0:
         friction_factor = 0.60
     elif raw_ensemble <= 15.0:
@@ -1618,6 +1594,7 @@ def calculate_calibrated_metacast_gust(ecmwf_gust, gfs_gust, icon_gust, base_win
         calibrated_gust = base_wind_spd * 1.15
 
     return round(calibrated_gust, 1)
+
 # ==============================================================================
 # BÖLÜM 1: ⚡ METACAST HİBRİT YAPAY ZEKÂ TAHMİN & KARAR MERKEZİ
 # ==============================================================================
@@ -1650,7 +1627,6 @@ col3.caption("PIML Olasılığı")
 col4.metric("Gece Min Sıcaklık", f"{night_min_temp:.1f}°C", delta="Don Riski" if night_min_temp <= 0.0 else None, delta_color="inverse")
 col4.caption(f"En Soğuk Saat: **{night_min_time}**")
 
-# Zaman Penceresi
 if is_radiation_frost_danger:
     frost_indices = df.index[night_mask & (temp <= 2.0)].tolist()
     if frost_indices:
@@ -1674,7 +1650,6 @@ else:
 
 st.markdown(f"<div class='time-window-box'>{time_window_badge}</div>", unsafe_allow_html=True)
 
-# Canlı METAR Durumu
 st.markdown("---")
 m1, m2, m3, m4, m5 = st.columns([2.0, 0.8, 0.8, 0.8, 1.4])
 m1.markdown(f"📡 **Erhaç (LTAT) METAR:** `{metar['raw']}`")
@@ -1699,7 +1674,6 @@ with m5:
 
 st.markdown("---")
 
-# Model Doğrulama ve Güvenilirlik
 now_hour = datetime.now(TR_TZ).hour
 cur_idx = now_hour if now_hour < len(df) else int(np.argmin(np.abs(df["time"].dt.hour - now_hour)))
 
@@ -1804,7 +1778,6 @@ is_viewing_today = (mode == "Canlı Operasyonel" and st.session_state.current_da
 default_hour = cur_real_h if is_viewing_today else peak_idx
 default_min = cur_real_m if is_viewing_today else 0
 
-# 24 Saati 4 Eşit Parçaya (15'er Dk) Bölen 96 Adımlı Sayı Doğrusu Skalası
 time_slots = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
 default_time_str = f"{default_hour:02d}:{default_min:02d}"
 
@@ -1832,7 +1805,6 @@ with t_slider_col:
         st.session_state.selected_time_slot = sel_time
         st.rerun()
 
-    # Sayı Doğrusu Alt Cetveli (3'er Saatlik Ana Kerteriz Noktaları)
     st.markdown(
         """
         <div style="display: flex; justify-content: space-between; font-family: monospace; font-size: 0.74rem; color: #78909c; padding: 0 4px; margin-top: -8px; margin-bottom: 8px;">
@@ -1880,8 +1852,6 @@ sel_risk = interp_val(pd.Series(probabilities))
 c_map1, c_map2 = st.columns([1.65, 1.35])
 
 with c_map1:
-    center_lat, center_lon = 38.3552, 38.3095
-
     stations = [
         {"name": "Malatya Merkez", "lat": 38.3552, "lon": 38.3095, "type": "merkez"},
         {"name": "Erhaç (LTAT)", "lat": 38.4312, "lon": 38.0898, "type": "erhac"},
@@ -2051,20 +2021,13 @@ with c_map2:
 st.markdown("---")
 
 # ==============================================================================
-# 🛰️ BÖLGESEL CANLI RADAR & METACAST CONVLSTM ONNX NOWCASTER (FAZ-2 DEEP LEARNING)
+# 🛰️ BÖLGESEL CANLI RADAR & METACAST CONVLSTM ONNX NOWCASTER
 # ==============================================================================
-st.markdown("---")
-
 @st.cache_data(ttl=600)
 def run_onnx_radar_nowcasting():
-    """
-    RainViewer API'den son 4 radar karesini çeker, metacast_nowcaster.onnx
-    modelini çalıştırarak T+15, T+30, T+45, T+60 dk tahminlerini üretir.
-    """
     model_path = "models/metacast_nowcaster.onnx"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     
-    # 1. Canlı radar zaman damgalarını sorgula
     try:
         r_meta = requests.get("https://api.rainviewer.com/public/weather-maps.json", headers=headers, timeout=6)
         meta_json = r_meta.json()
@@ -2073,7 +2036,6 @@ def run_onnx_radar_nowcasting():
     except Exception:
         host, past_frames = "https://tilecache.rainviewer.com", []
 
-    # 2. Son 4 kareyi indirip normalize et
     collected = []
     if len(past_frames) >= 4:
         for f in past_frames[-4:]:
@@ -2098,9 +2060,8 @@ def run_onnx_radar_nowcasting():
         collected.append(np.zeros((256, 256), dtype=np.float32))
 
     input_tensor = np.array(collected, dtype=np.float32).reshape(1, 4, 1, 256, 256)
-
-    # 3. ONNX Modelini Çalıştırma (Inference)
     predictions = None
+
     if os.path.exists(model_path):
         try:
             import onnxruntime as ort
@@ -2108,25 +2069,17 @@ def run_onnx_radar_nowcasting():
             input_name = sess.get_inputs()[0].name
             output_name = sess.get_outputs()[0].name
             pred_raw = sess.run([output_name], {input_name: input_tensor})[0]
-            # pred_raw: [1, 4, 1, 256, 256] -> [4, 256, 256]
-            predictions = pred_raw[0, :, 0, :, :] * 65.0  # dBZ skalasına dönüş
+            predictions = pred_raw[0, :, 0, :, :] * 65.0
         except Exception:
             predictions = None
 
-    # ONNX çalışmazsa fail-safe adveksiyon matrisi
     if predictions is None:
         predictions = np.zeros((4, 256, 256), dtype=np.float32)
 
     return predictions
 
-
-# ==============================================================================
-# 🛰️ BÖLGESEL CANLI RADAR & OTOMATİK AKAN GERÇEK RADAR SİMÜLATÖRÜ (MGM STANDARDI)
-# ==============================================================================
-st.markdown("---")
 with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akışı", expanded=True):
     st.caption("🔴 Gerçek meteoroloji radar istasyonlarının anlık yansıtırlık (dBZ) akışı ve kütle hareket simülasyonu:")
-
     now_tsi_str = datetime.now(TR_TZ).strftime("%d.%m.%Y %H:%M TSİ")
 
     real_radar_stream_html = f"""
@@ -2145,48 +2098,16 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                 overflow: hidden;
                 padding: 10px 14px 14px 14px;
             }}
-            .sim-header {{
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 10px;
-                flex-wrap: wrap;
-                gap: 8px;
-            }}
-            .timeline-wrapper {{
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                flex-grow: 1;
-                max-width: 580px;
-            }}
-            .play-btn {{
-                background: #0284c7; border: none; color: #fff; font-size: 0.92rem;
-                font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer;
-                transition: background 0.2s;
-            }}
+            .sim-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }}
+            .timeline-wrapper {{ display: flex; align-items: center; gap: 12px; flex-grow: 1; max-width: 580px; }}
+            .play-btn {{ background: #0284c7; border: none; color: #fff; font-size: 0.92rem; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; transition: background 0.2s; }}
             .play-btn:hover {{ background: #0369a1; }}
             .track-bar {{ position: relative; flex-grow: 1; height: 6px; background: rgba(255,255,255,0.15); border-radius: 3px; }}
-            .progress-fill {{
-                position: absolute; left: 0; top: 0; height: 100%; width: 0%;
-                background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); border-radius: 3px; transition: width 0.2s ease;
-            }}
-            .status-pill {{
-                padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 800;
-                background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e;
-            }}
+            .progress-fill {{ position: absolute; left: 0; top: 0; height: 100%; width: 0%; background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); border-radius: 3px; transition: width 0.2s ease; }}
+            .status-pill {{ padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e; }}
             #radar-real-map {{ height: 460px; width: 100%; border-radius: 8px; position: relative; }}
-            .top-tsi-badge {{
-                position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-                background: #ffffff; color: #0f172a; padding: 5px 20px; border-radius: 20px;
-                font-size: 0.90rem; font-weight: 800; box-shadow: 0 4px 15px rgba(0,0,0,0.35);
-                z-index: 1000; letter-spacing: 0.4px; border: 1px solid #cbd5e1;
-            }}
-            .legend-bar {{
-                display: flex; justify-content: space-between; align-items: center;
-                padding: 8px 10px 0 10px; font-size: 0.75rem; color: #94a3b8; font-weight: 700;
-                flex-wrap: wrap; gap: 6px;
-            }}
+            .top-tsi-badge {{ position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: #ffffff; color: #0f172a; padding: 5px 20px; border-radius: 20px; font-size: 0.90rem; font-weight: 800; box-shadow: 0 4px 15px rgba(0,0,0,0.35); z-index: 1000; letter-spacing: 0.4px; border: 1px solid #cbd5e1; }}
+            .legend-bar {{ display: flex; justify-content: space-between; align-items: center; padding: 8px 10px 0 10px; font-size: 0.75rem; color: #94a3b8; font-weight: 700; flex-wrap: wrap; gap: 6px; }}
             .dbz-box {{ display: inline-block; width: 13px; height: 13px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
         </style>
     </head>
@@ -2200,12 +2121,10 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                 </div>
                 <div id="statusPill" class="status-pill">📡 CANLI RADAR AKIŞI</div>
             </div>
-
             <div style="position: relative;">
                 <div id="tsiBadge" class="top-tsi-badge">{now_tsi_str}</div>
                 <div id="radar-real-map"></div>
             </div>
-
             <div class="legend-bar">
                 <div><span class="dbz-box" style="background:#00e5ff;"></span> Çisenti (15-20 dBZ)</div>
                 <div><span class="dbz-box" style="background:#22c55e;"></span> Hafif-Orta (25-35 dBZ)</div>
@@ -2217,21 +2136,9 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
         </div>
 
         <script>
-            // 1. Sınırsız ve Hatasız Altlık Harita (OpenStreetMap)
-            const map = L.map('radar-real-map', {{ 
-                zoomControl: true, 
-                attributionControl: false,
-                maxZoom: 18, 
-                minZoom: 5 
-            }}).setView([38.355, 38.309], 9);
+            const map = L.map('radar-real-map', {{ zoomControl: true, attributionControl: false, maxZoom: 18, minZoom: 5 }}).setView([38.355, 38.309], 9);
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{ maxZoom: 18, minZoom: 5, attribution: 'OpenStreetMap' }}).addTo(map);
 
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                maxZoom: 18,
-                minZoom: 5,
-                attribution: 'OpenStreetMap'
-            }}).addTo(map);
-
-            // 2. Canlı ve Nowcast Radar Akışı
             let radarLayers = [];
             let framesData = [];
             let currentIdx = 0;
@@ -2247,14 +2154,9 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
 
                     if (framesData.length === 0) return;
 
-                    // maxNativeZoom: 8 sayesinde Malatya merkezine ne kadar yaklaşırsanız yaklaşın radar silinmez
                     framesData.forEach((frame, idx) => {{
                         const layer = L.tileLayer(data.host + frame.path + '/256/{{z}}/{{x}}/{{y}}/1/1_1.png', {{
-                            opacity: 0,
-                            zIndex: 500,
-                            maxNativeZoom: 8,
-                            maxZoom: 18,
-                            minZoom: 5
+                            opacity: 0, zIndex: 500, maxNativeZoom: 8, maxZoom: 18, minZoom: 5
                         }});
                         layer.addTo(map);
                         radarLayers.push(layer);
@@ -2278,28 +2180,20 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
 
             function showFrame(idx) {{
                 if (radarLayers.length === 0) return;
-
-                radarLayers.forEach((l, i) => {{
-                    l.setOpacity(i === idx ? 0.78 : 0);
-                }});
-
+                radarLayers.forEach((l, i) => {{ l.setOpacity(i === idx ? 0.78 : 0); }});
                 const f = framesData[idx];
                 document.getElementById('tsiBadge').innerText = formatTime(f.time);
                 document.getElementById('progressFill').style.width = `${{(idx / (framesData.length - 1)) * 100}}%`;
-
+                
                 const isFuture = idx >= (framesData.length - 4);
                 const pill = document.getElementById('statusPill');
                 if (isFuture) {{
                     pill.innerText = "🔮 NOWCAST KÜTLE TAHMİNİ";
-                    pill.style.color = "#38bdf8";
-                    pill.style.borderColor = "#38bdf8";
-                    pill.style.background = "rgba(56, 189, 248, 0.15)";
+                    pill.style.color = "#38bdf8"; pill.style.borderColor = "#38bdf8"; pill.style.background = "rgba(56, 189, 248, 0.15)";
                     document.getElementById('timeBadge').innerText = "Tahmin";
                 }} else {{
                     pill.innerText = "📡 CANLI RADAR GÖZLEMİ";
-                    pill.style.color = "#22c55e";
-                    pill.style.borderColor = "#22c55e";
-                    pill.style.background = "rgba(34, 197, 94, 0.15)";
+                    pill.style.color = "#22c55e"; pill.style.borderColor = "#22c55e"; pill.style.background = "rgba(34, 197, 94, 0.15)";
                     document.getElementById('timeBadge').innerText = "Canlı";
                 }}
             }}
@@ -2326,29 +2220,26 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
             document.getElementById('playBtn').addEventListener('click', () => {{
                 if (isPlaying) stopLoop(); else startLoop();
             }});
-
             setTimeout(() => {{ map.invalidateSize(); }}, 400);
         </script>
     </body>
     </html>
     """
     st.components.v1.html(real_radar_stream_html, height=540)
+
     # ==============================================================================
     # 🧭 METACAST DİNAMİK KÜTLE YÖRÜNGE, EKO FİLTRESİ & SİNOPTİK ANALİZ MOTORU
     # ==============================================================================
     cur_wind_deg = float(sel_wind_deg) if 'sel_wind_deg' in locals() else 210.0
     cur_wind_spd = float(sel_wind_spd) if 'sel_wind_spd' in locals() else 15.0
 
-    # 1. Havzada Aktif Kütle / Radar Yankısı Kontrolü (>15 dBZ / Yağış / Yoğun Bulut)
-    # Yağış miktarı, bulut yoğunluğu veya yaklaşan saatlerdeki kütle varlığı denetlenir
-    current_p = float(cur_precip) if 'cur_precip' in locals() else 0.0
-    current_c = float(cur_cloud) if 'cur_cloud' in locals() else 0.0
+    current_p = float(sel_precip) if 'sel_precip' in locals() else 0.0
+    current_c = float(sel_cloud) if 'sel_cloud' in locals() else 0.0
     upcoming_p = any(p > 0.05 for p in hourly_precips[:4]) if 'hourly_precips' in locals() and len(hourly_precips) >= 4 else False
 
     has_active_radar_echo = (current_p > 0.05) or (current_c >= 55.0) or upcoming_p
 
     if not has_active_radar_echo:
-        # --- DURUM A: GÖKYÜZÜ AÇIK / RADARDA AKTİF KÜTLE YOK ---
         st.markdown(
             """
             <div class="benchmark-box" style="border-left: 5px solid #22c55e; margin-top: 10px; background: rgba(255, 255, 255, 0.03); padding: 12px 16px; border-radius: 8px;">
@@ -2365,7 +2256,6 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
             unsafe_allow_html=True
         )
     else:
-        # --- DURUM B: AKTİF KÜTLE SAPTANDI (DİNAMİK YÖRÜNGE VE SAPMA DEVREDE) ---
         if cur_wind_spd < 8.0:
             traj_title = "⚠️ DURAĞAN KÜTLE: Yerel Çanak İçi Hapsolma Riski"
             traj_target = "Malatya Merkez, Yeşilyurt, Battalgazi"
@@ -2438,8 +2328,9 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
             """,
             unsafe_allow_html=True
         )
+
 # ==============================================================================
-# 🧠 XAI: AÇIKLANABİLİR YAPAY ZEKÂ KARAR GEREKÇELENDİRMESİ (YAZILI ANALİZ)
+# 🧠 XAI: AÇIKLANABİLİR YAPAY ZEKÂ KARAR GEREKÇELENDİRMESİ
 # ==============================================================================
 st.markdown("##### 🧠 Açıklanabilir Yapay Zekâ (XAI): Model Kararını Gerekçelendirme")
 st.caption(f"Saat {selected_time_str} itibarıyla yapay zekânın kararını şekillendiren fiziksel unsurlar:")
@@ -2447,7 +2338,6 @@ st.caption(f"Saat {selected_time_str} itibarıyla yapay zekânın kararını şe
 cur_xai_vec = X_norm[current_sel_h]
 feature_contributions = cur_xai_vec * weights
 
-# Parametrelerin açıklamalı sözlüğü
 feature_info = [
     {
         "name": "Rüzgâr Taban Hızı",
@@ -2487,14 +2377,9 @@ feature_info = [
     }
 ]
 
-shields = [f for f in feature_info if f["val"] < 0]
-dangers = [f for f in feature_info if f["val"] >= 0]
+shields = sorted([f for f in feature_info if f["val"] < 0], key=lambda x: x["val"])
+dangers = sorted([f for f in feature_info if f["val"] >= 0], key=lambda x: x["val"], reverse=True)
 
-# Sıralama: En etkili faktör en üstte
-shields = sorted(shields, key=lambda x: x["val"])
-dangers = sorted(dangers, key=lambda x: x["val"], reverse=True)
-
-# Net Model Özeti
 net_score = sum(f["val"] for f in feature_info)
 if net_score < -0.20:
     verdict_text = "🟢 **GENEL TEŞHİS: GÜVENLİ VE SAKİN.** Malatya'nın doğal coğrafi kalkanları ve düşük rüzgâr tabanı, olası afet baskılarını tamamen etkisiz hale getiriyor."
@@ -2572,6 +2457,7 @@ with xai_col2:
         """,
         unsafe_allow_html=True
     )
+
 # ==============================================================================
 # 📋 SEKTÖREL OPERASYONEL REÇETELER
 # ==============================================================================
@@ -2666,7 +2552,6 @@ s3.metric("Bulutluluk", cloud_desc_summary)
 s4.metric("Termodinamik CAPE", f"{max_cape:.0f} J/kg")
 s5.metric("Basınç Eğilimi", f"{pressure_diff.iloc[peak_idx]:+.1f} hPa")
 
-# Grafikler
 st.markdown(f"##### 📊 Erhaç Üssü Sayısal Rüzgâr Hamlesi Kıyası ({date_display})")
 fig_wind = go.Figure()
 fig_wind.add_trace(go.Scatter(x=[str(x) for x in df["time"].dt.strftime("%H:00")], y=[float(val) for val in ecmwf.values], name="ECMWF (Avrupa)", line=dict(color="#1f77b4", width=2)))
@@ -2694,7 +2579,6 @@ fig_weather.update_layout(
 )
 st.plotly_chart(fig_weather, use_container_width=True)
 
-# Tablo ve Log Panelleri
 with st.expander("📋 Saatlik Detaylı Meteorolojik Parametreler"):
     display_df = pd.DataFrame({
         "Saat": df["time"].dt.strftime("%H:00"),
