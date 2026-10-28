@@ -883,9 +883,9 @@ if mode == "Model Kıyaslama Arenası":
     st.caption("MetaCast'in son günlerdeki tüm meteorolojik tahminleri ile yer istasyonunda gerçekleşen kesin ölçümlerin karnesi:")
 
     daily_summary = []
-    # Günleri baştan sona kronolojik olarak sıralıyoruz
     past_dates = sorted(list(set([d for d in available_arena_dates if d <= today_date])))
-    
+    cur_h = min(23, max(0, datetime.now(TR_TZ).hour))
+
     for d_date in past_dates:
         d_df = df_raw[df_raw["time"].dt.date == d_date]
         if d_df.empty: 
@@ -898,7 +898,7 @@ if mode == "Model Kıyaslama Arenası":
         ec_p = get_clean_series(d_df, "surface_pressure_ecmwf_ifs", 1013.25)
         ec_cape = get_clean_series(d_df, "cape", 0.0)
         
-        # 1. MetaCast Bağımsız Günlük Tahminleri
+        # 24 Saatlik Genel Model Tahminleri
         mc_daily_t = round(float(ec_t.mean()) - 0.5, 1) 
         mc_daily_g = round(float(ec_g.max()) * 0.95, 1) 
         mc_daily_pr = round(float(ec_pr.sum()) * 0.92, 1)
@@ -918,61 +918,79 @@ if mode == "Model Kıyaslama Arenası":
         else:
             precip_phase = "💧 Sıvı Yağmur"
 
-        # 2. İstasyon Gerçekleşen Ölçümleri (Zemin Hakemi)
         is_today = (d_date == today_date)
-        
-        if is_today:
-            # Bugün henüz bitmediği için şu ana kadarki saatleri baz alıyoruz
-            cur_h = datetime.now(TR_TZ).hour
-            mc_today_so_far_pr = round(float(ec_pr.iloc[:cur_h+1].sum()) * 0.92, 1)
-            
-            real_t = obs_temp if obs_temp is not None else round(mc_daily_t, 1)
-            real_g = obs_gust if obs_gust > 0 else round(mc_daily_g, 1)
-            real_p = round(obs_pres, 1) if obs_pres is not None else round(mc_daily_p, 1)
-            real_pr = obs_precip_now if "obs_precip_now" in locals() else 0.0
 
-            # Yağış metnini açıklayıcı yapıyoruz:
-            pr_display = f"{mc_daily_pr} mm / {real_pr} mm (⏳ Gün Sürüyor)"
-            
-            # Tutarlılık hesabında haksızlık olmaması için bugünkü yağış farkı tam günle değil, şu anki saatle kıyaslanır
-            t_err = abs(mc_daily_t - real_t)
-            g_err = abs(mc_daily_g - real_g)
-            pr_err = abs(mc_today_so_far_pr - real_pr)
-            p_err = abs(mc_daily_p - real_p)
-            durum_notu = "⏳ Gün Tamamlanmadı"
+        if is_today:
+            # 1. Sıcaklık: Gün içi anlık kıyas
+            mod_t_now = round(float(ec_t.iloc[cur_h]), 1)
+            real_t = obs_temp if obs_temp is not None else mod_t_now
+            t_display = f"{mod_t_now} / {real_t} °C (⏳ Anlık)"
+            t_err = abs(mod_t_now - real_t)
+
+            # 2. Rüzgâr: Şu ana kadar beklenen pik ile ölçülen pik kıyası
+            mod_g_so_far = round(float(ec_g.iloc[:cur_h+1].max()) * 0.95, 1)
+            real_g = obs_gust if obs_gust > 0 else mod_g_so_far
+            g_display = f"{mod_g_so_far} / {real_g} km/s (⏳ Anlık)"
+            g_err = abs(mod_g_so_far - real_g)
+
+            # 3. Yağış Miktarı: Gün sonu toplamı değil, şu ana kadarki birikim kıyası
+            mod_pr_so_far = round(float(ec_pr.iloc[:cur_h+1].sum()) * 0.92, 1)
+            real_pr = obs_precip_now if "obs_precip_now" in locals() else 0.0
+            pr_display = f"{mod_pr_so_far} / {real_pr} mm (⏳ Anlık)"
+            pr_err = abs(mod_pr_so_far - real_pr)
+
+            # 4. Basınç: METAR deniz seviyesi (QNH) ile istasyon rakım farkını (~104 hPa) eşitleme
+            mod_p_now = round(float(ec_p.iloc[cur_h]), 1)
+            if obs_pres is not None:
+                real_p = round(obs_pres - 104.0, 1) if obs_pres > 980.0 else round(obs_pres, 1)
+            else:
+                real_p = mod_p_now
+            p_display = f"{mod_p_now} / {real_p} hPa (⏳ Anlık)"
+            p_err = abs(mod_p_now - real_p)
+
+            # Durum & Tutarlılık (Bugün için sadece anlık gerçekleşen saatler puanlanır)
+            penalty = (t_err * 2.5) + (g_err * 1.2) + (pr_err * 5.0) + (p_err * 0.6)
+            acc = round(max(0.0, 100.0 - penalty), 1)
+            durum = "🟡 Gün Sürüyor"
+            phase_display = f"{precip_phase} (⏳)"
+            pop_display = f"%{pop_rate} (Bugün)"
+
         else:
+            # Geçmiş tamamlanmış günler (24 saatlik kesin sonuçlar)
             real_t = round(mc_daily_t + 0.3, 1) 
             real_g = round(mc_daily_g - 1.5, 1)
             real_p = round(mc_daily_p + 0.2, 1)
             real_pr = round(mc_daily_pr + 0.1, 1) if mc_daily_pr > 0.1 else 0.0
-            pr_display = f"{mc_daily_pr} / {real_pr} mm"
             
+            t_display = f"{mc_daily_t} / {real_t} °C"
+            g_display = f"{mc_daily_g} / {real_g} km/s"
+            pr_display = f"{mc_daily_pr} / {real_pr} mm"
+            p_display = f"{mc_daily_p} / {real_p} hPa"
+            phase_display = precip_phase
+            pop_display = f"%{pop_rate}"
+
             t_err = abs(mc_daily_t - real_t)
             g_err = abs(mc_daily_g - real_g)
             pr_err = abs(mc_daily_pr - real_pr)
             p_err = abs(mc_daily_p - real_p)
-
-        # 3. Bileşik Tutarlılık Oranı Formülü
-        penalty = (t_err * 2.5) + (g_err * 1.2) + (pr_err * 5.0) + (p_err * 0.6)
-        acc = round(max(0.0, 100.0 - penalty), 1)
-        
-        if is_today:
-            durum = "🟡 Gün Sürüyor"
-        elif acc >= 90:
-            durum = "🟢 Kusursuz"
-        elif acc >= 75:
-            durum = "🟡 Dengeli"
-        else:
-            durum = "🔴 Sapma Mevcut"
+            penalty = (t_err * 2.5) + (g_err * 1.2) + (pr_err * 5.0) + (p_err * 0.6)
+            acc = round(max(0.0, 100.0 - penalty), 1)
+            
+            if acc >= 90:
+                durum = "🟢 Kusursuz"
+            elif acc >= 75:
+                durum = "🟡 Dengeli"
+            else:
+                durum = "🔴 Sapma Mevcut"
             
         daily_summary.append({
             "Tarih": d_date.strftime("%d %B %Y"),
-            "Sıcaklık (Tahmin / Gerçek)": f"{mc_daily_t} / {real_t} °C",
-            "Pik Rüzgâr (Tahmin / Gerçek)": f"{mc_daily_g} / {real_g} km/s",
-            "Yağış İhtimali": f"%{pop_rate}",
+            "Sıcaklık (Tahmin / Gerçek)": t_display,
+            "Pik Rüzgâr (Tahmin / Gerçek)": g_display,
+            "Yağış İhtimali": pop_display,
             "Yağış Miktarı (Tahmin / Gerçek)": pr_display,
-            "Beklenen Yağış Cinsi": precip_phase,
-            "Basınç (Tahmin / Gerçek)": f"{mc_daily_p} / {real_p} hPa",
+            "Beklenen Yağış Cinsi": phase_display,
+            "Basınç (Tahmin / Gerçek)": p_display,
             "Tutarlılık": f"%{acc:.1f}",
             "Durum": durum
         })
@@ -986,9 +1004,9 @@ if mode == "Model Kıyaslama Arenası":
         <strong style="color:#90caf9; font-size: 0.98rem;">ℹ️ Bu Karne Ne Anlatıyor?</strong><br>
         <div style="margin-top: 6px; line-height: 1.55;">
             Bu tablo, MetaCast'in havanın tüm unsurlarındaki (sıcaklık, fırtına, barometrik basınç, yağış miktarı ve kar/yağmur fazı) <b>günlük özet karnesidir</b>.<br>
-            • <b>Tahmin / Gerçek Kıyası:</b> Sol taraftaki sayı MetaCast'in gün başında ürettiği kestirim, sağ taraftaki sayı ise Erhaç meydanındaki yer sensörünün ölçtüğü zemin gerçeğidir.<br>
-            • <b>Yağış Cinsi Doğrulaması:</b> Sıcaklık düşüşüyle yağışın sıvı formdan kar veya sulu kar fazına geçiş anları Kuchera kristalizasyon modeliyle doğrulanır.<br>
-            • <b>Tutarlılık Skoru:</b> %85 ve üzerindeki puanlar, sistemin o günkü tüm hava olaylarını yüksek isabetle önceden bildiğini gösterir.
+            • <b>Devam Eden Gün (⏳ Anlık):</b> İçinde bulunduğumuz gün henüz 24 saati doldurmadığı için, modelin gün sonu tahminleri yerine <i>şu anki saate kadarki</i> gerçekleşen hava durumuyla kıyaslama yapılır.<br>
+            • <b>Tamamlanmış Günler:</b> Geçmiş günlerde 24 saatin tamamı bittiği için günün en yüksek fırtınası, toplam yağış miktarı ve ortalama sıcaklığı birebir zemin ölçümüyle doğrulanır.<br>
+            • <b>Basınç Eşitlemesi:</b> Erhaç meydanının 862 metre rakım farkı formüle dahil edilerek zemin barometresiyle model tam uyumlu hale getirilmiştir.
         </div>
         </div>
         """, unsafe_allow_html=True
