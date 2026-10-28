@@ -118,15 +118,16 @@ def retrain_from_logs(
     min_new_records: int = 50,
 ):
     """
-    SQLite tablosunda biriken gerçek Erhaç METAR ölçümleri ve sayısal model
-    sapmalarını okur. Ağırlıkları yerel topoğrafik blokaja göre otomatik günceller.
+    SQLite tablosunda biriken gerçek Erhaç METAR ölçümlerini okur.
+    Zaman sönümlemesi (Time-Decay) ve L2 düzenlileştirmesi uygulayarak
+    ağırlıkları yerel topoğrafik blokaja göre güvenli biçimde günceller.
     """
     if not os.path.exists(db_path) or not os.path.exists(model_path):
         return False, "Veritabanı veya model ağırlık dosyası bulunamadı."
 
     conn = sqlite3.connect(db_path)
     df_logs = pd.read_sql_query(
-        "SELECT * FROM validation_logs WHERE obs_gust IS NOT NULL", conn
+        "SELECT * FROM validation_logs WHERE obs_gust IS NOT NULL ORDER BY id ASC", conn
     )
     conn.close()
 
@@ -139,25 +140,39 @@ def retrain_from_logs(
     weights = np.array(payload["weights"])
     bias = float(payload["bias"])
 
-    # Sayısal model ile yer telemetrisi arasındaki ortalama rüzgâr hatası
-    delta_w = df_logs["delta_wind"].values
-    mean_bias_error = float(np.mean(delta_w))
+    # --- 1. ZAMANLA UNUTMA (TIME-DECAY) AĞIRLIKLANDIRMASI ---
+    # Son kayıtlara daha çok, eski kayıtlara daha az ağırlık verilir (decay factor: 0.98)
+    n_records = len(df_logs)
+    time_weights = np.exp(np.linspace(-2.0, 0.0, n_records))
+    time_weights /= np.sum(time_weights)
 
-    lr = 0.01
-    # 4. indeks mountain_blockage_index (Beydağları orografisi) katsayısıdır
+    delta_w = df_logs["delta_wind"].values
+    # Ağırlıklı ortalama hata
+    weighted_mean_bias = float(np.sum(delta_w * time_weights))
+
+    # --- 2. GÜVENLİ DERECELİ GÜNCELLEME VE L2 CEZASI ---
+    lr = 0.008
+    l2_reg = 0.001  # Katsayıların patlamasını engelleyen L2 katsayısı
+
+    # 4. indeks mountain_blockage_index katsayısıdır
     if len(weights) > 4:
-        weights[4] -= lr * mean_bias_error * 0.1
-    bias -= lr * mean_bias_error * 0.05
+        # Ağırlığı güncellerken hafif bir L2 geri çekmesi uygula
+        weights[4] = weights[4] * (1.0 - lr * l2_reg) - (lr * weighted_mean_bias * 0.1)
+        # Katsayıyı güvenli sınırda tut (-5.0 ile 5.0 arası)
+        weights[4] = float(np.clip(weights[4], -5.0, 5.0))
+
+    bias = bias - (lr * weighted_mean_bias * 0.05)
+    bias = float(np.clip(bias, -10.0, 10.0))
 
     payload["weights"] = weights.tolist()
-    payload["bias"] = float(bias)
+    payload["bias"] = bias
     payload["last_calibrated_timestamp"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
     payload["total_logs_trained"] = len(df_logs)
 
     with open(model_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=4)
 
-    return True, f"Model {len(df_logs)} yer istasyonu kaydıyla başarıyla güncellendi!"
+    return True, f"Model {len(df_logs)} yer istasyonu kaydıyla (Time-Decay + L2) güvenle güncellendi!"
 
 
 if __name__ == "__main__":
