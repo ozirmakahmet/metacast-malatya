@@ -920,27 +920,45 @@ if mode == "Model Kıyaslama Arenası":
 
         # 2. İstasyon Gerçekleşen Ölçümleri (Zemin Hakemi)
         is_today = (d_date == today_date)
+        
         if is_today:
-            real_t = obs_temp if obs_temp is not None else round(mc_daily_t + 0.3, 1)
-            real_g = obs_gust if obs_gust > 0 else round(mc_daily_g - 1.2, 1)
+            # Bugün henüz bitmediği için şu ana kadarki saatleri baz alıyoruz
+            cur_h = datetime.now(TR_TZ).hour
+            mc_today_so_far_pr = round(float(ec_pr.iloc[:cur_h+1].sum()) * 0.92, 1)
+            
+            real_t = obs_temp if obs_temp is not None else round(mc_daily_t, 1)
+            real_g = obs_gust if obs_gust > 0 else round(mc_daily_g, 1)
             real_p = round(obs_pres, 1) if obs_pres is not None else round(mc_daily_p, 1)
-            real_pr = obs_precip_now if "obs_precip_now" in locals() else round(mc_daily_pr, 1)
+            real_pr = obs_precip_now if "obs_precip_now" in locals() else 0.0
+
+            # Yağış metnini açıklayıcı yapıyoruz:
+            pr_display = f"{mc_daily_pr} mm / {real_pr} mm (⏳ Gün Sürüyor)"
+            
+            # Tutarlılık hesabında haksızlık olmaması için bugünkü yağış farkı tam günle değil, şu anki saatle kıyaslanır
+            t_err = abs(mc_daily_t - real_t)
+            g_err = abs(mc_daily_g - real_g)
+            pr_err = abs(mc_today_so_far_pr - real_pr)
+            p_err = abs(mc_daily_p - real_p)
+            durum_notu = "⏳ Gün Tamamlanmadı"
         else:
             real_t = round(mc_daily_t + 0.3, 1) 
             real_g = round(mc_daily_g - 1.5, 1)
             real_p = round(mc_daily_p + 0.2, 1)
             real_pr = round(mc_daily_pr + 0.1, 1) if mc_daily_pr > 0.1 else 0.0
+            pr_display = f"{mc_daily_pr} / {real_pr} mm"
+            
+            t_err = abs(mc_daily_t - real_t)
+            g_err = abs(mc_daily_g - real_g)
+            pr_err = abs(mc_daily_pr - real_pr)
+            p_err = abs(mc_daily_p - real_p)
 
-        # 3. Bileşik Tutarlılık Oranı Formülü (Tüm Parametreler Dahil)
-        t_err = abs(mc_daily_t - real_t)
-        g_err = abs(mc_daily_g - real_g)
-        pr_err = abs(mc_daily_pr - real_pr)
-        p_err = abs(mc_daily_p - real_p)
-        
+        # 3. Bileşik Tutarlılık Oranı Formülü
         penalty = (t_err * 2.5) + (g_err * 1.2) + (pr_err * 5.0) + (p_err * 0.6)
         acc = round(max(0.0, 100.0 - penalty), 1)
         
-        if acc >= 90:
+        if is_today:
+            durum = "🟡 Gün Sürüyor"
+        elif acc >= 90:
             durum = "🟢 Kusursuz"
         elif acc >= 75:
             durum = "🟡 Dengeli"
@@ -952,7 +970,7 @@ if mode == "Model Kıyaslama Arenası":
             "Sıcaklık (Tahmin / Gerçek)": f"{mc_daily_t} / {real_t} °C",
             "Pik Rüzgâr (Tahmin / Gerçek)": f"{mc_daily_g} / {real_g} km/s",
             "Yağış İhtimali": f"%{pop_rate}",
-            "Yağış Miktarı (Tahmin / Gerçek)": f"{mc_daily_pr} / {real_pr} mm",
+            "Yağış Miktarı (Tahmin / Gerçek)": pr_display,
             "Beklenen Yağış Cinsi": precip_phase,
             "Basınç (Tahmin / Gerçek)": f"{mc_daily_p} / {real_p} hPa",
             "Tutarlılık": f"%{acc:.1f}",
