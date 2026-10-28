@@ -1943,9 +1943,9 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                     if (framesData.length === 0) return;
 
                     framesData.forEach((frame, idx) => {{
-                        const layer = L.tileLayer(data.host + frame.path + '/256/{{z}}/{{x}}/{{y}}/1/1_1.png', {{
-                            opacity: 0, zIndex: 500, maxNativeZoom: 8, maxZoom: 18, minZoom: 5
-                        }});
+                        const layer = L.tileLayer(data.host + frame.path + '/256/{z}/{x}/{y}/1/1_1.png', {
+    opacity: 0, zIndex: 500, maxNativeZoom: 8, maxZoom: 11, minZoom: 5
+});
                         layer.addTo(map);
                         radarLayers.push(layer);
                     }});
