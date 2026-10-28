@@ -1809,7 +1809,8 @@ with v_col1:
         f"""
     <div class="card-box">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <strong style="color: #90caf9;">📊 Model Doğruluk & Güvenilirlik</strong>
+            st.markdown('<strong style="color: #90caf9;">📊 Model Doğruluk & Güvenilirlik</strong>', unsafe_allow_html=True)
+
             <span style="font-weight: 700; color: #fff;">%{model_reliability_score:.0f}</span>
         </div>
         <div style="font-size: 0.85rem; color: #cfd8dc; margin-bottom: 6px;">Durum: <strong>{rel_status}</strong></div>
