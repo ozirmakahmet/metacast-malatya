@@ -163,27 +163,27 @@ def calculate_snow_accumulation_cm(temps, precips, hours=24):
     return round(total_snow_cm, 1), valid_hours
     
     def transfer_erhac_to_merkez(erhac_temp, erhac_gust, erhac_precip, wind_dir, cloud_cover, hour):
-    is_night = (hour >= 20) or (hour <= 7)
-    if erhac_temp is not None:
+     is_night = (hour >= 20) or (hour <= 7)
+     if erhac_temp is not None:
         if is_night and (cloud_cover <= 35.0) and (erhac_gust <= 15.0):
             merkez_temp = round(erhac_temp - 1.2, 1)
-        else:
+         else:
             merkez_temp = round(erhac_temp - 0.6, 1)
     else:
         merkez_temp = None
 
     blk = float(calculate_gaussian_blockage(wind_dir))
-    if blk >= 0.50 and erhac_gust >= 25.0:
+     if blk >= 0.50 and erhac_gust >= 25.0:
         merkez_gust = round(erhac_gust * (1.0 - 0.35 * blk), 1)
-    else:
+     else:
         merkez_gust = round(erhac_gust * 0.95, 1)
 
-    if erhac_precip > 0.05:
+     if erhac_precip > 0.05:
         merkez_precip = round(erhac_precip * 1.18, 1)
-    else:
+     else:
         merkez_precip = erhac_precip
 
-    return merkez_temp, merkez_gust, merkez_precip
+     return merkez_temp, merkez_gust, merkez_precip
 
 
 # --- MLOps VERİ GÜNLÜĞÜ (SQLITE) & OTOMATİK ÖĞRENME TETİKLEYİCİSİ ---
