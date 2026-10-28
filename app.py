@@ -827,7 +827,7 @@ if "Bileşik" in selected_param:
         m4.metric("GFS", f"{v_gfs} Puan", delta=f"{v_gfs - 100:+.1f}", delta_color="inverse")
         m5.metric("ICON", f"{v_icon} Puan", delta=f"{v_icon - 100:+.1f}", delta_color="inverse")
         winner_name = max({"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon}, key=lambda k: {"MetaCast (Hibrit)": v_mc, "ECMWF (Avrupa)": v_ec, "GFS (ABD)": v_gfs, "ICON (Almanya)": v_icon}[k])
-    else:
+else:
         m1.metric("🚩 Erhaç Hakem", f"{ref_val:.1f} {param_unit}", delta="Yer Ölçümü")
         m2.metric("MetaCast", f"{v_mc:.1f} {param_unit}", delta=f"Fark: {v_mc - ref_val:+.1f}", delta_color="inverse")
         m3.metric("ECMWF", f"{v_ec:.1f} {param_unit}", delta=f"Fark: {v_ec - ref_val:+.1f}", delta_color="inverse")
