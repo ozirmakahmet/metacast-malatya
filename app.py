@@ -1646,9 +1646,12 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
             fetch('https://api.rainviewer.com/public/weather-maps.json')
                 .then(res => res.json())
                 .then(data => {{
-                    const past = data.radar.past || [];
+                    const rawPast = data.radar.past || [];
                     const nowcast = data.radar.nowcast || [];
-                    framesData = past.concat(nowcast);
+                    
+                    // Sadece son 3 kareyi (yaklaşık son 30 dakikayı) alıyoruz
+                    const recentPast = rawPast.slice(-3);
+                    framesData = recentPast.concat(nowcast);
 
                     if (framesData.length === 0) return;
 
@@ -1660,7 +1663,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
                         radarLayers.push(layer);
                     }});
 
-                    currentIdx = past.length > 0 ? past.length - 1 : 0;
+                    currentIdx = recentPast.length > 0 ? recentPast.length - 1 : 0;
                     showFrame(currentIdx);
                     startLoop();
                 }})
