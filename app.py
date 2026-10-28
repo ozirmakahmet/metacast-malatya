@@ -247,6 +247,39 @@ def calculate_gaussian_blockage(wind_dir, peak_angle=215.0, spread=35.0):
     diff = (wind_dir - peak_angle + 180) % 360 - 180
     # Gauss Formülü: e^(-(x^2) / (2*sigma^2))
     return np.exp(-(diff ** 2) / (2 * spread ** 2))
+    def calculate_snow_accumulation_cm(temps, precips, hours=24):
+    """
+    Termodinamik Kuchera SLR (Snow-to-Liquid Ratio) Modeli:
+    Saatlik sıcaklık ve sıvı eşdeğeri yağış (mm) üzerinden zeminde birikecek
+    tahmini kar örtüsü kalınlığını (cm) dinamik oranla hesaplar.
+    """
+    total_snow_cm = 0.0
+    valid_hours = min(len(temps), len(precips), hours)
+
+    for i in range(valid_hours):
+        t = float(temps[i])
+        p = float(precips[i])
+
+        if p <= 0.05:
+            continue
+
+        if t <= -12.0:
+            slr = 20.0
+        elif t <= -7.0:
+            slr = 17.0
+        elif t <= -3.0:
+            slr = 14.0
+        elif t <= 0.0:
+            slr = 11.0
+        elif t <= 1.2:
+            slr = 6.0
+        else:
+            slr = 0.0
+
+        snow_depth_cm = (p * slr) / 10.0
+        total_snow_cm += snow_depth_cm
+
+    return round(total_snow_cm, 1), valid_hours
 # --- MLOps VERİ GÜNLÜĞÜ (SQLITE) & OTOMATİK ÖĞRENME TETİKLEYİCİSİ ---
 def init_logger_db():
     os.makedirs("data", exist_ok=True)
@@ -1562,22 +1595,28 @@ for d_idx, tab in enumerate(day_tabs):
             unsafe_allow_html=True
         )
 
-        if 'hourly_temps' in locals() and 'hourly_precips' in locals() and len(hourly_temps) >= 24:
-            snow_24h_cm, _ = calculate_snow_accumulation_cm(hourly_temps[:24], hourly_precips[:24], hours=24)
+        # ❄️ 24 Saatlik Termodinamik Kuchera Zemin Kar Birikim Kartı
+        day_slice_temps = api_hourly_temps[day_start_hour:day_start_hour + 24]
+        day_slice_precips = api_hourly_precips[day_start_hour:day_start_hour + 24]
+
+        if day_slice_temps and day_slice_precips:
+            snow_24h_cm, _ = calculate_snow_accumulation_cm(day_slice_temps, day_slice_precips, hours=24)
             if snow_24h_cm > 0.0:
-                snow_status = "İnce Beyaz Örtü" if snow_24h_cm < 3.0 else ("Kuvvetli Kar Yağışı" if snow_24h_cm < 10.0 else "Yoğun Kar Fırtınası")
+                snow_status = (
+                    "İnce Beyaz Örtü (Buzlanma Tehlikesi)" if snow_24h_cm < 3.0
+                    else ("Kuvvetli Kar Yağışı (Trafik ve Tipi Riski)" if snow_24h_cm < 10.0
+                    else "🚨 Yoğun Kar Fırtınası (Afet Protokolü)")
+                )
                 snow_color = "#38bdf8" if snow_24h_cm < 3.0 else ("#f59e0b" if snow_24h_cm < 10.0 else "#ef4444")
                 st.markdown(
                     f"""
-                    <div style="background: rgba(14, 165, 233, 0.06); border: 1.5px solid {snow_color}; border-radius: 12px; padding: 12px 16px; margin: 10px 0; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="background: rgba(14, 165, 233, 0.08); border: 1.5px solid {snow_color}; border-radius: 12px; padding: 12px 18px; margin: 12px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                         <div>
-                            <div style="font-weight: 800; color: #fff;">❄️ 24 Saatlik Zemin Kar Birikimi: <span style="color: {snow_color};">{snow_24h_cm} cm</span></div>
-                            <div style="font-size: 0.8rem; color: #94a3b8;">{snow_status} (Kuchera SLR Termodinamik Modeli)</div>
+                            <div style="font-weight: 800; font-size: 1.05rem; color: #ffffff;">❄️ 24 Saatlik Tahmini Kar Birikimi: <span style="color: {snow_color}; font-size: 1.25rem;">{snow_24h_cm} cm</span></div>
+                            <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 2px;">{snow_status} • <em>Kuchera SLR Dinamik Kristalizasyon Modeli</em></div>
                         </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+                        <div style="text-align: right;">
+                            <span style="background: {snow_color}; color:
 
 # ==============================================================================
 # 🧠 METACAST GELİŞMİŞ KALİBRASYON MOTORU (ERHAÇ MİKROKLİMA & ENSEMBLE)
