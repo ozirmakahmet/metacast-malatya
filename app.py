@@ -1247,12 +1247,13 @@ if mode == "Canlı Operasyonel":
                 st.rerun()
 
     df = df_raw[df_raw["time"].dt.date == st.session_state.current_date].reset_index(drop=True)
-    if df.empty:
-        st.session_state.current_date = min_date
-        df = df_raw[df_raw["time"].dt.date == min_date].reset_index(drop=True)
+if df.empty:
+    st.session_state.current_date = min_date
+    df = df_raw[df_raw["time"].dt.date == min_date].reset_index(drop=True)
 
-    date_display = df["time"].iloc[0].strftime("%d %B %Y")
+date_display = df["time"].iloc[0].strftime("%d %B %Y")
 tag_sub = f"Canlı Model Tahmini (Güncelleme: {last_update})"
+
 # Sayısal modellerin serilerini df indeksine kilitleme
 ecmwf = get_clean_series(df, "wind_gusts_10m_ecmwf_ifs", 10.0)
 gfs = get_clean_series(df, "wind_gusts_10m_gfs_seamless", 10.0, fallback_series=ecmwf)
@@ -1264,7 +1265,6 @@ gust_std = np.std([ecmwf.values, gfs.values, icon_gusts.values], axis=0)
 peak_idx = int(np.argmax(gust_mean.values))
 peak_time = df["time"].iloc[peak_idx].strftime("%d.%m.%Y - Saat %H:00")
 peak_gust = float(gust_mean.iloc[peak_idx])
-
 wind_dir_series = get_clean_series(df, "wind_direction_10m_ecmwf_ifs", 0.0)
 live_wind_deg = float(wind_dir_series.iloc[peak_idx])
 
