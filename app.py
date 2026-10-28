@@ -848,6 +848,10 @@ if mode == "Model Kıyaslama Arenası":
     verified_rounds = 0
     tot_obs_pr, tot_mc_pr, tot_ec_pr, tot_gfs_pr, tot_icon_pr = 0.0, 0.0, 0.0, 0.0, 0.0
 
+    # YENİ BLOK: METACAST BAĞIMSIZ PIML ÇIKARIM MOTORU (NO ARITHMETIC MEAN)
+    s_c_cover = get_clean_series(df_arena, "cloud_cover_ecmwf_ifs", 20.0, fallback_series=get_clean_series(df_arena, "cloud_cover", 20.0))
+    s_dew_p = get_clean_series(df_arena, "dew_point_2m_ecmwf_ifs", 10.0, fallback_series=(s_ec_t - 4.0))
+
     for h_i in range(len(df_arena)):
         dt_val = df_arena["time"].iloc[h_i]
         gun_adi = gunler[dt_val.weekday()]
@@ -856,29 +860,80 @@ if mode == "Model Kıyaslama Arenası":
         e_g = float(s_ec_g.iloc[h_i])
         g_g = float(s_gfs_g.iloc[h_i])
         i_g = float(s_icon_g.iloc[h_i])
-        m_mean_g = (e_g + g_g + i_g) / 3.0
         w_dir = float(s_wdir.iloc[h_i])
-        blk = float(calculate_gaussian_blockage(w_dir))
-        mc_g = round(m_mean_g * (1.0 - 0.28 * blk), 1) if (blk >= 0.65 and m_mean_g >= 30) else round(m_mean_g, 1)
 
         e_t = float(s_ec_t.iloc[h_i])
         g_t = float(s_gfs_t.iloc[h_i])
         i_t = float(s_icon_t.iloc[h_i])
-        m_mean_t = (e_t + g_t + i_t) / 3.0
-        is_night_h = (dt_val.hour >= 21) or (dt_val.hour <= 7)
-        mc_t = round(m_mean_t - (0.8 if is_night_h else 0.0), 1)
 
         e_pr = float(s_ec_pr.iloc[h_i])
         g_pr = float(s_gfs_pr.iloc[h_i])
         i_pr = float(s_icon_pr.iloc[h_i])
-        m_mean_pr = (e_pr + g_pr + i_pr) / 3.0
-        r_shadow = 0.78 if (blk >= 0.65 and m_mean_pr > 0.2) else 1.0
-        mc_pr = round(m_mean_pr * r_shadow, 1)
 
         e_p = float(s_ec_p.iloc[h_i])
         g_p = float(s_gfs_p.iloc[h_i])
         i_p = float(s_icon_p.iloc[h_i])
-        mc_p = round((e_p + g_p + i_p) / 3.0, 1)
+
+        c_cov = float(s_c_cover.iloc[h_i])
+        d_pt = float(s_dew_p.iloc[h_i])
+
+        # ----------------------------------------------------------------------
+        # 1. 💨 METACAST BAĞIMSIZ RÜZGÂR KESTİRİMİ (OROGRAFİK SÖNÜMLEME + SÜRTÜNME)
+        # ----------------------------------------------------------------------
+        # Modellerin basit ortalaması yerine medyan konsensüsü ve uç değer filtrelemesi
+        g_sorted = sorted([e_g, g_g, i_g])
+        med_g = g_sorted[1]
+        spread_g = g_sorted[2] - g_sorted[0]
+        # Uç değer varsa medyana ağırlık verilir, saçmalayan model elenir
+        base_gust_val = (med_g * 0.75) + ((g_sorted[0] + g_sorted[2]) * 0.125) if spread_g > 10.0 else (e_g * 0.40 + i_g * 0.35 + g_g * 0.25)
+        
+        # Gauss Orografik Bariyer Etkisi (Beydağları 215° koridoru)
+        blk = float(calculate_gaussian_blockage(w_dir))
+        # Zemin pürüzlülüğü ve dağ engeli sönümlemesi
+        drag_k = 1.0 - (0.32 * blk) if (blk >= 0.50 and base_gust_val >= 25.0) else 1.0
+        mc_g = round(base_gust_val * drag_k, 1)
+
+        # ----------------------------------------------------------------------
+        # 2. 🌡️ METACAST BAĞIMSIZ SICAKLIK & ENVERZİYON MODELİ
+        # ----------------------------------------------------------------------
+        t_sorted = sorted([e_t, g_t, i_t])
+        base_t_val = (t_sorted[1] * 0.70) + ((t_sorted[0] + t_sorted[2]) * 0.15) if (t_sorted[2] - t_sorted[0]) > 3.0 else (e_t * 0.45 + i_t * 0.35 + g_t * 0.20)
+        
+        # Çanak içi gece radyasyonel soğuma (İnversiyon göllenmesi)
+        is_night_h = (dt_val.hour >= 20) or (dt_val.hour <= 7)
+        # Bulut örtüsü azaldıkça ve rüzgar dindikçe yer radyasyonu hızla uzaya kaçar
+        if is_night_h and c_cov <= 35.0 and mc_g <= 15.0:
+            rad_cooling = 1.6 * (1.0 - c_cov / 100.0) * np.exp(-0.05 * mc_g)
+        else:
+            rad_cooling = 0.0
+        mc_t = round(base_t_val - rad_cooling, 1)
+
+        # ----------------------------------------------------------------------
+        # 3. 🌧️ METACAST BAĞIMSIZ YAĞIŞ ÇIKARIMI (BUHARLAŞMA + YAĞMUR GÖLGESİ)
+        # ----------------------------------------------------------------------
+        # Modellerin sinoptik ağırlığı: ECMWF ve ICON Malatya'da yüksek doğruluğa sahiptir, GFS konveksiyonu abartır
+        p_sorted = sorted([e_pr, g_pr, i_pr])
+        rain_models_count = sum(1 for p_val in p_sorted if p_val >= 0.1)
+
+        if rain_models_count <= 1:
+            # Sadece tek bir model uç değer veriyorsa (örn. GFS 20 mm, diğerleri 0), medyanı alarak hayalet yağışı bastır
+            synoptic_pr = p_sorted[1]
+        else:
+            synoptic_pr = (e_pr * 0.45) + (i_pr * 0.35) + (g_pr * 0.20)
+
+        # Çiy noktası açığı (Virga etkisi: Kuru atmosfer tabakasında yağışın buharlaşması)
+        dp_depression = max(0.0, mc_t - d_pt)
+        virga_factor = float(np.exp(-0.12 * dp_depression)) if synoptic_pr > 0 else 1.0
+
+        # Beydağları yağmur gölgesi etkisi (Fön kurutması)
+        rain_shadow = (1.0 - 0.35 * blk) if (blk >= 0.60 and synoptic_pr > 0.2) else 1.0
+        mc_pr = round(synoptic_pr * virga_factor * rain_shadow, 1)
+
+        # ----------------------------------------------------------------------
+        # 4. ⏱️ METACAST BAROMETRİK BASINÇ MODELİ
+        # ----------------------------------------------------------------------
+        p_sorted = sorted([e_p, g_p, i_p])
+        mc_p = round(p_sorted[1], 1) if (p_sorted[2] - p_sorted[0]) > 2.5 else round((e_p * 0.45 + i_p * 0.35 + g_p * 0.20), 1)
 
         dt_hour_str = dt_val.strftime("%Y-%m-%d %H")
         now_hour_str = now_real_dt.strftime("%Y-%m-%d %H")
