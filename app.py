@@ -161,6 +161,7 @@ def calculate_snow_accumulation_cm(temps, precips, hours=24):
         total_snow_cm += snow_depth_cm
 
     return round(total_snow_cm, 1), valid_hours
+    
     def transfer_erhac_to_merkez(erhac_temp, erhac_gust, erhac_precip, wind_dir, cloud_cover, hour):
     """
     Erhaç Havalimanı (862m) yer ölçümünü Malatya Merkez (950m) ve Beydağları
