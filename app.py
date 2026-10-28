@@ -820,7 +820,7 @@ except Exception:
     pass
 m1, m2, m3, m4, m5 = st.columns(5)
 
-    if "Bileşik" in selected_param:
+if "Bileşik" in selected_param:
         m1.metric("🚩 Erhaç Hakem", "100 Puan", delta="Kusursuz Hedef")
         m2.metric("MetaCast", f"{v_mc} Puan", delta=f"{v_mc - 100:+.1f}", delta_color="inverse")
         m3.metric("ECMWF", f"{v_ec} Puan", delta=f"{v_ec - 100:+.1f}", delta_color="inverse")
