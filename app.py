@@ -1620,18 +1620,53 @@ elif is_radiation_frost_danger:
 else:
     risk_score = float(probabilities.max())
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("İncelenen Tarih", date_display)
-col1.caption(f"Zirve: **{peak_time}**")
+col1, col2, col3, col4 = st.columns([1.2, 1.2, 1.4, 1.2])
 
-col2.metric("Beklenen Pik Rüzgâr", f"{peak_gust:.1f} km/s")
-col2.caption(f"Yön: **{live_wind_deg:.0f}°** | Sapma: ±{gust_std.mean():.1f} km/s")
+with col1:
+    st.metric("İncelenen Tarih", date_display)
+    st.caption(f"Zirve: **{peak_time}**")
 
-col3.metric("Bileşik Afet Riski", f"%{risk_score:.1f}")
-col3.caption("PIML Olasılığı")
+with col2:
+    st.metric("Beklenen Pik Rüzgâr", f"{peak_gust:.1f} km/s")
+    st.caption(f"Yön: **{live_wind_deg:.0f}°** | Sapma: ±{gust_std.mean():.1f} km/s")
 
-col4.metric("Gece Min Sıcaklık", f"{night_min_temp:.1f}°C", delta="Don Riski" if night_min_temp <= 0.0 else None, delta_color="inverse")
-col4.caption(f"En Soğuk Saat: **{night_min_time}**")
+with col3:
+    # --- İBRELİ AFET RİSKİ GÖSTERGESİ (GAUGE) ---
+    gauge_bar_color = "#22c55e" if risk_score < 35 else ("#ff9800" if risk_score < 65 else "#ef4444")
+    fig_gauge = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=round(risk_score, 1),
+        number={"suffix": "%", "font": {"size": 22, "color": "#ffffff", "family": "Arial Black"}},
+        title={"text": "Bileşik Afet Riski (PIML)", "font": {"size": 11, "color": "#90caf9"}},
+        gauge={
+            "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "#546e7a", "tickfont": {"size": 9, "color": "#94a3b8"}},
+            "bar": {"color": gauge_bar_color, "thickness": 0.28},
+            "bgcolor": "rgba(255, 255, 255, 0.03)",
+            "borderwidth": 1,
+            "bordercolor": "rgba(255, 255, 255, 0.1)",
+            "steps": [
+                {"range": [0, 35], "color": "rgba(34, 197, 94, 0.15)"},
+                {"range": [35, 65], "color": "rgba(255, 152, 0, 0.15)"},
+                {"range": [65, 100], "color": "rgba(239, 68, 68, 0.20)"},
+            ],
+            "threshold": {
+                "line": {"color": "#ffffff", "width": 2},
+                "thickness": 0.75,
+                "value": risk_score
+            }
+        }
+    ))
+    fig_gauge.update_layout(
+        height=125,
+        margin=dict(l=10, r=10, t=25, b=5),
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#ffffff")
+    )
+    st.plotly_chart(fig_gauge, use_container_width=True, config={"displayModeBar": False})
+
+with col4:
+    st.metric("Gece Min Sıcaklık", f"{night_min_temp:.1f}°C", delta="Don Riski" if night_min_temp <= 0.0 else None, delta_color="inverse")
+    st.caption(f"En Soğuk Saat: **{night_min_time}**")
 
 if is_radiation_frost_danger:
     frost_indices = df.index[night_mask & (temp <= 2.0)].tolist()
