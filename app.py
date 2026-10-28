@@ -1917,8 +1917,15 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
         </div>
 
         <script>
-            const map = L.map('radar-real-map', {{ zoomControl: true, attributionControl: false, maxZoom: 18, minZoom: 5 }}).setView([38.355, 38.309], 9);
-            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{ maxZoom: 18, minZoom: 5, attribution: 'OpenStreetMap' }}).addTo(map);
+    // MaxZoom 11 olarak sınırlandırıldı, zemin CartoDB ile değiştirildi.
+    const map = L.map('radar-real-map', { zoomControl: true, attributionControl: false, maxZoom: 11, minZoom: 5 }).setView([38.355, 38.309], 8);
+    
+    // Daha güvenilir ve şık harita zemini
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        maxZoom: 11,
+        minZoom: 5,
+        attribution: 'CartoDB'
+    }).addTo(map);
 
             let radarLayers = [];
             let framesData = [];
