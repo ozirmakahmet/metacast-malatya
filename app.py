@@ -1254,12 +1254,9 @@ df = df_raw[df_raw["time"].dt.date == st.session_state.current_date].reset_index
     date_display = df["time"].iloc[0].strftime("%d %B %Y")
     tag_sub = f"Canlı Model Tahmini (Güncelleme: {last_update})"
 else:
-    try:
-        df, date_display, tag_sub = generate_scenario(mode)
-    except Exception:
-        df = df_raw[df_raw["time"].dt.date == min_date].reset_index(drop=True)
-        date_display = df["time"].iloc[0].strftime("%d %B %Y")
-        tag_sub = "Model Arenası"
+    df = df_raw[df_raw["time"].dt.date == min_date].reset_index(drop=True)
+    date_display = df["time"].iloc[0].strftime("%d %B %Y")
+    tag_sub = "Model Arenası"
 
 # Sayısal modellerin serilerini df indeksine kilitleme
 ecmwf = get_clean_series(df, "wind_gusts_10m_ecmwf_ifs", 10.0)
