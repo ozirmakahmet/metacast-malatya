@@ -479,7 +479,11 @@ except Exception as e:
     st.error(f"Model ağırlıkları yüklenemedi: {e}")
     st.stop()
 
+# GENEL TELEMETRİ YÜKLEMESİ (TÜM SAYFADA GEÇERLİ)
 metar = fetch_live_metar()
+obs_gust = float(metar["gust_kmh"]) if metar.get("gust_kmh") else float(metar.get("speed_kmh", 0.0))
+obs_temp = float(metar["temp_c"]) if metar.get("temp_c") is not None else None
+obs_pres = float(metar["altim_hpa"]) if metar.get("altim_hpa") else None
 
 if metar["status"] == "offline":
     st.warning("⚠️ **FAIL-SAFE AKTİF:** Erhaç yer istasyonu çevrimdışı. Modeller konsensüsü devrede.")
@@ -513,7 +517,7 @@ if mode == "Model Kıyaslama Arenası":
 
     selected_param = st.radio("Kıyaslanacak Meteorolojik Durum:", ["💨 Rüzgâr Hamlesi (km/s)", "🌡️ Hava Sıcaklığı (°C)", "🌧️ Yağış Miktarı (mm)", "⏱️ Yüzey Basıncı (hPa)", "🏆 Bileşik Genel Başarı (Tüm Parametreler)"], horizontal=True)
 
-    obs_g = float(metar["gust_kmh"]) if metar["gust_kmh"] else 0.0
+    obs_g = obs_gust
     ec_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0).iloc[now_idx])
     gfs_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_gfs_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
     icon_g_now = float(get_clean_series(df_raw, "wind_gusts_10m_icon_seamless", 0.0, fallback_series=get_clean_series(df_raw, "wind_gusts_10m_ecmwf_ifs", 0.0)).iloc[now_idx])
@@ -529,7 +533,7 @@ if mode == "Model Kıyaslama Arenası":
     mountain_drag = (1.0 - 0.22 * blk_now) if (blk_now >= 0.70 and base_gust >= 35.0) else 1.0
     mc_g_now = round(base_gust * mountain_drag, 1)
 
-    obs_t = float(metar["temp_c"]) if metar["temp_c"] is not None else None
+    obs_t = obs_temp
     ec_t_now = float(get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0).iloc[now_idx])
     gfs_t_now = float(get_clean_series(df_raw, "temperature_2m_gfs_seamless", 15.0, fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0)).iloc[now_idx])
     icon_t_now = float(get_clean_series(df_raw, "temperature_2m_icon_seamless", 15.0, fallback_series=get_clean_series(df_raw, "temperature_2m_ecmwf_ifs", 15.0)).iloc[now_idx])
@@ -568,7 +572,6 @@ if mode == "Model Kıyaslama Arenası":
     rain_shadow = 0.78 if (blk_now >= 0.65 and base_p > 0.2) else 1.0
     mc_precip_now = round(base_p * rain_shadow, 1)
 
-    obs_pres = float(metar["altim_hpa"]) if metar["altim_hpa"] else None
     ec_pres_now = float(get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25).iloc[now_idx])
     gfs_pres_now = float(get_clean_series(df_raw, "surface_pressure_gfs_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
     icon_pres_now = float(get_clean_series(df_raw, "surface_pressure_icon_seamless", 1013.25, fallback_series=get_clean_series(df_raw, "surface_pressure_ecmwf_ifs", 1013.25)).iloc[now_idx])
@@ -638,7 +641,7 @@ if mode == "Model Kıyaslama Arenası":
 
     available_arena_dates = sorted(df_raw["time"].dt.date.unique())
     date_options = ["Tüm 7 Günlük Dönem"] + [d.strftime("%d %B %Y") for d in available_arena_dates]
-    today_arena_str = datetime.now(TR_TZ).date().strftime("%d %B %Y")
+    today_arena_str = today_date.strftime("%d %B %Y")
     default_arena_idx = date_options.index(today_arena_str) if today_arena_str in date_options else (1 if len(date_options) > 1 else 0)
 
     col_filter_title, col_filter_select = st.columns([1.5, 2.5])
@@ -1827,8 +1830,8 @@ now_hour = datetime.now(TR_TZ).hour
 cur_idx = now_hour if now_hour < len(df) else int(np.argmin(np.abs(df["time"].dt.hour - now_hour)))
 
 merkez_t_est, merkez_g_est, merkez_p_est = transfer_erhac_to_merkez(
-    erhac_temp=metar["temp_c"],
-    erhac_gust=float(metar["gust_kmh"]),
+    erhac_temp=obs_temp,
+    erhac_gust=obs_gust,
     erhac_precip=0.0,
     wind_dir=float(metar["wdir_deg"]),
     cloud_cover=float(cloud_cover.iloc[cur_idx]) if not cloud_cover.empty else 20.0,
@@ -1848,9 +1851,9 @@ st.markdown(
 m1, m2, m3, m4, m5 = st.columns([2.0, 0.8, 0.8, 0.8, 1.4])
 m1.markdown(f"📡 **Erhaç (LTAT) METAR:** `{metar['raw']}`")
 m1.caption(f"☁️ Bulut: {metar['cloud_desc']}")
-m2.metric("Termometre", f"{metar['temp_c']}°C" if metar["temp_c"] is not None else "--")
-m3.metric("Yer Hamlesi", f"{metar['gust_kmh']} km/s")
-m4.metric("Basınç", f"{int(metar['altim_hpa'])} hPa" if metar["altim_hpa"] else "1014 hPa")
+m2.metric("Termometre", f"{obs_temp}°C" if obs_temp is not None else "--")
+m3.metric("Yer Hamlesi", f"{obs_gust} km/s")
+m4.metric("Basınç", f"{int(obs_pres)} hPa" if obs_pres else "1014 hPa")
 
 active_badges = []
 if metar["is_hail"]:
@@ -1877,10 +1880,6 @@ st.markdown("---")
 mod_gust_now = float(gust_mean.iloc[cur_idx])
 mod_temp_now = float(temp.iloc[cur_idx])
 mod_pres_now = float(pressure_series.iloc[cur_idx])
-
-obs_gust = float(metar["gust_kmh"]) if metar["gust_kmh"] else float(metar["speed_kmh"])
-obs_temp = float(metar["temp_c"]) if metar["temp_c"] is not None else None
-obs_pres = float(metar["altim_hpa"]) if metar["altim_hpa"] else None
 
 if metar["status"] != "offline":
     delta_wind = mod_gust_now - obs_gust
