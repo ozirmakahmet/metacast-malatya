@@ -1994,11 +1994,17 @@ st.markdown("---")
 now_hour = datetime.now(TR_TZ).hour
 cur_idx = now_hour if now_hour < len(df) else int(np.argmin(np.abs(df["time"].dt.hour - now_hour)))
 
+# Rüzgâr yönü "VRB" veya geçersiz gelirse güvenli şekilde 0.0 veya model yönü alınır
+try:
+    safe_metar_wdir = float(metar.get("wdir_deg", 0.0))
+except (ValueError, TypeError):
+    safe_metar_wdir = float(wind_dir_series.iloc[cur_idx]) if not wind_dir_series.empty else 0.0
+
 merkez_t_est, merkez_g_est, merkez_p_est = transfer_erhac_to_merkez(
     erhac_temp=obs_temp,
     erhac_gust=obs_gust,
     erhac_precip=0.0,
-    wind_dir=float(metar["wdir_deg"]),
+    wind_dir=safe_metar_wdir,
     cloud_cover=float(cloud_cover.iloc[cur_idx]) if not cloud_cover.empty else 20.0,
     hour=now_hour
 )
