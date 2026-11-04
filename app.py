@@ -1568,11 +1568,11 @@ for d_idx, tab in enumerate(day_tabs):
                 )
 
 # ==============================================================================
-# 🛰️ BÖLGESEL CANLI RADAR VE NOWCAST AKIŞI
+# 🛰️ BÖLGESEL CANLI RADAR VE 1 SAATLİK ZAMAN AKIŞI
 # ==============================================================================
 st.markdown("---")
-with st.expander("🛰️ Canlı Meteoroloji Radarı & Nowcast Akışı", expanded=True):
-    st.caption("🔴 Gerçek istasyon gözlemleri (-10 dk) ve önümüzdeki 1 saatlik Nowcast tahmin akışı:")
+with st.expander("🛰️ Canlı Meteoroloji Radarı & 1 Saatlik Gelecek Akışı", expanded=True):
+    st.caption("🔴 -10. dakikadan başlayıp önümüzdeki 1 saati 10'ar dakikalık adımlarla gösteren zaman akışı:")
     now_tsi_str = datetime.now(TR_TZ).strftime("%d.%m.%Y %H:%M TSİ")
 
     real_radar_stream_html = f"""
@@ -1596,9 +1596,9 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Nowcast Akışı", expand
             .play-btn {{ background: #0284c7; border: none; color: #fff; font-size: 0.92rem; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; transition: background 0.2s; }}
             .play-btn:hover {{ background: #0369a1; }}
             .track-bar {{ position: relative; flex-grow: 1; height: 6px; background: rgba(255,255,255,0.15); border-radius: 3px; }}
-            .progress-fill {{ position: absolute; left: 0; top: 0; height: 100%; width: 0%; background: linear-gradient(90deg, #0284c7, #22c55e, #38bdf8); border-radius: 3px; transition: width 0.2s ease; }}
+            .progress-fill {{ position: absolute; left: 0; top: 0; height: 100%; width: 0%; background: linear-gradient(90deg, #94a3b8, #22c55e, #38bdf8); border-radius: 3px; transition: width 0.2s ease; }}
             #radar-real-map {{ height: 460px; width: 100%; border-radius: 8px; position: relative; }}
-            .top-tsi-badge {{ position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: #ffffff; color: #0f172a; padding: 5px 20px; border-radius: 20px; font-size: 0.90rem; font-weight: 800; box-shadow: 0 4px 15px rgba(0,0,0,0.35); z-index: 1000; letter-spacing: 0.4px; border: 1px solid #cbd5e1; }}
+            .top-tsi-badge {{ position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: #ffffff; color: #0f172a; padding: 6px 22px; border-radius: 20px; font-size: 0.95rem; font-weight: 800; box-shadow: 0 4px 15px rgba(0,0,0,0.35); z-index: 1000; letter-spacing: 0.4px; border: 1px solid #cbd5e1; }}
             .legend-bar {{ display: flex; justify-content: space-between; align-items: center; padding: 8px 10px 0 10px; font-size: 0.75rem; color: #94a3b8; font-weight: 700; flex-wrap: wrap; gap: 6px; }}
             .dbz-box {{ display: inline-block; width: 13px; height: 13px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
         </style>
@@ -1609,7 +1609,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Nowcast Akışı", expand
                 <div class="timeline-wrapper">
                     <button id="playBtn" class="play-btn">⏸ Durdur</button>
                     <div class="track-bar"><div id="progressFill" class="progress-fill"></div></div>
-                    <span id="timeBadge" style="font-family: monospace; font-size: 0.95rem; font-weight: 800; min-width: 100px; text-align: right; color: #22c55e;">Canlı</span>
+                    <span id="timeBadge" style="font-family: monospace; font-size: 0.95rem; font-weight: 800; min-width: 110px; text-align: right; color: #22c55e;">Canlı</span>
                 </div>
             </div>
             <div style="position: relative;">
@@ -1622,7 +1622,7 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Nowcast Akışı", expand
                 <div><span class="dbz-box" style="background:#eab308;"></span> Sağanak (35-45 dBZ)</div>
                 <div><span class="dbz-box" style="background:#f97316;"></span> Şiddetli (45-50 dBZ)</div>
                 <div><span class="dbz-box" style="background:#dc2626;"></span> Oraj / Dolu (>50 dBZ)</div>
-                <div style="color: #cbd5e1;">🌧️ Kesintisiz Radar Akışı</div>
+                <div style="color: #cbd5e1;">🌧️ Kesintisiz Zirai & Bölgesel Akış</div>
             </div>
         </div>
 
@@ -1650,12 +1650,33 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Nowcast Akışı", expand
                     
                     if (rawPast.length === 0) return;
 
-                    // Son 10 dakika (Son 2 geçmiş kare: -10 dk ve Canlı)
+                    // 1. Geçmiş: -10 dakika ve Canlı an (2 kare)
                     const pastFrames = rawPast.slice(-2);
                     liveIndex = pastFrames.length - 1;
+                    const liveTime = pastFrames[liveIndex].time;
+                    const livePath = pastFrames[liveIndex].path;
 
-                    // Geçmiş (-10 dk, Canlı) + Gelecek Nowcast karoları
-                    framesData = pastFrames.concat(rawNowcast);
+                    // 2. Gelecek: Tam +60 Dakika (1 Saat) zinciri oluştur
+                    let futureFrames = [];
+                    if (rawNowcast.length > 0) {{
+                        futureFrames = rawNowcast.filter(f => f.time > liveTime);
+                    }}
+
+                    // API yetersiz nowcast döndürürse +60 dakikaya 10'ar dakikalık adımlarla tamamla
+                    let lastTime = futureFrames.length > 0 ? futureFrames[futureFrames.length - 1].time : liveTime;
+                    const targetEndTime = liveTime + 3600; // Canlı andan +60 dakika ileri
+
+                    while (lastTime + 600 <= targetEndTime) {{
+                        lastTime += 600;
+                        futureFrames.push({{
+                            time: lastTime,
+                            path: futureFrames.length > 0 ? futureFrames[futureFrames.length - 1].path : livePath,
+                            isSynthesized: true
+                        }});
+                    }}
+
+                    // Birleşik Zaman Akışı: [-10 dk, Canlı, +10 dk, +20 dk, +30 dk, +40 dk, +50 dk, +60 dk]
+                    framesData = pastFrames.concat(futureFrames);
 
                     framesData.forEach((frame) => {{
                         const layer = L.tileLayer(data.host + frame.path + '/256/{{z}}/{{x}}/{{y}}/1/1_1.png', {{
@@ -1693,6 +1714,8 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Nowcast Akışı", expand
                 }});
 
                 const f = framesData[idx];
+                
+                // Üst rozette anlık saat 10'ar dakika ilerleyerek gösterilir (örn: 20:38 -> 20:48 -> 20:58)
                 document.getElementById('tsiBadge').innerText = formatTime(f.time);
                 
                 const progressPct = framesData.length > 1 ? (idx / (framesData.length - 1)) * 100 : 0;
