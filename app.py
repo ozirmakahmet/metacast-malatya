@@ -1568,17 +1568,17 @@ for d_idx, tab in enumerate(day_tabs):
                 )
 
 # ==============================================================================
-# 🛰️ BÖLGESEL CANLI RADAR VE DİNAMİK NOWCAST AKIŞI (WINDY FULL CANLI MOTOR)
+# 🛰️ BÖLGESEL CANLI RADAR VE DİNAMİK NOWCAST AKIŞI (WINDY NOWCAST MOTORU)
 # ==============================================================================
 st.markdown("---")
-with st.expander("🛰️ Canlı Meteoroloji Radarı & Nowcast Akışı", expanded=True):
-    st.caption("🔴 Canlı istasyon gözlemleri ve önümüzdeki saatlere ait kesintisiz nowcast zaman akışı:")
+with st.expander("🛰️ Canlı Meteoroloji Radarı & Dynamic Nowcast Akışı", expanded=True):
+    st.caption("🔴 Canlı istasyon gözlemlerinden başlayıp önümüzdeki 1 saate akan dinamik Nowcast tahmini:")
 
     windy_radar_html = """
     <iframe 
         width="100%" 
         height="560" 
-        src="https://embed.windy.com/embed2.html?lat=38.355&lon=38.309&detailLat=38.355&detailLon=38.309&width=100%25&height=560&zoom=8&level=surface&overlay=radar&product=radar&menu=true&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1" 
+        src="https://embed.windy.com/embed2.html?lat=38.355&lon=38.309&detailLat=38.355&detailLon=38.309&width=100%25&height=560&zoom=8&level=surface&overlay=radar&product=nowcast&menu=true&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1" 
         frameborder="0"
         style="border-radius: 10px; border: 1px solid rgba(255,255,255,0.15);">
     </iframe>
