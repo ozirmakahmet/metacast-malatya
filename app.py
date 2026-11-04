@@ -1568,20 +1568,26 @@ for d_idx, tab in enumerate(day_tabs):
                 )
 
 # ==============================================================================
-# 🛰️ BÖLGESEL CANLI RADAR & NOWCASTING AKIŞI (FİZİKSEL ADVEKSİYON MOTORU)
+# 🛰️ ÇİFT HARİTALI RADAR SİSTEMİ: CANLI GÖZLEM & METACAST OROGRAFİK TAHMİN
 # ==============================================================================
 st.markdown("---")
-with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akışı", expanded=True):
-    st.caption("🔴 Orografik engeller ve 700-850 hPa yönlendirici rüzgâr vektörüyle hesaplanan 1 saatlik dinamik kütle akışı:")
-    now_tsi_str = datetime.now(TR_TZ).strftime("%d.%m.%Y %H:%M TSİ")
+st.markdown("##### 🛰️ Bölgesel Radar İzleme & MetaCast Özel Nowcast Tahmin Paneli")
+st.caption("Sol tarafta %100 gerçek anlık radar gözlemleri; sağ tarafta Malatya ve çevre illerin coğrafi yapısına göre üretilen MetaCast orografik tahmin simülasyonu:")
 
-    # Fiziksel Parametrelerin JS Motoruna Aktarılması
-    cur_h_idx = min(23, max(0, datetime.now(TR_TZ).hour))
-    phys_wind_deg = float(wind_dir_series.iloc[cur_h_idx]) if not wind_dir_series.empty else 215.0
-    phys_wind_spd = float(w_speed_series.iloc[cur_h_idx]) if not w_speed_series.empty else 15.0
-    phys_blockage = float(calculate_gaussian_blockage(phys_wind_deg))
+col_radar_live, col_radar_forecast = st.columns(2)
 
-    real_radar_stream_html = f"""
+now_tsi_str = datetime.now(TR_TZ).strftime("%d.%m.%Y %H:%M TSİ")
+cur_h_idx = min(23, max(0, datetime.now(TR_TZ).hour))
+phys_wind_deg = float(wind_dir_series.iloc[cur_h_idx]) if not wind_dir_series.empty else 215.0
+phys_wind_spd = float(w_speed_series.iloc[cur_h_idx]) if not w_speed_series.empty else 15.0
+phys_blockage = float(calculate_gaussian_blockage(phys_wind_deg))
+
+# ------------------------------------------------------------------------------
+# 1. SOL HARİTA: SADECE GERÇEK CANLI RADAR GÖZLEMİ
+# ------------------------------------------------------------------------------
+with col_radar_live:
+    st.markdown("##### 📡 Gerçek Canlı Radar (Gözlem)")
+    html_live_radar = f"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -1589,233 +1595,192 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Kütle Nowcasting Akış�
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <style>
-            body {{ margin: 0; padding: 0; background: #0e1117; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
-            #sim-container {{
-                background: rgba(255, 255, 255, 0.02);
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 10px;
-                overflow: hidden;
-                padding: 10px 14px 14px 14px;
-            }}
-            .sim-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }}
-            .timeline-wrapper {{ display: flex; align-items: center; gap: 12px; flex-grow: 1; max-width: 600px; }}
-            .play-btn {{ background: #0284c7; border: none; color: #fff; font-size: 0.92rem; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; transition: background 0.2s; }}
-            .play-btn:hover {{ background: #0369a1; }}
-            .track-bar {{ position: relative; flex-grow: 1; height: 6px; background: rgba(255,255,255,0.15); border-radius: 3px; }}
-            .progress-fill {{ position: absolute; left: 0; top: 0; height: 100%; width: 0%; background: linear-gradient(90deg, #22c55e, #eab308, #38bdf8); border-radius: 3px; transition: width 0.2s ease; }}
-            .status-pill {{ padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 800; }}
-            #radar-real-map {{ height: 460px; width: 100%; border-radius: 8px; position: relative; }}
-            .top-tsi-badge {{ position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: #ffffff; color: #0f172a; padding: 5px 20px; border-radius: 20px; font-size: 0.90rem; font-weight: 800; box-shadow: 0 4px 15px rgba(0,0,0,0.35); z-index: 1000; letter-spacing: 0.4px; border: 1px solid #cbd5e1; }}
-            .legend-bar {{ display: flex; justify-content: space-between; align-items: center; padding: 8px 10px 0 10px; font-size: 0.75rem; color: #94a3b8; font-weight: 700; flex-wrap: wrap; gap: 6px; }}
-            .dbz-box {{ display: inline-block; width: 13px; height: 13px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
+            body {{ margin: 0; padding: 0; background: #0e1117; font-family: sans-serif; }}
+            #sim-live {{ background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px; }}
+            .header-bar {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }}
+            .btn-play {{ background: #0284c7; border: none; color: #fff; font-weight: 700; padding: 5px 12px; border-radius: 6px; cursor: pointer; }}
+            #map-live {{ height: 420px; width: 100%; border-radius: 8px; }}
+            .badge-top {{ position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: #ffffff; color: #0f172a; padding: 4px 14px; border-radius: 15px; font-weight: 800; font-size: 0.85rem; z-index: 1000; border: 1px solid #cbd5e1; }}
         </style>
     </head>
     <body>
-        <div id="sim-container">
-            <div class="sim-header">
-                <div class="timeline-wrapper">
-                    <button id="playBtn" class="play-btn">⏸ Durdur</button>
-                    <div class="track-bar"><div id="progressFill" class="progress-fill"></div></div>
-                    <span id="timeBadge" style="font-family: monospace; font-size: 0.95rem; font-weight: 800; min-width: 80px; text-align: right;">Canlı</span>
-                </div>
-                <div id="statusPill" class="status-pill">📡 CANLI RADAR AKIŞI</div>
+        <div id="sim-live">
+            <div class="header-bar">
+                <button id="btnPlayLive" class="btn-play">⏸ Durdur</button>
+                <span id="txtLiveStatus" style="color: #22c55e; font-size: 0.82rem; font-weight: 800;">🔴 %100 GERÇEK GÖZLEM</span>
             </div>
             <div style="position: relative;">
-                <div id="tsiBadge" class="top-tsi-badge">{now_tsi_str}</div>
-                <div id="radar-real-map"></div>
-            </div>
-            <div class="legend-bar">
-                <div><span class="dbz-box" style="background:#00e5ff;"></span> Çisenti (15-20 dBZ)</div>
-                <div><span class="dbz-box" style="background:#22c55e;"></span> Hafif-Orta (25-35 dBZ)</div>
-                <div><span class="dbz-box" style="background:#eab308;"></span> Sağanak (35-45 dBZ)</div>
-                <div><span class="dbz-box" style="background:#f97316;"></span> Şiddetli (45-50 dBZ)</div>
-                <div><span class="dbz-box" style="background:#dc2626;"></span> Oraj / Dolu (>50 dBZ)</div>
-                <div style="color: #cbd5e1;">🌧️ Dinamik Adveksiyon Katmanı</div>
+                <div id="badgeLiveTime" class="badge-top">{now_tsi_str}</div>
+                <div id="map-live"></div>
             </div>
         </div>
-
         <script>
-            // 1. Atmosferik ve Orografik Parametreler
-            let steerDir = {phys_wind_deg}; // Rüzgâr yönü (azimut)
-            let steerSpd = {phys_wind_spd}; // Rüzgâr hızı (km/s)
-            let blockage = {phys_blockage}; // Beydağları blokaj faktörü
+            const mapL = L.map('map-live', {{ zoomControl: true, attributionControl: false }}).setView([38.355, 38.309], 8);
+            L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png').addTo(mapL);
 
-            // Orografik Sapma (Beydağları Lodos Kırılması: Kütle güneyden geliyorsa Doğuya/Elazığ'a bükülür)
-            if (steerDir >= 190 && steerDir <= 240 && blockage >= 0.5) {{
-                steerDir = (steerDir + 25) % 360; // Fırat vadisi kanalizasyonu
-                steerSpd = steerSpd * 0.85; // Dağ sürtünmesi yavaşlatması
-            }}
-
-            const map = L.map('radar-real-map', {{ zoomControl: true, attributionControl: false, maxZoom: 13, minZoom: 5 }}).setView([38.355, 38.309], 8);
-            
-            L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                maxZoom: 13,
-                minZoom: 5,
-                attribution: '&copy; OpenStreetMap'
-            }}).addTo(map);
-
-            let radarLayers = [];
-            let framesData = [];
-            let currentIdx = 0;
-            let timer = null;
-            let isPlaying = true;
+            let layersL = [], framesL = [], idxL = 0, timerL = null, isPlayL = true;
 
             fetch('https://api.rainviewer.com/public/weather-maps.json')
-                .then(res => res.json())
+                .then(r => r.json())
+                .then(data => {{
+                    // Sadece geçmiş (gerçek istasyon kayıtları) alınıyor, tahmin karoları dahil edilmiyor
+                    framesL = (data.radar.past || []).slice(-5);
+                    if (framesL.length === 0) return;
+
+                    framesL.forEach(f => {{
+                        const l = L.tileLayer(data.host + f.path + '/256/{{z}}/{{x}}/{{y}}/1/1_1.png', {{ opacity: 0, zIndex: 500 }});
+                        l.addTo(mapL);
+                        layersL.push(l);
+                    }});
+
+                    idxL = framesL.length - 1;
+                    renderL(idxL);
+                    timerL = setInterval(() => {{ idxL = (idxL + 1) % framesL.length; renderL(idxL); }}, 900);
+                }});
+
+            function renderL(i) {{
+                if (!layersL[i]) return;
+                layersL.forEach((ly, k) => ly.setOpacity(k === i ? 0.8 : 0));
+                const d = new Date(framesL[i].time * 1000);
+                document.getElementById('badgeLiveTime').innerText = d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0') + ' TSİ (Gözlem)';
+            }}
+
+            document.getElementById('btnPlayLive').onclick = () => {{
+                if (isPlayL) {{ clearInterval(timerL); document.getElementById('btnPlayLive').innerText = '▶ Başlat'; }}
+                else {{ timerL = setInterval(() => {{ idxL = (idxL + 1) % framesL.length; renderL(idxL); }}, 900); document.getElementById('btnPlayLive').innerText = '⏸ Durdur'; }}
+                isPlayL = !isPlayL;
+            }};
+            setTimeout(() => mapL.invalidateSize(), 400);
+        </script>
+    </body>
+    </html>
+    """
+    st.components.v1.html(html_live_radar, height=500)
+
+# ------------------------------------------------------------------------------
+# 2. SAĞ HARİTA: METACAST MALATYA & ÇEVRE İLLER OROGRAFİK NOWCAST TAHMİNİ
+# ------------------------------------------------------------------------------
+with col_radar_forecast:
+    st.markdown("##### 🔮 MetaCast Orografik Nowcast (Malatya & Bölge)")
+    html_forecast_radar = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8" />
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <style>
+            body {{ margin: 0; padding: 0; background: #0e1117; font-family: sans-serif; }}
+            #sim-fc {{ background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px; }}
+            .header-bar {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }}
+            .btn-play {{ background: #0284c7; border: none; color: #fff; font-weight: 700; padding: 5px 12px; border-radius: 6px; cursor: pointer; }}
+            #map-fc {{ height: 420px; width: 100%; border-radius: 8px; }}
+            .badge-top {{ position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: #0284c7; color: #ffffff; padding: 4px 14px; border-radius: 15px; font-weight: 800; font-size: 0.85rem; z-index: 1000; border: 1px solid #38bdf8; }}
+        </style>
+    </head>
+    <body>
+        <div id="sim-fc">
+            <div class="header-bar">
+                <button id="btnPlayFc" class="play-btn">⏸ Durdur</button>
+                <span id="txtFcStatus" style="color: #38bdf8; font-size: 0.82rem; font-weight: 800;">🏔️ BEYDAĞLARI & FIRAT VADİ KANALI DAHİL</span>
+            </div>
+            <div style="position: relative;">
+                <div id="badgeFcTime" class="badge-top">MetaCast Tahmin Motoru</div>
+                <div id="map-fc"></div>
+            </div>
+        </div>
+        <script>
+            // Malatya ve çevresini (Elazığ, Adıyaman, Kahramanmaraş, Sivas) içine alan geniş görünüm
+            const mapF = L.map('map-fc', {{ zoomControl: true, attributionControl: false }}).setView([38.355, 38.309], 8);
+            L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png').addTo(mapF);
+
+            let steerDir = {phys_wind_deg};
+            let steerSpd = {phys_wind_spd};
+            let blockage = {phys_blockage};
+
+            // Orografik Engel Algoritması (Beydağları Lodos Kırılması & Fırat Vadi Kanalizasyonu)
+            if (steerDir >= 190 && steerDir <= 240 && blockage >= 0.4) {{
+                steerDir = (steerDir + 28) % 360; // Kütleyi Elazığ/Fırat havzasına kırar
+                steerSpd = steerSpd * 0.82;       // Dağ sürtünmesi
+            }}
+
+            let layersF = [], framesF = [], idxF = 0, timerF = null, isPlayF = true;
+
+            fetch('https://api.rainviewer.com/public/weather-maps.json')
+                .then(r => r.json())
                 .then(data => {{
                     const rawPast = data.radar.past || [];
                     if (rawPast.length === 0) return;
 
-                    // Son 3 geçmiş kare (-30 dk, -20 dk, Canlı)
-                    const pastFrames = rawPast.slice(-3);
-                    const liveFrame = pastFrames[pastFrames.length - 1];
-                    const liveTime = liveFrame.time;
-
-                    // Gelecek +60 Dakika İçin Dinamik Adveksiyon Kareleri Oluşturma (+10 dk ... +60 dk)
-                    let futureFrames = [];
+                    const liveF = rawPast[rawPast.length - 1];
                     const radAngle = (steerDir * Math.PI) / 180.0;
 
-                    for (let step = 1; step <= 6; step++) {{
-                        const dtSec = step * 600; // 10, 20, 30, 40, 50, 60 dk
-                        const dtHours = dtSec / 3600.0;
-                        const distKm = steerSpd * dtHours; // Kat edilen mesafe (km)
+                    // Canlı an + Önümüzdeki 1 saatlik (+60 dk) adveksiyon adımları
+                    framesF.push({{ time: liveF.time, path: liveF.path, isFc: false, label: 'Canlı' }});
 
-                        // 1 derece enlem ~111 km, boylam ~87 km (38° enleminde)
+                    for (let step = 1; step <= 6; step++) {{
+                        const dtSec = step * 600;
+                        const distKm = steerSpd * (dtSec / 3600.0);
                         const dLat = (distKm * -Math.cos(radAngle)) / 111.0;
                         const dLon = (distKm * -Math.sin(radAngle)) / 87.0;
 
-                        futureFrames.push({{
-                            time: liveTime + dtSec,
-                            path: liveFrame.path,
-                            isNowcast: true,
-                            offsetMins: step * 10,
+                        framesF.push({{
+                            time: liveF.time + dtSec,
+                            path: liveF.path,
+                            isFc: true,
+                            label: '+' + (step * 10) + ' dk Tahmin',
                             shiftLat: dLat,
                             shiftLon: dLon
                         }});
                     }}
 
-                    // Geçmiş + Gelecek birleşik zaman akışı (Toplam 9 kare)
-                    framesData = pastFrames.concat(futureFrames);
-
-                    framesData.forEach((frame) => {{
-                        const layer = L.tileLayer(data.host + frame.path + '/256/{{z}}/{{x}}/{{y}}/1/1_1.png', {{
-                            opacity: 0,
-                            zIndex: 500,
-                            maxNativeZoom: 6,
-                            maxZoom: 13,
-                            minZoom: 5
-                        }});
-                        layer.addTo(map);
-                        radarLayers.push(layer);
+                    framesF.forEach(f => {{
+                        const l = L.tileLayer(data.host + f.path + '/256/{{z}}/{{x}}/{{y}}/1/1_1.png', {{ opacity: 0, zIndex: 500 }});
+                        l.addTo(mapF);
+                        layersF.push(l);
                     }});
 
-                    currentIdx = 2; // Canlı andan başlat
-                    showFrame(currentIdx);
-                    startLoop();
-                }})
-                .catch(err => console.error("Radar yüklenemedi:", err));
+                    idxF = 0;
+                    renderF(idxF);
+                    timerF = setInterval(() => {{ idxF = (idxF + 1) % framesF.length; renderF(idxF); }}, 900);
+                }});
 
-            function formatTime(unixSec) {{
-                const d = new Date(unixSec * 1000);
-                const day = String(d.getDate()).padStart(2, '0');
-                const month = String(d.getMonth() + 1).padStart(2, '0');
-                const year = d.getFullYear();
-                const hours = String(d.getHours()).padStart(2, '0');
-                const minutes = String(d.getMinutes()).padStart(2, '0');
-                return `${{day}}.${{month}}.${{year}} ${{hours}}:${{minutes}} TSİ`;
-            }}
+            function renderF(i) {{
+                if (!layersF[i]) return;
+                const f = framesF[i];
 
-            function showFrame(idx) {{
-                if (!radarLayers || radarLayers.length === 0 || !framesData[idx]) return;
-                
-                const f = framesData[idx];
-
-                // Katman opaklık ve fiziksel kaydırma (Adveksiyon ötelemesi)
-                radarLayers.forEach((l, i) => {{
-                    const isTarget = (i === idx);
-                    l.setOpacity(isTarget ? 0.78 : 0);
-
-                    // Eğer gelecek Nowcast karesi ise katmanın DOM konteynerini rüzgâr yönünde ötele
-                    if (isTarget && framesData[i].isNowcast) {{
-                        const container = l.getContainer();
-                        if (container) {{
-                            // Harita pikseline göre koordinat öteleme hesaplaması
-                            const centerPoint = map.latLngToLayerPoint(map.getCenter());
-                            const shiftedCenter = map.latLngToLayerPoint([
-                                map.getCenter().lat + framesData[i].shiftLat,
-                                map.getCenter().lng + framesData[i].shiftLon
-                            ]);
-                            const dx = shiftedCenter.x - centerPoint.x;
-                            const dy = shiftedCenter.y - centerPoint.y;
-                            container.style.transform = `translate3d(${{dx}}px, ${{dy}}px, 0px)`;
+                layersF.forEach((ly, k) => {{
+                    const active = (k === i);
+                    ly.setOpacity(active ? 0.82 : 0);
+                    if (active && f.isFc) {{
+                        const c = ly.getContainer();
+                        if (c) {{
+                            const p0 = mapF.latLngToLayerPoint(mapF.getCenter());
+                            const p1 = mapF.latLngToLayerPoint([mapF.getCenter().lat + f.shiftLat, mapF.getCenter().lng + f.shiftLon]);
+                            c.style.transform = `translate3d(${{p1.x - p0.x}}px, ${{p1.y - p0.y}}px, 0px)`;
                         }}
-                    }} else if (isTarget) {{
-                        const container = l.getContainer();
-                        if (container) container.style.transform = 'none';
+                    }} else if (active) {{
+                        const c = ly.getContainer();
+                        if (c) c.style.transform = 'none';
                     }}
                 }});
 
-                document.getElementById('tsiBadge').innerText = formatTime(f.time);
-                
-                const progressPct = framesData.length > 1 ? (idx / (framesData.length - 1)) * 100 : 0;
-                document.getElementById('progressFill').style.width = `${{progressPct}}%`;
-
-                const pill = document.getElementById('statusPill');
-                const badge = document.getElementById('timeBadge');
-
-                if (f.isNowcast) {{
-                    pill.innerText = `🔮 +${{f.offsetMins}} DK NOWCAST (RÜZGÂR İLERLEMESİ)`;
-                    pill.style.color = "#38bdf8";
-                    pill.style.borderColor = "#38bdf8";
-                    pill.style.background = "rgba(56, 189, 248, 0.15)";
-                    badge.innerText = `+${{f.offsetMins}} dk`;
-                    badge.style.color = "#38bdf8";
-                }} else if (idx === 2) {{
-                    pill.innerText = "🔴 CANLI RADAR GÖZLEMİ";
-                    pill.style.color = "#22c55e";
-                    pill.style.borderColor = "#22c55e";
-                    pill.style.background = "rgba(34, 197, 94, 0.15)";
-                    badge.innerText = "Canlı";
-                    badge.style.color = "#22c55e";
-                }} else {{
-                    const pastMins = (2 - idx) * 10;
-                    pill.innerText = `📡 -${{pastMins}} DK GEÇMİŞ GÖZLEM`;
-                    pill.style.color = "#94a3b8";
-                    pill.style.borderColor = "#94a3b8";
-                    pill.style.background = "rgba(148, 163, 184, 0.15)";
-                    badge.innerText = `-${{pastMins}} dk`;
-                    badge.style.color = "#94a3b8";
-                }}
+                const d = new Date(f.time * 1000);
+                const timeStr = d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+                document.getElementById('badgeFcTime').innerText = timeStr + ' TSİ (' + f.label + ')';
             }}
 
-            function nextFrame() {{
-                if (!framesData || framesData.length === 0) return;
-                currentIdx = (currentIdx + 1) % framesData.length;
-                showFrame(currentIdx);
-            }}
-
-            function startLoop() {{
-                if (timer) clearInterval(timer);
-                timer = setInterval(nextFrame, 850);
-                document.getElementById('playBtn').innerText = "⏸ Durdur";
-                isPlaying = true;
-            }}
-
-            function stopLoop() {{
-                if (timer) clearInterval(timer);
-                document.getElementById('playBtn').innerText = "▶ Başlat";
-                isPlaying = false;
-            }}
-
-            document.getElementById('playBtn').addEventListener('click', () => {{
-                if (isPlaying) stopLoop(); else startLoop();
-            }});
-            setTimeout(() => {{ map.invalidateSize(); }}, 400);
+            document.getElementById('btnPlayFc').onclick = () => {{
+                if (isPlayF) {{ clearInterval(timerF); document.getElementById('btnPlayFc').innerText = '▶ Başlat'; }}
+                else {{ timerF = setInterval(() => {{ idxF = (idxF + 1) % framesF.length; renderF(idxF); }}, 900); document.getElementById('btnPlayFc').innerText = '⏸ Durdur'; }}
+                isPlayF = !isPlayF;
+            }};
+            setTimeout(() => mapF.invalidateSize(), 400);
         </script>
     </body>
     </html>
     """
-    st.components.v1.html(real_radar_stream_html, height=540)
+    st.components.v1.html(html_forecast_radar, height=500)
     now_hour_radar = datetime.now(TR_TZ).hour
     cur_idx_radar = now_hour_radar if now_hour_radar < len(df) else int(np.argmin(np.abs(df["time"].dt.hour - now_hour_radar)))
 
