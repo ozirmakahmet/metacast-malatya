@@ -1568,22 +1568,22 @@ for d_idx, tab in enumerate(day_tabs):
                 )
 
 # ==============================================================================
-# 🛰️ BÖLGESEL CANLI RADAR VE DİNAMİK NOWCAST AKIŞI (WINDY MOTORU)
+# 🛰️ BÖLGESEL CANLI RADAR VE DİNAMİK NOWCAST AKIŞI (WINDY FULL CANLI MOTOR)
 # ==============================================================================
 st.markdown("---")
 with st.expander("🛰️ Canlı Meteoroloji Radarı & Nowcast Akışı", expanded=True):
-    st.caption("🔴 Geçmiş gözlemlerden başlayıp geleceğe doğru kesintisiz akan dinamik kütle simülasyonu:")
+    st.caption("🔴 Canlı istasyon gözlemleri ve önümüzdeki saatlere ait kesintisiz nowcast zaman akışı:")
 
     windy_radar_html = """
     <iframe 
         width="100%" 
-        height="500" 
-        src="https://embed.windy.com/embed.html?lat=38.355&lon=38.309&detailLat=38.355&detailLon=38.309&width=100%25&height=500&zoom=8&level=surface&overlay=radar&product=radar&menu=&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1" 
+        height="560" 
+        src="https://embed.windy.com/embed2.html?lat=38.355&lon=38.309&detailLat=38.355&detailLon=38.309&width=100%25&height=560&zoom=8&level=surface&overlay=radar&product=radar&menu=true&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1" 
         frameborder="0"
         style="border-radius: 10px; border: 1px solid rgba(255,255,255,0.15);">
     </iframe>
     """
-    st.components.v1.html(windy_radar_html, height=520)
+    st.components.v1.html(windy_radar_html, height=580)
     now_hour_radar = datetime.now(TR_TZ).hour
     cur_idx_radar = now_hour_radar if now_hour_radar < len(df) else int(np.argmin(np.abs(df["time"].dt.hour - now_hour_radar)))
 
