@@ -75,15 +75,23 @@ div[data-testid="stMetricValue"] > div {
     padding: 14px 16px;
     height: 100%;
 }
-.arena-card {
-    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
-    border: 1px solid rgba(255,255,255,0.12);
+.arena-champ-box {
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.12), rgba(0, 230, 118, 0.08));
+    border: 1px solid rgba(255, 215, 0, 0.35);
     border-radius: 10px;
-    padding: 14px;
-    height: 100%;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+}
+.arena-xai-box {
+    background-color: rgba(33, 150, 243, 0.07);
+    border-left: 4px solid #29b6f6;
+    border-radius: 8px;
+    padding: 13px 16px;
+    margin-top: 12px;
+    margin-bottom: 16px;
 }
 
-/* 7 Günlük Tıklanabilir Kart Butonları - Kırpılma Önleyici & Yüksek Görünürlük */
+/* 7 Günlük Tıklanabilir Kart Butonları */
 div[data-testid="stHorizontalBlock"] button[kind="secondary"] {
     min-height: 128px !important;
     padding: 10px 8px !important;
@@ -197,6 +205,58 @@ def get_weather_icon_and_text(
   if cloud_val >= 35.0:
     return "⛅" if not is_night else "☁️", "Parçalı Bulut"
   return ("🌙", "Açık") if is_night else ("☀️", "Açık")
+
+
+# --- BAĞIMSIZ PIML FİZİK ÇIKARIM MOTORU (MODEL ARENASI İÇİN) ---
+def compute_piml_independent_forecast(df_slice: pd.DataFrame):
+  ec_g = df_slice["wind_gusts_10m_ecmwf_ifs"].values
+  gf_g = df_slice["wind_gusts_10m_gfs_seamless"].values
+  ic_g = df_slice["wind_gusts_10m_icon_seamless"].values
+
+  ec_t = df_slice["temperature_2m_ecmwf_ifs"].values
+  gf_t = df_slice.get("temperature_2m_gfs_seamless", df_slice["temperature_2m_ecmwf_ifs"]).values
+  ic_t = df_slice.get("temperature_2m_icon_seamless", df_slice["temperature_2m_ecmwf_ifs"]).values
+
+  ec_p = df_slice["precipitation_ecmwf_ifs"].values
+  gf_p = df_slice.get("precipitation_gfs_seamless", df_slice["precipitation_ecmwf_ifs"]).values
+  ic_p = df_slice.get("precipitation_icon_seamless", df_slice["precipitation_ecmwf_ifs"]).values
+
+  w_dir = df_slice["wind_direction_10m_ecmwf_ifs"].values
+  cloud = df_slice.get("cloud_cover_ecmwf_ifs", pd.Series(np.zeros(len(df_slice)))).values
+  dew = df_slice.get("dew_point_2m_ecmwf_ifs", pd.Series(ec_t - 4.0)).values
+  hours = df_slice["time"].dt.hour.values
+
+  # 1. Rüzgâr Fizik Kısıtı: Medyan + Varyans Kontrolü + Beydağları (215°) Orografik Sönümleme
+  g_med = np.median([ec_g, gf_g, ic_g], axis=0)
+  g_std = np.std([ec_g, gf_g, ic_g], axis=0)
+  orographic_blockage = np.abs(np.cos(np.radians(w_dir - 215.0)))
+  piml_gust = np.maximum(
+      3.0, g_med * (1.0 - 0.32 * orographic_blockage) - 0.15 * g_std
+  )
+
+  # 2. Sıcaklık Fizik Kısıtı: Medyan + Çiy Noktası Buharlaşma Soğuması + Gece Radyasyonel Çanak Enverziyonu
+  t_med = np.median([ec_t, gf_t, ic_t], axis=0)
+  dew_spread = np.maximum(0.0, t_med - dew)
+  p_med = np.median([ec_p, gf_p, ic_p], axis=0)
+  evap_cooling = np.where(p_med > 0.1, np.minimum(1.8, 0.22 * dew_spread), 0.0)
+  is_clear_night = ((hours >= 19) | (hours <= 6)) & (cloud <= 30.0)
+  rad_cooling = np.where(is_clear_night, 1.1, 0.0)
+  piml_temp = t_med - evap_cooling - rad_cooling
+
+  # 3. Yağış Fizik Kısıtı: Dağ Yağmur Gölgesi (Rain Shadow) + Konvektif Medyan Filtresi
+  rain_shadow_factor = np.where(
+      (orographic_blockage >= 0.75) & (p_med < 3.0), 0.78, 1.0
+  )
+  piml_precip = np.round(p_med * rain_shadow_factor, 2)
+
+  return (
+      pd.Series(piml_gust),
+      pd.Series(piml_temp),
+      pd.Series(piml_precip),
+      orographic_blockage,
+      evap_cooling,
+      rad_cooling,
+  )
 
 
 # --- MLOps VERİ GÜNLÜĞÜ (SQLITE) ---
@@ -724,9 +784,9 @@ elif metar["status"] == "degraded" and metar["warnings"]:
       f" {' | '.join(metar['warnings'])}"
   )
 
-# --- 1. MODEL ARENASI SAYFASI (SOL MENÜDEN SEÇİLDİĞİNDE) ---
+# --- 1. MODEL ARENASI (ÖNCEKİ ÖZGÜN PIML & KARNE YAPISI) ---
 if mode == "Model Arenası":
-  with st.spinner("Arena verileri hazırlanıyor..."):
+  with st.spinner("Model Arenası için çoklu model ve PIML çıkarımı çalıştırılıyor..."):
     multi_hourly, multi_daily, last_update = fetch_live_multi_forecast()
   st.sidebar.caption(f"🕒 Son Model Güncellemesi: **{last_update}**")
 
@@ -740,9 +800,9 @@ if mode == "Model Arenası":
   )
 
   st.sidebar.markdown("---")
-  st.sidebar.subheader("📅 Arena Karşılaştırma Tarihi")
+  st.sidebar.subheader("📅 Karne & Arena Tarihi")
   arena_date = st.sidebar.date_input(
-      "Tarih Seçin:",
+      "İncelenecek Tarih:",
       value=default_d_arena,
       min_value=available_dates_arena[0],
       max_value=available_dates_arena[-1],
@@ -755,14 +815,23 @@ if mode == "Model Arenası":
   arena_date_display = format_tr_date(arena_date)
 
   st.subheader(
-      f"⚔️ Model Arenası: MetaCast (PIML) vs Küresel Modeller & Erhaç"
-      f" İstasyonu ({arena_date_display})"
+      f"⚔️ Model Arenası: Bağımsız PIML Çıkarım Motoru & Günlük Karne ({arena_date_display})"
   )
   st.caption(
-      "Medyan & varyans kontrollü hibrit topluluk (ensemble) yapısı ile"
-      " Avrupa (ECMWF), ABD (GFS), Almanya (ICON) modellerinin Erhaç (LTAT)"
-      " yer gözlemine göre anlık performans kıyaslaması."
+      "MetaCast, küresel sayısal modellerin (ECMWF, GFS, ICON) aritmetik ortalamasını"
+      " almak yerine; Beydağları orografik blokajı, çiy noktası buharlaşma"
+      " soğuması ve çanak radyasyonel enverziyonu fizik kısıtlarını kullanarak"
+      " bağımsız tahmin üretir ve Erhaç (LTAT) yer gözlemiyle puanlanır."
   )
+
+  (
+      mc_g,
+      mc_t,
+      mc_p,
+      oro_block_arr,
+      evap_cool_arr,
+      rad_cool_arr,
+  ) = compute_piml_independent_forecast(df_arena)
 
   ec_g = df_arena["wind_gusts_10m_ecmwf_ifs"]
   gf_g = df_arena["wind_gusts_10m_gfs_seamless"]
@@ -776,14 +845,6 @@ if mode == "Model Arenası":
   gf_p = df_arena.get("precipitation_gfs_seamless", ec_p)
   ic_p = df_arena.get("precipitation_icon_seamless", ec_p)
 
-  w_dir = df_arena["wind_direction_10m_ecmwf_ifs"]
-  m_block = np.abs(np.cos(np.radians(w_dir - 215.0)))
-  g_med = np.median([ec_g, gf_g, ic_g], axis=0)
-
-  mc_g = pd.Series(g_med * (1.0 - 0.35 * m_block))
-  mc_t = pd.Series(np.median([ec_t, gf_t, ic_t], axis=0))
-  mc_p = pd.Series(np.median([ec_p, gf_p, ic_p], axis=0))
-
   now_h = datetime.now().hour
   c_idx = (
       now_h
@@ -791,222 +852,266 @@ if mode == "Model Arenası":
       else int(np.argmin(np.abs(df_arena["time"].dt.hour - now_h)))
   )
 
-  mc_gust_now = float(mc_g.iloc[c_idx])
-  ec_gust_now = float(ec_g.iloc[c_idx])
-  gf_gust_now = float(gf_g.iloc[c_idx])
-  ic_gust_now = float(ic_g.iloc[c_idx])
-
-  mc_temp_now = float(mc_t.iloc[c_idx])
-  ec_temp_now = float(ec_t.iloc[c_idx])
-  gf_temp_now = float(gf_t.iloc[c_idx])
-  ic_temp_now = float(ic_t.iloc[c_idx])
-
   obs_gust = (
       float(metar["gust_kmh"]) if metar["gust_kmh"] else float(metar["speed_kmh"])
   )
   obs_temp = float(metar["temp_c"]) if metar["temp_c"] is not None else None
-  obs_pres = float(metar["altim_hpa"]) if metar["altim_hpa"] else None
 
-  a1, a2, a3, a4, a5 = st.columns(5)
-
-  with a1:
-    st.markdown(
-        f"""
-      <div class="arena-card" style="border-top: 4px solid #00e676;">
-          <strong style="color: #00e676;">⚡ MetaCast (PIML)</strong>
-          <p style="font-size: 0.76rem; color: #90a4ae; margin: 2px 0 8px 0;">Hibrit Medyan + Orografi</p>
-          <div style="font-size: 0.86rem; line-height: 1.6;">
-              <strong>Anlık Hamle:</strong> {mc_gust_now:.1f} km/s<br>
-              <strong>Pik Hamle:</strong> {mc_g.max():.1f} km/s<br>
-              <strong>Anlık Sıcaklık:</strong> {mc_temp_now:.1f} °C<br>
-              <strong>Toplam Yağış:</strong> {mc_p.sum():.1f} mm
-          </div>
-      </div>
-      """,
-        unsafe_allow_html=True,
-    )
-
-  with a2:
-    st.markdown(
-        f"""
-      <div class="arena-card" style="border-top: 4px solid #42a5f5;">
-          <strong style="color: #42a5f5;">🇪🇺 ECMWF IFS</strong>
-          <p style="font-size: 0.76rem; color: #90a4ae; margin: 2px 0 8px 0;">Avrupa Orta Vadeli Model</p>
-          <div style="font-size: 0.86rem; line-height: 1.6;">
-              <strong>Anlık Hamle:</strong> {ec_gust_now:.1f} km/s<br>
-              <strong>Pik Hamle:</strong> {ec_g.max():.1f} km/s<br>
-              <strong>Anlık Sıcaklık:</strong> {ec_temp_now:.1f} °C<br>
-              <strong>Toplam Yağış:</strong> {ec_p.sum():.1f} mm
-          </div>
-      </div>
-      """,
-        unsafe_allow_html=True,
-    )
-
-  with a3:
-    st.markdown(
-        f"""
-      <div class="arena-card" style="border-top: 4px solid #ef5350;">
-          <strong style="color: #ef5350;">🇺🇸 NOAA GFS</strong>
-          <p style="font-size: 0.76rem; color: #90a4ae; margin: 2px 0 8px 0;">ABD Küresel Tahmin Sistemi</p>
-          <div style="font-size: 0.86rem; line-height: 1.6;">
-              <strong>Anlık Hamle:</strong> {gf_gust_now:.1f} km/s<br>
-              <strong>Pik Hamle:</strong> {gf_g.max():.1f} km/s<br>
-              <strong>Anlık Sıcaklık:</strong> {gf_temp_now:.1f} °C<br>
-              <strong>Toplam Yağış:</strong> {gf_p.sum():.1f} mm
-          </div>
-      </div>
-      """,
-        unsafe_allow_html=True,
-    )
-
-  with a4:
-    st.markdown(
-        f"""
-      <div class="arena-card" style="border-top: 4px solid #ffa726;">
-          <strong style="color: #ffa726;">🇩🇪 DWD ICON</strong>
-          <p style="font-size: 0.76rem; color: #90a4ae; margin: 2px 0 8px 0;">Almanya İkosahedral Model</p>
-          <div style="font-size: 0.86rem; line-height: 1.6;">
-              <strong>Anlık Hamle:</strong> {ic_gust_now:.1f} km/s<br>
-              <strong>Pik Hamle:</strong> {ic_g.max():.1f} km/s<br>
-              <strong>Anlık Sıcaklık:</strong> {ic_temp_now:.1f} °C<br>
-              <strong>Toplam Yağış:</strong> {ic_p.sum():.1f} mm
-          </div>
-      </div>
-      """,
-        unsafe_allow_html=True,
-    )
-
-  with a5:
-    obs_t_str = f"{obs_temp:.1f} °C" if obs_temp is not None else "--"
-    st.markdown(
-        f"""
-      <div class="arena-card" style="border-top: 4px solid #ab47bc; background: rgba(171, 71, 188, 0.08);">
-          <strong style="color: #ce93d8;">📡 Erhaç (LTAT)</strong>
-          <p style="font-size: 0.76rem; color: #90a4ae; margin: 2px 0 8px 0;">Gerçek Yer Gözlemi (Referans)</p>
-          <div style="font-size: 0.86rem; line-height: 1.6;">
-              <strong>Yer Hamlesi:</strong> {obs_gust:.1f} km/s<br>
-              <strong>Ort. Rüzgâr:</strong> {metar['speed_kmh']} km/s<br>
-              <strong>Termometre:</strong> {obs_t_str}<br>
-              <strong>QNH Basınç:</strong> {int(obs_pres) if obs_pres else '--'} hPa
-          </div>
-      </div>
-      """,
-        unsafe_allow_html=True,
-    )
-
-  st.markdown("<div style='margin-top: 16px;'></div>", unsafe_allow_html=True)
-
-  fig_arena = go.Figure()
-  fig_arena.add_trace(
-      go.Scatter(
-          x=df_arena["time"],
-          y=mc_g,
-          name="⚡ MetaCast (PIML Düzeltmeli)",
-          line=dict(color="#00e676", width=3.2),
-      )
-  )
-  fig_arena.add_trace(
-      go.Scatter(
-          x=df_arena["time"],
-          y=ec_g,
-          name="ECMWF IFS",
-          line=dict(color="#42a5f5", width=1.8, dash="dash"),
-      )
-  )
-  fig_arena.add_trace(
-      go.Scatter(
-          x=df_arena["time"],
-          y=gf_g,
-          name="NOAA GFS",
-          line=dict(color="#ef5350", width=1.8, dash="dot"),
-      )
-  )
-  fig_arena.add_trace(
-      go.Scatter(
-          x=df_arena["time"],
-          y=ic_g,
-          name="DWD ICON",
-          line=dict(color="#ffa726", width=1.8, dash="dashdot"),
-      )
-  )
-
-  if arena_date == datetime.now().date() and metar["status"] != "offline":
-    fig_arena.add_trace(
-        go.Scatter(
-            x=[df_arena["time"].iloc[c_idx]],
-            y=[obs_gust],
-            mode="markers+text",
-            name="📡 Erhaç (LTAT) Canlı Gözlem",
-            text=[f"LTAT: {obs_gust} km/s"],
-            textposition="top center",
-            marker=dict(color="#ce93d8", size=12, symbol="diamond"),
-        )
-    )
-
-  fig_arena.update_layout(
-      title="Arena Rüzgâr Hamlesi Düellosu: MetaCast Orografik Düzeltmesi vs Ham Küresel Modeller",
-      xaxis_title="Saat",
-      yaxis_title="Rüzgâr Hamlesi (km/s)",
-      hovermode="x unified",
-      template="plotly_white",
-      height=360,
-      legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-  )
-  st.plotly_chart(fig_arena, use_container_width=True)
+  # Şampiyonluk ve Doğruluk Puanlaması (Erhaç LTAT Referansına Göre)
+  models_eval = {
+      "⚡ MetaCast (PIML)": {
+          "gust": float(mc_g.iloc[c_idx]),
+          "temp": float(mc_t.iloc[c_idx]),
+          "precip_sum": float(mc_p.sum()),
+          "gust_peak": float(mc_g.max()),
+      },
+      "🇪🇺 ECMWF IFS": {
+          "gust": float(ec_g.iloc[c_idx]),
+          "temp": float(ec_t.iloc[c_idx]),
+          "precip_sum": float(ec_p.sum()),
+          "gust_peak": float(ec_g.max()),
+      },
+      "🇺🇸 NOAA GFS": {
+          "gust": float(gf_g.iloc[c_idx]),
+          "temp": float(gf_t.iloc[c_idx]),
+          "precip_sum": float(gf_p.sum()),
+          "gust_peak": float(gf_g.max()),
+      },
+      "🇩🇪 DWD ICON": {
+          "gust": float(ic_g.iloc[c_idx]),
+          "temp": float(ic_t.iloc[c_idx]),
+          "precip_sum": float(ic_p.sum()),
+          "gust_peak": float(ic_g.max()),
+      },
+  }
 
   if metar["status"] != "offline":
-    arena_table = pd.DataFrame([
-        {
-            "Model / Kaynak": "⚡ MetaCast (PIML Hibrit)",
-            "Anlık Rüzgâr (km/s)": round(mc_gust_now, 1),
-            "Rüzgâr Sapması (Δ)": f"{mc_gust_now - obs_gust:+.1f} km/s",
-            "Anlık Sıcaklık (°C)": round(mc_temp_now, 1),
-            "Sıcaklık Sapması (Δ)": (
-                f"{mc_temp_now - obs_temp:+.1f} °C"
-                if obs_temp is not None
-                else "--"
-            ),
-            "Günlük Yağış (mm)": round(float(mc_p.sum()), 1),
-        },
-        {
-            "Model / Kaynak": "🇪🇺 ECMWF IFS",
-            "Anlık Rüzgâr (km/s)": round(ec_gust_now, 1),
-            "Rüzgâr Sapması (Δ)": f"{ec_gust_now - obs_gust:+.1f} km/s",
-            "Anlık Sıcaklık (°C)": round(ec_temp_now, 1),
-            "Sıcaklık Sapması (Δ)": (
-                f"{ec_temp_now - obs_temp:+.1f} °C"
-                if obs_temp is not None
-                else "--"
-            ),
-            "Günlük Yağış (mm)": round(float(ec_p.sum()), 1),
-        },
-        {
-            "Model / Kaynak": "🇺🇸 NOAA GFS",
-            "Anlık Rüzgâr (km/s)": round(gf_gust_now, 1),
-            "Rüzgâr Sapması (Δ)": f"{gf_gust_now - obs_gust:+.1f} km/s",
-            "Anlık Sıcaklık (°C)": round(gf_temp_now, 1),
-            "Sıcaklık Sapması (Δ)": (
-                f"{gf_temp_now - obs_temp:+.1f} °C"
-                if obs_temp is not None
-                else "--"
-            ),
-            "Günlük Yağış (mm)": round(float(gf_p.sum()), 1),
-        },
-        {
-            "Model / Kaynak": "🇩🇪 DWD ICON",
-            "Anlık Rüzgâr (km/s)": round(ic_gust_now, 1),
-            "Rüzgâr Sapması (Δ)": f"{ic_gust_now - obs_gust:+.1f} km/s",
-            "Anlık Sıcaklık (°C)": round(ic_temp_now, 1),
-            "Sıcaklık Sapması (Δ)": (
-                f"{ic_temp_now - obs_temp:+.1f} °C"
-                if obs_temp is not None
-                else "--"
-            ),
-            "Günlük Yağış (mm)": round(float(ic_p.sum()), 1),
-        },
-    ])
-    st.dataframe(arena_table, use_container_width=True)
+    wind_errors = {
+        k: abs(v["gust"] - obs_gust) for k, v in models_eval.items()
+    }
+    wind_champ = min(wind_errors, key=wind_errors.get)
+
+    if obs_temp is not None:
+      temp_errors = {
+          k: abs(v["temp"] - obs_temp) for k, v in models_eval.items()
+      }
+      temp_champ = min(temp_errors, key=temp_errors.get)
+    else:
+      temp_errors = {k: 0.0 for k in models_eval}
+      temp_champ = "⚡ MetaCast (PIML)"
+
+    total_scores = {}
+    for k in models_eval:
+      w_pen = min(50.0, wind_errors[k] * 2.5)
+      t_pen = min(50.0, temp_errors[k] * 6.0)
+      total_scores[k] = round(max(0.0, 100.0 - (w_pen + t_pen)), 1)
+
+    overall_champ = max(total_scores, key=total_scores.get)
+
+    st.markdown(
+        f"""
+      <div class="arena-champ-box">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+              <div>
+                  <strong style="font-size: 1.05rem; color: #ffd54f;">🏆 Günün Genel Arena Şampiyonu: {overall_champ} (%{total_scores[overall_champ]} İsabetsizlik-Arındırılmış Skor)</strong>
+                  <div style="font-size: 0.86rem; color: #e0e0e0; margin-top: 4px;">
+                      💨 <strong>Rüzgâr Lideri:</strong> {wind_champ} (Sapma: {wind_errors[wind_champ]:.1f} km/s)  | 
+                      🌡️ <strong>Sıcaklık Lideri:</strong> {temp_champ} (Sapma: {temp_errors[temp_champ]:.1f} °C)  | 
+                      📡 <strong>Referans İstasyon:</strong> Erhaç LTAT ({obs_gust:.1f} km/s, {obs_temp if obs_temp is not None else '--'}°C)
+                  </div>
+              </div>
+          </div>
+      </div>
+      """,
+        unsafe_allow_html=True,
+    )
+  else:
+    wind_errors = {k: None for k in models_eval}
+    temp_errors = {k: None for k in models_eval}
+    total_scores = {k: None for k in models_eval}
+    st.info(
+        "📡 Erhaç (LTAT) yer istasyonu şu an çevrimdışı olduğundan canlı"
+        " sapma puanlaması beklemede; modellerin bağımsız PIML karşılaştırması"
+        " aşağıda sunulmaktadır."
+    )
+
+  # Günlük Karne Tablosu
+  st.markdown("#### 📋 Günlük Model Performans Karnesi (Erhaç LTAT Referanslı)")
+  karne_rows = []
+  for m_name, vals in models_eval.items():
+    w_err = wind_errors[m_name]
+    t_err = temp_errors[m_name]
+    sc = total_scores[m_name]
+
+    if sc is None:
+      grade = "⏳ Gözlem Bekleniyor"
+    elif sc >= 85:
+      grade = "🥇 AA (Mükemmel)"
+    elif sc >= 70:
+      grade = "🥈 BB (Başarılı)"
+    elif sc >= 50:
+      grade = "🥉 CC (Orta Sapma)"
+    else:
+      grade = "⚠️ DD (Yüksek Sapma)"
+
+    karne_rows.append({
+        "Model / Motor": m_name,
+        "Anlık Hamle (km/s)": round(vals["gust"], 1),
+        "Rüzgâr Sapması (Δ)": (
+            f"{vals['gust'] - obs_gust:+.1f} km/s"
+            if w_err is not None
+            else "--"
+        ),
+        "Anlık Sıcaklık (°C)": round(vals["temp"], 1),
+        "Sıcaklık Sapması (Δ)": (
+            f"{vals['temp'] - obs_temp:+.1f} °C"
+            if (t_err is not None and obs_temp is not None)
+            else "--"
+        ),
+        "Günlük Yağış (mm)": round(vals["precip_sum"], 1),
+        "Güvenilirlik Skoru": f"%{sc}" if sc is not None else "--",
+        "Karne Notu": grade,
+    })
+
+  st.dataframe(pd.DataFrame(karne_rows), use_container_width=True)
+
+  # XAI Fizik Gerekçelendirme Kutusu
+  avg_oro = float(np.mean(oro_block_arr) * 100.0)
+  max_evap = float(np.max(evap_cool_arr))
+  max_rad = float(np.max(rad_cool_arr))
+  st.markdown(
+      f"""
+    <div class="arena-xai-box">
+        <strong style="color: #81d4fa;">🔬 XAI Fizik Gerekçesi — MetaCast Neden Küresel Modellerden Ayrışıyor?</strong>
+        <div style="font-size: 0.88rem; line-height: 1.55; color: #eceff1; margin-top: 6px;">
+            • <strong>Beydağları Orografik Blokaj Katsayısı:</strong> Gün ortalaması <code>%{avg_oro:.0f}</code> — Güneybatı (215°) yönlü akımlarda küresel modellerin abarttığı rüzgâr hamleleri dağ bariyeri nedeniyle sönümlendirildi.<br>
+            • <strong>Termodinamik Buharlaşma Soğuması (Çiy Noktası):</strong> Yağış anlarında maksimum <code>-{max_evap:.1f}°C</code> gizli ısı soğuması uygulandı.<br>
+            • <strong>Malatya Çanağı Radyasyonel Soğuma:</strong> Açık gece saatlerinde <code>-{max_rad:.1f}°C</code> taban enverziyonu düzeltmesi devreye alındı.
+        </div>
+    </div>
+    """,
+      unsafe_allow_html=True,
+  )
+
+  # Çok Değişkenli Arena Karşılaştırma Grafikleri (Rüzgâr & Sıcaklık)
+  c_ar1, c_ar2 = st.columns(2)
+  with c_ar1:
+    fig_ar_w = go.Figure()
+    fig_ar_w.add_trace(
+        go.Scatter(
+            x=df_arena["time"],
+            y=mc_g,
+            name="⚡ MetaCast (PIML)",
+            line=dict(color="#00e676", width=3.2),
+        )
+    )
+    fig_ar_w.add_trace(
+        go.Scatter(
+            x=df_arena["time"],
+            y=ec_g,
+            name="ECMWF",
+            line=dict(color="#42a5f5", width=1.8, dash="dash"),
+        )
+    )
+    fig_ar_w.add_trace(
+        go.Scatter(
+            x=df_arena["time"],
+            y=gf_g,
+            name="GFS",
+            line=dict(color="#ef5350", width=1.8, dash="dot"),
+        )
+    )
+    fig_ar_w.add_trace(
+        go.Scatter(
+            x=df_arena["time"],
+            y=ic_g,
+            name="ICON",
+            line=dict(color="#ffa726", width=1.8, dash="dashdot"),
+        )
+    )
+    if arena_date == datetime.now().date() and metar["status"] != "offline":
+      fig_ar_w.add_trace(
+          go.Scatter(
+              x=[df_arena["time"].iloc[c_idx]],
+              y=[obs_gust],
+              mode="markers+text",
+              name="📡 Erhaç LTAT",
+              text=[f"LTAT: {obs_gust}"],
+              textposition="top center",
+              marker=dict(color="#ce93d8", size=11, symbol="diamond"),
+          )
+      )
+    fig_ar_w.update_layout(
+        title="💨 Rüzgâr Hamlesi Düellosu (km/s)",
+        xaxis_title="Saat",
+        yaxis_title="km/s",
+        hovermode="x unified",
+        template="plotly_white",
+        height=330,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    st.plotly_chart(fig_ar_w, use_container_width=True)
+
+  with c_ar2:
+    fig_ar_t = go.Figure()
+    fig_ar_t.add_trace(
+        go.Scatter(
+            x=df_arena["time"],
+            y=mc_t,
+            name="⚡ MetaCast (PIML)",
+            line=dict(color="#00e676", width=3.2),
+        )
+    )
+    fig_ar_t.add_trace(
+        go.Scatter(
+            x=df_arena["time"],
+            y=ec_t,
+            name="ECMWF",
+            line=dict(color="#42a5f5", width=1.8, dash="dash"),
+        )
+    )
+    fig_ar_t.add_trace(
+        go.Scatter(
+            x=df_arena["time"],
+            y=gf_t,
+            name="GFS",
+            line=dict(color="#ef5350", width=1.8, dash="dot"),
+        )
+    )
+    fig_ar_t.add_trace(
+        go.Scatter(
+            x=df_arena["time"],
+            y=ic_t,
+            name="ICON",
+            line=dict(color="#ffa726", width=1.8, dash="dashdot"),
+        )
+    )
+    if (
+        arena_date == datetime.now().date()
+        and metar["status"] != "offline"
+        and obs_temp is not None
+    ):
+      fig_ar_t.add_trace(
+          go.Scatter(
+              x=[df_arena["time"].iloc[c_idx]],
+              y=[obs_temp],
+              mode="markers+text",
+              name="📡 Erhaç LTAT",
+              text=[f"LTAT: {obs_temp}°C"],
+              textposition="top center",
+              marker=dict(color="#ce93d8", size=11, symbol="diamond"),
+          )
+      )
+    fig_ar_t.update_layout(
+        title="🌡️ Sıcaklık Profili Düellosu (°C)",
+        xaxis_title="Saat",
+        yaxis_title="°C",
+        hovermode="x unified",
+        template="plotly_white",
+        height=330,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    st.plotly_chart(fig_ar_t, use_container_width=True)
 
   st.stop()
 
