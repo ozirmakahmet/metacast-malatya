@@ -75,21 +75,14 @@ div[data-testid="stMetricValue"] > div {
     padding: 14px 16px;
     height: 100%;
 }
-.day-pill {
-    background-color: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    padding: 8px 10px;
-    text-align: center;
-    font-size: 0.82rem;
-}
-.day-pill-active {
-    background-color: rgba(33, 150, 243, 0.18);
-    border: 1px solid #42a5f5;
-    border-radius: 8px;
-    padding: 8px 10px;
-    text-align: center;
-    font-size: 0.82rem;
+/* 7 Günlük Tıklanabilir Kart Buton Stili */
+div[data-testid="stHorizontalBlock"] button[kind="secondary"],
+div[data-testid="stHorizontalBlock"] button[kind="primary"] {
+    min-height: 108px !important;
+    padding: 10px 6px !important;
+    border-radius: 10px !important;
+    line-height: 1.45 !important;
+    white-space: pre-line !important;
 }
 </style>
 """,
@@ -923,12 +916,16 @@ else:
   df, date_display, tag_sub = generate_scenario(mode)
   selected_d = df["time"].dt.date.iloc[0]
 
-# --- 7 GÜNLÜK HIZLI ÖZET ŞERİDİ (CANLI MODDA) ---
+# --- 7 GÜNLÜK TIKLANABİLİR HIZLI ÖZET ŞERİDİ (CANLI MODDA) ---
 if mode == "Canlı Operasyonel" and not daily_erhac.empty:
   forecast_days_df = daily_erhac[
       daily_erhac["date"] >= datetime.now().date()
   ].head(7)
   if not forecast_days_df.empty:
+    st.caption(
+        "👇 Detaylarını incelemek istediğiniz günün kartına doğrudan"
+        " tıklayabilirsiniz:"
+    )
     tmax_col = [
         c for c in forecast_days_df.columns if c.startswith("temperature_2m_max")
     ][0]
@@ -946,26 +943,35 @@ if mode == "Canlı Operasyonel" and not daily_erhac.empty:
     for col_widget, (_, r_day) in zip(day_cols, forecast_days_df.iterrows()):
       d_val = r_day["date"]
       is_sel = d_val == selected_d
-      pill_cls = "day-pill-active" if is_sel else "day-pill"
       day_name = TR_DAYS[d_val.weekday()]
       p_mm = float(r_day[psum_col]) if pd.notna(r_day[psum_col]) else 0.0
       t_mx = float(r_day[tmax_col]) if pd.notna(r_day[tmax_col]) else 0.0
       t_mn = float(r_day[tmin_col]) if pd.notna(r_day[tmin_col]) else 0.0
       w_mx = float(r_day[wmax_col]) if pd.notna(r_day[wmax_col]) else 0.0
-      w_icon = "❄️" if t_mn <= 0 else ("🌧️" if p_mm > 1.0 else ("💨" if w_mx >= 45 else "☀️"))
+      w_icon = (
+          "❄️"
+          if t_mn <= 0
+          else ("🌧️" if p_mm > 1.0 else ("💨" if w_mx >= 45 else "☀️"))
+      )
+
+      btn_label = (
+          f"{'🔵 ' if is_sel else ''}{d_val.day:02d}"
+          f" {TR_MONTHS[d_val.month][:3]} ({day_name})\n"
+          f"{w_icon}  {t_mx:.0f}° / {t_mn:.0f}°\n"
+          f"💨 {w_mx:.0f} km/s | 💧 {p_mm:.1f}mm"
+      )
+
       with col_widget:
-        st.markdown(
-            f"""
-            <div class="{pill_cls}">
-                <div style="font-weight: 700; color: #90caf9;">{d_val.day:02d} {TR_MONTHS[d_val.month][:3]} ({day_name})</div>
-                <div style="font-size: 1.15rem; margin: 3px 0;">{w_icon}</div>
-                <div><strong>{t_mx:.0f}°</strong> / <span style="color:#90caf9;">{t_mn:.0f}°</span></div>
-                <div style="font-size: 0.74rem; color: #b0bec5;">💨 {w_mx:.0f} km/s | 💧 {p_mm:.1f}mm</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
+        if st.button(
+            btn_label,
+            key=f"day_card_{d_val}",
+            type="primary" if is_sel else "secondary",
+            use_container_width=True,
+        ):
+          st.session_state.current_date = d_val
+          st.rerun()
+
+    st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
 
 # --- TEMEL FİZİKSEL HESAPLAMALAR ---
 ecmwf = df["wind_gusts_10m_ecmwf_ifs"]
