@@ -75,7 +75,13 @@ div[data-testid="stMetricValue"] > div {
     padding: 14px 16px;
     height: 100%;
 }
-/* 7 Günlük Tıklanabilir Kart Buton Stili */
+.arena-card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    padding: 14px;
+    height: 100%;
+}
 div[data-testid="stHorizontalBlock"] button[kind="secondary"],
 div[data-testid="stHorizontalBlock"] button[kind="primary"] {
     min-height: 108px !important;
@@ -545,7 +551,11 @@ def generate_scenario(name: str):
       "pressure_msl_ecmwf_ifs": pressure,
       "surface_pressure_ecmwf_ifs": pressure - 104.0,
       "temperature_2m_ecmwf_ifs": temp,
+      "temperature_2m_gfs_seamless": temp - 0.4,
+      "temperature_2m_icon_seamless": temp + 0.3,
       "precipitation_ecmwf_ifs": precip,
+      "precipitation_gfs_seamless": precip * 1.1,
+      "precipitation_icon_seamless": precip * 0.9,
       "cloud_cover_ecmwf_ifs": cloud,
       "cape": cape_vals,
       "dew_point_2m_ecmwf_ifs": dew_point,
@@ -559,8 +569,8 @@ st.markdown(
 <div class="hero-header">
     <h2 style="margin: 0; font-size: 1.75rem;">⚡ MetaCast: Malatya Havzası Meteorolojik Karar-Destek Platformu</h2>
     <p style="margin: 6px 0 0 0; font-size: 0.92rem; color: #cfd8dc;">
-        📍 <strong>Hedef Havza:</strong> Malatya Çanağı & Erhaç (LTAT)  | 
-        🔬 <strong>Mimari:</strong> Fizik Destekli Makine Öğrenmesi (PIML) + Açıklanabilir Yapay Zekâ (XAI)  | 
+        📍 <strong>Hedef Havza:</strong> Malatya Çanağı & Erhaç (LTAT) &nbsp;|&nbsp;
+        🔬 <strong>Mimari:</strong> Fizik Destekli Makine Öğrenmesi (PIML) + Açıklanabilir Yapay Zekâ (XAI) &nbsp;|&nbsp;
         📡 <strong>Veri:</strong> NOAA METAR + ECMWF / GFS / ICON Çok Noktalı Akış
     </p>
 </div>
@@ -903,7 +913,6 @@ if mode == "Canlı Operasyonel":
   date_display = format_tr_date(selected_d)
   tag_sub = "Canlı Sayısal Model Tahmini (Çok Noktalı Gerçek Akış)"
 
-  # Gerçek gün doğumu ve gün batımı saatlerini çek
   if not daily_erhac.empty and selected_d in daily_erhac["date"].values:
     d_row = daily_erhac[daily_erhac["date"] == selected_d].iloc[0]
     sr_col = [c for c in daily_erhac.columns if c.startswith("sunrise")]
@@ -979,6 +988,7 @@ gfs = df["wind_gusts_10m_gfs_seamless"]
 icon = df["wind_gusts_10m_icon_seamless"]
 
 gust_mean = (ecmwf + gfs + icon) / 3.0
+gust_median = np.median([ecmwf, gfs, icon], axis=0)
 gust_std = np.std([ecmwf, gfs, icon], axis=0)
 
 peak_idx = int(np.argmax(gust_mean))
@@ -988,7 +998,6 @@ peak_gust = float(gust_mean.iloc[peak_idx])
 wind_dir_series = df["wind_direction_10m_ecmwf_ifs"]
 live_wind_deg = float(wind_dir_series.iloc[peak_idx])
 
-# Deniz seviyesine indirgenmiş basınç (QNH / MSL)
 msl_pressure_series = df.get(
     "pressure_msl_ecmwf_ifs", df["surface_pressure_ecmwf_ifs"]
 )
@@ -1001,7 +1010,13 @@ gust_factor = (
 ).clip(1.0, 5.0)
 
 temp = df["temperature_2m_ecmwf_ifs"]
+temp_gfs = df.get("temperature_2m_gfs_seamless", temp)
+temp_icon = df.get("temperature_2m_icon_seamless", temp)
+
 precip = df["precipitation_ecmwf_ifs"]
+precip_gfs = df.get("precipitation_gfs_seamless", precip)
+precip_icon = df.get("precipitation_icon_seamless", precip)
+
 cloud_cover = df.get(
     "cloud_cover_ecmwf_ifs",
     df.get("cloud_cover", pd.Series(np.zeros(len(df)))),
@@ -1009,9 +1024,7 @@ cloud_cover = df.get(
 
 cape_series = df.get("cape", pd.Series(np.zeros(len(df))))
 dew_point_series = df.get("dew_point_2m_ecmwf_ifs", temp - 4.0)
-dew_point_depression = temp - dew_point_series
 
-# Gerçek gün doğumu ve gün batımı saatlerine göre gece maskesi
 sr_hour = int(sunrise_str.split(":")[0])
 ss_hour = int(sunset_str.split(":")[0])
 night_mask = (df["time"].dt.hour >= ss_hour) | (df["time"].dt.hour <= sr_hour)
@@ -1061,6 +1074,17 @@ X_input = np.column_stack([
 
 X_norm = (X_input - mean) / std
 probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
+
+# MetaCast Orografik Düzeltmeli Hibrit Rüzgâr Serisi
+metacast_gust_series = pd.Series(
+    gust_median * (1.0 - 0.35 * mountain_blockage)
+)
+metacast_temp_series = pd.Series(
+    np.median([temp, temp_gfs, temp_icon], axis=0)
+)
+metacast_precip_series = pd.Series(
+    np.median([precip, precip_gfs, precip_icon], axis=0)
+)
 
 # --- ÜST METRİK KARTLARI ---
 col1, col2, col3, col4 = st.columns(4)
@@ -1455,8 +1479,9 @@ else:
     )
 
 # --- SEKMELİ KOKPİT ALANI ---
-tab_karar, tab_grafik, tab_ilce, tab_mlops = st.tabs([
+tab_karar, tab_arena, tab_grafik, tab_ilce, tab_mlops = st.tabs([
     "🧠 Karar Motoru, XAI & Sektörel Reçeteler",
+    "⚔️ Model Arenası (MetaCast vs Modeller)",
     "📊 Saatlik Model & Termodinamik Analiz",
     "🏢 İlçe Bazlı Gerçek Model Kıyaslaması",
     "🗄️ MLOps Doğrulama Arşivi",
@@ -1626,7 +1651,217 @@ with tab_karar:
         unsafe_allow_html=True,
     )
 
-# ==================== SEKME 2: SAATLİK GRAFİKLER ====================
+# ==================== SEKME 2: MODEL ARENASI ====================
+with tab_arena:
+  st.markdown(
+      f"#### ⚔️ Model Arenası: MetaCast (PIML) vs Küresel Modeller & Erhaç"
+      f" İstasyonu ({date_display})"
+  )
+  st.caption(
+      "Medyan & varyans kontrollü hibrit topluluk (ensemble) yapısı ile"
+      " Avrupa (ECMWF), ABD (GFS), Almanya (ICON) modellerinin Erhaç (LTAT)"
+      " yer gözlemine göre anlık performans kıyaslaması."
+  )
+
+  # Anlık saat (cur_idx) kıyaslama değerleri
+  mc_gust_now = float(metacast_gust_series.iloc[cur_idx])
+  ec_gust_now = float(ecmwf.iloc[cur_idx])
+  gf_gust_now = float(gfs.iloc[cur_idx])
+  ic_gust_now = float(icon.iloc[cur_idx])
+
+  mc_temp_now = float(metacast_temp_series.iloc[cur_idx])
+  ec_temp_now = float(temp.iloc[cur_idx])
+  gf_temp_now = float(temp_gfs.iloc[cur_idx])
+  ic_temp_now = float(temp_icon.iloc[cur_idx])
+
+  a1, a2, a3, a4, a5 = st.columns(5)
+
+  with a1:
+    st.markdown(
+        f"""
+      <div class="arena-card" style="border-top: 4px solid #00e676;">
+          <strong style="color: #00e676;">⚡ MetaCast (PIML)</strong>
+          <p style="font-size: 0.76rem; color: #90a4ae; margin: 2px 0 8px 0;">Hibrit Medyan + Orografi</p>
+          <div style="font-size: 0.86rem; line-height: 1.6;">
+              <strong>Anlık Hamle:</strong> {mc_gust_now:.1f} km/s<br>
+              <strong>Pik Hamle:</strong> {metacast_gust_series.max():.1f} km/s<br>
+              <strong>Anlık Sıcaklık:</strong> {mc_temp_now:.1f} °C<br>
+              <strong>Toplam Yağış:</strong> {metacast_precip_series.sum():.1f} mm
+          </div>
+      </div>
+      """,
+        unsafe_allow_html=True,
+    )
+
+  with a2:
+    st.markdown(
+        f"""
+      <div class="arena-card" style="border-top: 4px solid #42a5f5;">
+          <strong style="color: #42a5f5;">🇪🇺 ECMWF IFS</strong>
+          <p style="font-size: 0.76rem; color: #90a4ae; margin: 2px 0 8px 0;">Avrupa Orta Vadeli Model</p>
+          <div style="font-size: 0.86rem; line-height: 1.6;">
+              <strong>Anlık Hamle:</strong> {ec_gust_now:.1f} km/s<br>
+              <strong>Pik Hamle:</strong> {ecmwf.max():.1f} km/s<br>
+              <strong>Anlık Sıcaklık:</strong> {ec_temp_now:.1f} °C<br>
+              <strong>Toplam Yağış:</strong> {precip.sum():.1f} mm
+          </div>
+      </div>
+      """,
+        unsafe_allow_html=True,
+    )
+
+  with a3:
+    st.markdown(
+        f"""
+      <div class="arena-card" style="border-top: 4px solid #ef5350;">
+          <strong style="color: #ef5350;">🇺🇸 NOAA GFS</strong>
+          <p style="font-size: 0.76rem; color: #90a4ae; margin: 2px 0 8px 0;">ABD Küresel Tahmin Sistemi</p>
+          <div style="font-size: 0.86rem; line-height: 1.6;">
+              <strong>Anlık Hamle:</strong> {gf_gust_now:.1f} km/s<br>
+              <strong>Pik Hamle:</strong> {gfs.max():.1f} km/s<br>
+              <strong>Anlık Sıcaklık:</strong> {gf_temp_now:.1f} °C<br>
+              <strong>Toplam Yağış:</strong> {precip_gfs.sum():.1f} mm
+          </div>
+      </div>
+      """,
+        unsafe_allow_html=True,
+    )
+
+  with a4:
+    st.markdown(
+        f"""
+      <div class="arena-card" style="border-top: 4px solid #ffa726;">
+          <strong style="color: #ffa726;">🇩🇪 DWD ICON</strong>
+          <p style="font-size: 0.76rem; color: #90a4ae; margin: 2px 0 8px 0;">Almanya İkosahedral Model</p>
+          <div style="font-size: 0.86rem; line-height: 1.6;">
+              <strong>Anlık Hamle:</strong> {ic_gust_now:.1f} km/s<br>
+              <strong>Pik Hamle:</strong> {icon.max():.1f} km/s<br>
+              <strong>Anlık Sıcaklık:</strong> {ic_temp_now:.1f} °C<br>
+              <strong>Toplam Yağış:</strong> {precip_icon.sum():.1f} mm
+          </div>
+      </div>
+      """,
+        unsafe_allow_html=True,
+    )
+
+  with a5:
+    obs_t_str = f"{obs_temp:.1f} °C" if obs_temp is not None else "--"
+    st.markdown(
+        f"""
+      <div class="arena-card" style="border-top: 4px solid #ab47bc; background: rgba(171, 71, 188, 0.08);">
+          <strong style="color: #ce93d8;">📡 Erhaç (LTAT)</strong>
+          <p style="font-size: 0.76rem; color: #90a4ae; margin: 2px 0 8px 0;">Gerçek Yer Gözlemi (Referans)</p>
+          <div style="font-size: 0.86rem; line-height: 1.6;">
+              <strong>Yer Hamlesi:</strong> {obs_gust:.1f} km/s<br>
+              <strong>Ort. Rüzgâr:</strong> {metar['speed_kmh']} km/s<br>
+              <strong>Termometre:</strong> {obs_t_str}<br>
+              <strong>QNH Basınç:</strong> {int(obs_pres) if obs_pres else '--'} hPa
+          </div>
+      </div>
+      """,
+        unsafe_allow_html=True,
+    )
+
+  st.markdown("<div style='margin-top: 16px;'></div>", unsafe_allow_html=True)
+
+  # Arena Saatlik Karşılaştırma Grafiği (MetaCast vs Küresel Modeller + Yer Gözlemi)
+  fig_arena = go.Figure()
+  fig_arena.add_trace(
+      go.Scatter(
+          x=df["time"],
+          y=metacast_gust_series,
+          name="⚡ MetaCast (PIML Düzeltmeli)",
+          line=dict(color="#00e676", width=3.2),
+      )
+  )
+  fig_arena.add_trace(
+      go.Scatter(
+          x=df["time"],
+          y=ecmwf,
+          name="ECMWF IFS",
+          line=dict(color="#42a5f5", width=1.8, dash="dash"),
+      )
+  )
+  fig_arena.add_trace(
+      go.Scatter(
+          x=df["time"],
+          y=gfs,
+          name="NOAA GFS",
+          line=dict(color="#ef5350", width=1.8, dash="dot"),
+      )
+  )
+  fig_arena.add_trace(
+      go.Scatter(
+          x=df["time"],
+          y=icon,
+          name="DWD ICON",
+          line=dict(color="#ffa726", width=1.8, dash="dashdot"),
+      )
+  )
+
+  if mode == "Canlı Operasyonel" and selected_d == datetime.now().date() and metar["status"] != "offline":
+    fig_arena.add_trace(
+        go.Scatter(
+            x=[df["time"].iloc[cur_idx]],
+            y=[obs_gust],
+            mode="markers+text",
+            name="📡 Erhaç (LTAT) Canlı Gözlem",
+            text=[f"LTAT: {obs_gust} km/s"],
+            textposition="top center",
+            marker=dict(color="#ce93d8", size=12, symbol="diamond"),
+        )
+    )
+
+  fig_arena.update_layout(
+      title="Arena Rüzgâr Hamlesi Düellosu: MetaCast Orografik Düzeltmesi vs Ham Küresel Modeller",
+      xaxis_title="Saat",
+      yaxis_title="Rüzgâr Hamlesi (km/s)",
+      hovermode="x unified",
+      template="plotly_white",
+      height=350,
+      legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+  )
+  st.plotly_chart(fig_arena, use_container_width=True)
+
+  # Canlı Hata (Sapma) Tablosu
+  if metar["status"] != "offline":
+    arena_table = pd.DataFrame([
+        {
+            "Model / Kaynak": "⚡ MetaCast (PIML Hibrit)",
+            "Anlık Rüzgâr (km/s)": round(mc_gust_now, 1),
+            "Rüzgâr Sapması (Δ)": f"{mc_gust_now - obs_gust:+.1f} km/s",
+            "Anlık Sıcaklık (°C)": round(mc_temp_now, 1),
+            "Sıcaklık Sapması (Δ)": f"{mc_temp_now - obs_temp:+.1f} °C" if obs_temp is not None else "--",
+            "Günlük Yağış (mm)": round(float(metacast_precip_series.sum()), 1),
+        },
+        {
+            "Model / Kaynak": "🇪🇺 ECMWF IFS",
+            "Anlık Rüzgâr (km/s)": round(ec_gust_now, 1),
+            "Rüzgâr Sapması (Δ)": f"{ec_gust_now - obs_gust:+.1f} km/s",
+            "Anlık Sıcaklık (°C)": round(ec_temp_now, 1),
+            "Sıcaklık Sapması (Δ)": f"{ec_temp_now - obs_temp:+.1f} °C" if obs_temp is not None else "--",
+            "Günlük Yağış (mm)": round(float(precip.sum()), 1),
+        },
+        {
+            "Model / Kaynak": "🇺🇸 NOAA GFS",
+            "Anlık Rüzgâr (km/s)": round(gf_gust_now, 1),
+            "Rüzgâr Sapması (Δ)": f"{gf_gust_now - obs_gust:+.1f} km/s",
+            "Anlık Sıcaklık (°C)": round(gf_temp_now, 1),
+            "Sıcaklık Sapması (Δ)": f"{gf_temp_now - obs_temp:+.1f} °C" if obs_temp is not None else "--",
+            "Günlük Yağış (mm)": round(float(precip_gfs.sum()), 1),
+        },
+        {
+            "Model / Kaynak": "🇩🇪 DWD ICON",
+            "Anlık Rüzgâr (km/s)": round(ic_gust_now, 1),
+            "Rüzgâr Sapması (Δ)": f"{ic_gust_now - obs_gust:+.1f} km/s",
+            "Anlık Sıcaklık (°C)": round(ic_temp_now, 1),
+            "Sıcaklık Sapması (Δ)": f"{ic_temp_now - obs_temp:+.1f} °C" if obs_temp is not None else "--",
+            "Günlük Yağış (mm)": round(float(precip_icon.sum()), 1),
+        },
+    ])
+    st.dataframe(arena_table, use_container_width=True)
+
+# ==================== SEKME 3: SAATLİK GRAFİKLER ====================
 with tab_grafik:
   total_precip = float(precip.sum())
   avg_cloud = float(cloud_cover.mean())
@@ -1734,10 +1969,10 @@ with tab_grafik:
   with st.expander("📋 Saat Saat Tüm Meteorolojik Değerler Tablosu"):
     display_df = pd.DataFrame({
         "Saat": df["time"].dt.strftime("%H:00"),
+        "MetaCast (km/s)": metacast_gust_series.round(1),
         "ECMWF (km/s)": ecmwf.round(1),
         "GFS (km/s)": gfs.round(1),
         "ICON (km/s)": icon.round(1),
-        "Ort. Hamle (km/s)": gust_mean.round(1),
         "Sıcaklık (°C)": temp.round(1),
         "Çiy Noktası (°C)": dew_point_series.round(1),
         "CAPE (J/kg)": cape_series.round(0).astype(int),
@@ -1748,7 +1983,7 @@ with tab_grafik:
     })
     st.dataframe(display_df, use_container_width=True)
 
-# ==================== SEKME 3: İLÇE BAZLI GERÇEK VERİLER ====================
+# ==================== SEKME 4: İLÇE BAZLI GERÇEK VERİLER ====================
 with tab_ilce:
   st.markdown(
       "#### 🏢 Resmi Koordinatlara Göre Çok Noktalı Model Çıktıları"
@@ -1835,7 +2070,7 @@ with tab_ilce:
         " aktif olarak çalışmaktadır."
     )
 
-# ==================== SEKME 4: MLOps DOĞRULAMA ARŞİVİ ====================
+# ==================== SEKME 5: MLOps DOĞRULAMA ARŞİVİ ====================
 with tab_mlops:
   st.markdown(
       "#### 🗄️ Otomatik Model Doğrulama Günlüğü (SQLite / MLOps Audit Archive)"
