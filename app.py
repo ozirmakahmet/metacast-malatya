@@ -82,13 +82,66 @@ div[data-testid="stMetricValue"] > div {
     padding: 14px;
     height: 100%;
 }
-div[data-testid="stHorizontalBlock"] button[kind="secondary"],
+
+/* 7 Günlük Tıklanabilir Kart Butonları - Kırpılma Önleyici & Yüksek Görünürlük */
+div[data-testid="stHorizontalBlock"] button[kind="secondary"] {
+    min-height: 128px !important;
+    padding: 10px 8px !important;
+    border-radius: 12px !important;
+    background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)) !important;
+    border: 1px solid rgba(144, 202, 249, 0.28) !important;
+    transition: all 0.2s ease !important;
+}
+div[data-testid="stHorizontalBlock"] button[kind="secondary"]:hover {
+    border-color: #64b5f6 !important;
+    background: rgba(33, 150, 243, 0.14) !important;
+    transform: translateY(-2px);
+}
 div[data-testid="stHorizontalBlock"] button[kind="primary"] {
-    min-height: 108px !important;
-    padding: 10px 6px !important;
-    border-radius: 10px !important;
-    line-height: 1.45 !important;
+    min-height: 128px !important;
+    padding: 10px 8px !important;
+    border-radius: 12px !important;
+    background: linear-gradient(135deg, rgba(21, 101, 192, 0.85), rgba(0, 131, 143, 0.85)) !important;
+    border: 2px solid #4dd0e1 !important;
+    box-shadow: 0 4px 14px rgba(0, 188, 212, 0.25) !important;
+}
+div[data-testid="stHorizontalBlock"] button[kind="secondary"] p,
+div[data-testid="stHorizontalBlock"] button[kind="primary"] p,
+div[data-testid="stHorizontalBlock"] button[kind="secondary"] div,
+div[data-testid="stHorizontalBlock"] button[kind="primary"] div {
     white-space: pre-line !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+    line-height: 1.42 !important;
+    font-size: 0.83rem !important;
+    text-align: center !important;
+}
+
+/* 24 Saatlik Saatlik Tahmin Şeridi */
+.hourly-strip {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding: 10px 4px 14px 4px;
+    margin-bottom: 14px;
+    scrollbar-width: thin;
+}
+.hourly-item {
+    min-width: 82px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 9px 6px;
+    text-align: center;
+    flex-shrink: 0;
+}
+.hourly-item-frost {
+    background: rgba(33, 150, 243, 0.14);
+    border: 1px solid rgba(100, 181, 246, 0.45);
+}
+.hourly-item-wind {
+    background: rgba(255, 152, 0, 0.14);
+    border: 1px solid rgba(255, 183, 77, 0.45);
 }
 </style>
 """,
@@ -119,6 +172,29 @@ def format_tr_date(dt_obj) -> str:
 
 def sigmoid(z):
   return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
+
+
+def get_weather_icon_and_text(
+    temp_val: float,
+    precip_val: float,
+    cloud_val: float,
+    gust_val: float,
+    cape_val: float = 0.0,
+    is_night: bool = False,
+):
+  if precip_val > 0.25:
+    if temp_val <= 1.5:
+      return "❄️", "Karlı"
+    if cape_val >= 900.0 or (temp_val >= 22.0 and precip_val >= 2.0 and gust_val >= 35.0):
+      return "⚡", "Fırtına/Dolu"
+    return "🌧️", "Yağmurlu"
+  if gust_val >= 50.0:
+    return "💨", "Fırtınalı"
+  if cloud_val >= 75.0:
+    return "☁️", "Çok Bulutlu"
+  if cloud_val >= 35.0:
+    return "⛅" if not is_night else "☁️", "Parçalı Bulut"
+  return ("🌙", "Açık") if is_night else ("☀️", "Açık")
 
 
 # --- MLOps VERİ GÜNLÜĞÜ (SQLITE) ---
@@ -569,8 +645,8 @@ st.markdown(
 <div class="hero-header">
     <h2 style="margin: 0; font-size: 1.75rem;">⚡ MetaCast: Malatya Havzası Meteorolojik Karar-Destek Platformu</h2>
     <p style="margin: 6px 0 0 0; font-size: 0.92rem; color: #cfd8dc;">
-        📍 <strong>Hedef Havza:</strong> Malatya Çanağı & Erhaç (LTAT) &nbsp;|&nbsp;
-        🔬 <strong>Mimari:</strong> Fizik Destekli Makine Öğrenmesi (PIML) + Açıklanabilir Yapay Zekâ (XAI) &nbsp;|&nbsp;
+        📍 <strong>Hedef Havza:</strong> Malatya Çanağı & Erhaç (LTAT)  | 
+        🔬 <strong>Mimari:</strong> Fizik Destekli Makine Öğrenmesi (PIML) + Açıklanabilir Yapay Zekâ (XAI)  | 
         📡 <strong>Veri:</strong> NOAA METAR + ECMWF / GFS / ICON Çok Noktalı Akış
     </p>
 </div>
@@ -854,6 +930,7 @@ if mode == "What-If Laboratuvarı":
 # --- 3. CANLI OPERASYONEL VEYA GEÇMİŞ SENARYO AKIŞI ---
 multi_hourly = {}
 daily_erhac = pd.DataFrame()
+df_raw = pd.DataFrame()
 sunrise_str = "06:30"
 sunset_str = "18:30"
 
@@ -925,15 +1002,15 @@ else:
   df, date_display, tag_sub = generate_scenario(mode)
   selected_d = df["time"].dt.date.iloc[0]
 
-# --- 7 GÜNLÜK TIKLANABİLİR HIZLI ÖZET ŞERİDİ (CANLI MODDA) ---
-if mode == "Canlı Operasyonel" and not daily_erhac.empty:
+# --- 7 GÜNLÜK DETAYLI VE TIKLANABİLİR GÜNDÜZ/GECE KARTLARI ---
+if mode == "Canlı Operasyonel" and not daily_erhac.empty and not df_raw.empty:
   forecast_days_df = daily_erhac[
       daily_erhac["date"] >= datetime.now().date()
   ].head(7)
   if not forecast_days_df.empty:
     st.caption(
-        "👇 Detaylarını incelemek istediğiniz günün kartına doğrudan"
-        " tıklayabilirsiniz:"
+        "👇 Detaylı 24 saatlik tahmini ve analizleri görmek istediğiniz günün"
+        " kartına tıklayın:"
     )
     tmax_col = [
         c for c in forecast_days_df.columns if c.startswith("temperature_2m_max")
@@ -957,17 +1034,49 @@ if mode == "Canlı Operasyonel" and not daily_erhac.empty:
       t_mx = float(r_day[tmax_col]) if pd.notna(r_day[tmax_col]) else 0.0
       t_mn = float(r_day[tmin_col]) if pd.notna(r_day[tmin_col]) else 0.0
       w_mx = float(r_day[wmax_col]) if pd.notna(r_day[wmax_col]) else 0.0
-      w_icon = (
-          "❄️"
-          if t_mn <= 0
-          else ("🌧️" if p_mm > 1.0 else ("💨" if w_mx >= 45 else "☀️"))
-      )
 
+      # O güne ait saatlik dilimden Gündüz (07:00-17:00) ve Akşam/Gece (18:00-06:00) hava olaylarını belirle
+      d_slice = df_raw[df_raw["time"].dt.date == d_val]
+      if not d_slice.empty:
+        day_part = d_slice[
+            (d_slice["time"].dt.hour >= 7) & (d_slice["time"].dt.hour <= 17)
+        ]
+        eve_part = d_slice[
+            (d_slice["time"].dt.hour >= 18) | (d_slice["time"].dt.hour <= 6)
+        ]
+
+        if not day_part.empty:
+          d_icon, _ = get_weather_icon_and_text(
+              float(day_part["temperature_2m_ecmwf_ifs"].mean()),
+              float(day_part["precipitation_ecmwf_ifs"].sum()),
+              float(day_part["cloud_cover_ecmwf_ifs"].mean()),
+              float(day_part["wind_gusts_10m_ecmwf_ifs"].max()),
+              float(day_part.get("cape", pd.Series([0])).max()),
+              is_night=False,
+          )
+        else:
+          d_icon = "☀️"
+
+        if not eve_part.empty:
+          n_icon, _ = get_weather_icon_and_text(
+              float(eve_part["temperature_2m_ecmwf_ifs"].min()),
+              float(eve_part["precipitation_ecmwf_ifs"].sum()),
+              float(eve_part["cloud_cover_ecmwf_ifs"].mean()),
+              float(eve_part["wind_gusts_10m_ecmwf_ifs"].max()),
+              float(eve_part.get("cape", pd.Series([0])).max()),
+              is_night=True,
+          )
+        else:
+          n_icon = "🌙"
+      else:
+        d_icon = "🌧️" if p_mm > 1.0 else "☀️"
+        n_icon = "❄️" if t_mn <= 0 else "🌙"
+
+      header_tag = f"📍 {d_val.day:02d} {TR_MONTHS[d_val.month][:3]} ({day_name})" if is_sel else f"{d_val.day:02d} {TR_MONTHS[d_val.month][:3]} ({day_name})"
       btn_label = (
-          f"{'🔵 ' if is_sel else ''}{d_val.day:02d}"
-          f" {TR_MONTHS[d_val.month][:3]} ({day_name})\n"
-          f"{w_icon}  {t_mx:.0f}° / {t_mn:.0f}°\n"
-          f"💨 {w_mx:.0f} km/s | 💧 {p_mm:.1f}mm"
+          f"{header_tag}\n"
+          f"Gündüz {d_icon} {t_mx:.0f}°  |  Gece {n_icon} {t_mn:.0f}°\n"
+          f"💨 {w_mx:.0f} km/s  •  💧 {p_mm:.1f}mm"
       )
 
       with col_widget:
@@ -979,8 +1088,6 @@ if mode == "Canlı Operasyonel" and not daily_erhac.empty:
         ):
           st.session_state.current_date = d_val
           st.rerun()
-
-    st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
 
 # --- TEMEL FİZİKSEL HESAPLAMALAR ---
 ecmwf = df["wind_gusts_10m_ecmwf_ifs"]
@@ -1075,7 +1182,6 @@ X_input = np.column_stack([
 X_norm = (X_input - mean) / std
 probabilities = sigmoid(np.dot(X_norm, weights) + bias) * 100.0
 
-# MetaCast Orografik Düzeltmeli Hibrit Rüzgâr Serisi
 metacast_gust_series = pd.Series(
     gust_median * (1.0 - 0.35 * mountain_blockage)
 )
@@ -1086,10 +1192,51 @@ metacast_precip_series = pd.Series(
     np.median([precip, precip_gfs, precip_icon], axis=0)
 )
 
-# --- ÜST METRİK KARTLARI ---
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("İncelenen Tarih", date_display)
-col1.caption(f"🌅 Doğuş: **{sunrise_str}** | 🌇 Batış: **{sunset_str}**")
+# --- 24 SAATLİK SAATLİK TAHMİN ŞERİDİ (00:00 - 23:00) ---
+st.markdown(
+    f"<div style='display:flex; justify-content:space-between; align-items:center; margin-top: 12px; margin-bottom: 4px;'>"
+    f"<strong style='font-size: 1.02rem; color: #90caf9;'>🕒 {date_display} — 24 Saatlik Detaylı Akış</strong>"
+    f"<span style='font-size: 0.85rem; color: #b0bec5;'>🌅 Gün Doğumu: <strong>{sunrise_str}</strong>  |  🌇 Gün Batımı: <strong>{sunset_str}</strong></span>"
+    f"</div>",
+    unsafe_allow_html=True,
+)
+
+hourly_cards_html = ["<div class='hourly-strip'>"]
+for idx_h, row_h in df.iterrows():
+  hr_int = row_h["time"].hour
+  hr_str = row_h["time"].strftime("%H:00")
+  is_n = (hr_int >= ss_hour) or (hr_int <= sr_hour)
+  t_h = float(row_h["temperature_2m_ecmwf_ifs"])
+  p_h = float(row_h["precipitation_ecmwf_ifs"])
+  c_h = float(row_h.get("cloud_cover_ecmwf_ifs", 0.0))
+  g_h = float(gust_mean.iloc[idx_h])
+  cp_h = float(row_h.get("cape", 0.0))
+
+  h_icon, h_desc = get_weather_icon_and_text(
+      t_h, p_h, c_h, g_h, cp_h, is_night=is_n
+  )
+
+  extra_cls = ""
+  if t_h <= 1.0:
+    extra_cls = " hourly-item-frost"
+  elif g_h >= 40.0:
+    extra_cls = " hourly-item-wind"
+
+  sub_info = f"💧 {p_h:.1f}mm" if p_h > 0.05 else f"☁️ %{c_h:.0f}"
+  hourly_cards_html.append(
+      f"<div class='hourly-item{extra_cls}'>"
+      f"<div style='font-size: 0.78rem; color: #90a4ae; font-weight: 600;'>{hr_str}</div>"
+      f"<div style='font-size: 1.35rem; margin: 4px 0;'>{h_icon}</div>"
+      f"<div style='font-size: 0.96rem; font-weight: 700; color: #ffffff;'>{t_h:.1f}°</div>"
+      f"<div style='font-size: 0.73rem; color: #81d4fa; margin-top: 3px;'>💨 {g_h:.0f} km/s</div>"
+      f"<div style='font-size: 0.72rem; color: #b0bec5;'>{sub_info}</div>"
+      f"</div>"
+  )
+hourly_cards_html.append("</div>")
+st.markdown("".join(hourly_cards_html), unsafe_allow_html=True)
+
+# --- ÜST METRİK KARTLARI (İNCELENEN TARİH KALDIRILDI -> 3 NET METRİK) ---
+col2, col3, col4 = st.columns(3)
 
 col2.metric("Beklenen Pik Rüzgâr", f"{peak_gust:.1f} km/s")
 col2.caption(
@@ -1663,7 +1810,6 @@ with tab_arena:
       " yer gözlemine göre anlık performans kıyaslaması."
   )
 
-  # Anlık saat (cur_idx) kıyaslama değerleri
   mc_gust_now = float(metacast_gust_series.iloc[cur_idx])
   ec_gust_now = float(ecmwf.iloc[cur_idx])
   gf_gust_now = float(gfs.iloc[cur_idx])
@@ -1764,7 +1910,6 @@ with tab_arena:
 
   st.markdown("<div style='margin-top: 16px;'></div>", unsafe_allow_html=True)
 
-  # Arena Saatlik Karşılaştırma Grafiği (MetaCast vs Küresel Modeller + Yer Gözlemi)
   fig_arena = go.Figure()
   fig_arena.add_trace(
       go.Scatter(
@@ -1799,7 +1944,11 @@ with tab_arena:
       )
   )
 
-  if mode == "Canlı Operasyonel" and selected_d == datetime.now().date() and metar["status"] != "offline":
+  if (
+      mode == "Canlı Operasyonel"
+      and selected_d == datetime.now().date()
+      and metar["status"] != "offline"
+  ):
     fig_arena.add_trace(
         go.Scatter(
             x=[df["time"].iloc[cur_idx]],
@@ -1823,7 +1972,6 @@ with tab_arena:
   )
   st.plotly_chart(fig_arena, use_container_width=True)
 
-  # Canlı Hata (Sapma) Tablosu
   if metar["status"] != "offline":
     arena_table = pd.DataFrame([
         {
@@ -1831,7 +1979,11 @@ with tab_arena:
             "Anlık Rüzgâr (km/s)": round(mc_gust_now, 1),
             "Rüzgâr Sapması (Δ)": f"{mc_gust_now - obs_gust:+.1f} km/s",
             "Anlık Sıcaklık (°C)": round(mc_temp_now, 1),
-            "Sıcaklık Sapması (Δ)": f"{mc_temp_now - obs_temp:+.1f} °C" if obs_temp is not None else "--",
+            "Sıcaklık Sapması (Δ)": (
+                f"{mc_temp_now - obs_temp:+.1f} °C"
+                if obs_temp is not None
+                else "--"
+            ),
             "Günlük Yağış (mm)": round(float(metacast_precip_series.sum()), 1),
         },
         {
@@ -1839,7 +1991,11 @@ with tab_arena:
             "Anlık Rüzgâr (km/s)": round(ec_gust_now, 1),
             "Rüzgâr Sapması (Δ)": f"{ec_gust_now - obs_gust:+.1f} km/s",
             "Anlık Sıcaklık (°C)": round(ec_temp_now, 1),
-            "Sıcaklık Sapması (Δ)": f"{ec_temp_now - obs_temp:+.1f} °C" if obs_temp is not None else "--",
+            "Sıcaklık Sapması (Δ)": (
+                f"{ec_temp_now - obs_temp:+.1f} °C"
+                if obs_temp is not None
+                else "--"
+            ),
             "Günlük Yağış (mm)": round(float(precip.sum()), 1),
         },
         {
@@ -1847,7 +2003,11 @@ with tab_arena:
             "Anlık Rüzgâr (km/s)": round(gf_gust_now, 1),
             "Rüzgâr Sapması (Δ)": f"{gf_gust_now - obs_gust:+.1f} km/s",
             "Anlık Sıcaklık (°C)": round(gf_temp_now, 1),
-            "Sıcaklık Sapması (Δ)": f"{gf_temp_now - obs_temp:+.1f} °C" if obs_temp is not None else "--",
+            "Sıcaklık Sapması (Δ)": (
+                f"{gf_temp_now - obs_temp:+.1f} °C"
+                if obs_temp is not None
+                else "--"
+            ),
             "Günlük Yağış (mm)": round(float(precip_gfs.sum()), 1),
         },
         {
@@ -1855,7 +2015,11 @@ with tab_arena:
             "Anlık Rüzgâr (km/s)": round(ic_gust_now, 1),
             "Rüzgâr Sapması (Δ)": f"{ic_gust_now - obs_gust:+.1f} km/s",
             "Anlık Sıcaklık (°C)": round(ic_temp_now, 1),
-            "Sıcaklık Sapması (Δ)": f"{ic_temp_now - obs_temp:+.1f} °C" if obs_temp is not None else "--",
+            "Sıcaklık Sapması (Δ)": (
+                f"{ic_temp_now - obs_temp:+.1f} °C"
+                if obs_temp is not None
+                else "--"
+            ),
             "Günlük Yağış (mm)": round(float(precip_icon.sum()), 1),
         },
     ])
