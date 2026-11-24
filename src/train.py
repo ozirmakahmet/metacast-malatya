@@ -1,183 +1,169 @@
 import json
 import os
 import sqlite3
+from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
+import requests
+
+LAT_MERKEZ = 38.3552
+LON_MERKEZ = 38.3095
+TR_TZ = timezone(timedelta(hours=3))
+
+WEIGHTS_PATH = "models/metacast_weights.json"
+DB_PATH = "data/metacast_logs.db"
 
 
 def sigmoid(z):
-    return 1 / (1 + np.exp(-np.clip(z, -25, 25)))
+    return 1.0 / (1.0 + np.exp(-np.clip(z, -25.0, 25.0)))
 
 
-# --- 1. ANA MODEL EĞİTİM MOTORU (GEÇMİŞ ARŞİV İLE BÜYÜK EĞİTİM) ---
-def train_metacast_model(data_path: str, model_output_path: str):
-    print("Genişletilmiş şiddetli hava veri seti yükleniyor...")
-    if not os.path.exists(data_path):
-        print(f"Hata: {data_path} bulunamadı!")
-        return
+def calculate_gaussian_blockage(wind_dir, peak_angle=215.0, spread=35.0):
+    diff = (wind_dir - peak_angle + 180.0) % 360.0 - 180.0
+    return np.exp(-(diff ** 2) / (2.0 * (spread ** 2)))
 
-    df = pd.read_csv(data_path)
 
-    # Malatya'nın topoğrafik ve fiziksel öznitelikleri
-    features = [
-        "wind_u",
-        "wind_v",
-        "pressure_diff_3h",
-        "temp_diff_3h",
-        "mountain_blockage_index",
-        "gust_factor",
-        "dam_moisture_advection",
-        "is_snow_phase",
-        "hail_potential",
-    ]
+def fetch_historical_malatya_data(start_date="2020-01-01", end_date=None):
+    if end_date is None:
+        end_date = (datetime.now(TR_TZ) - timedelta(days=2)).strftime("%Y-%m-%d")
 
-    # Hedef Değişken (Fırtına, Kar, Dolu veya Zirai Don)
-    target_col = "target_severe_event"
-
-    X = df[features].values
-    y = df[target_col].values
-
-    # Zamansal Bölme (Temporal Split - Veri Sızıntısını Önler)
-    split_idx = int(len(df) * 0.8)
-    X_train, y_train = X[:split_idx], y[:split_idx]
-    X_test, y_test = X[split_idx:], y[split_idx:]
-
-    # Z-Score Standardizasyonu
-    mean = np.mean(X_train, axis=0)
-    std = np.std(X_train, axis=0) + 1e-7
-
-    X_train_norm = (X_train - mean) / std
-    X_test_norm = (X_test - mean) / std
-
-    severe_events_train = int(np.sum(y_train))
-    severe_events_test = int(np.sum(y_test))
-
-    print(
-        f"Eğitim Kümesi: {len(X_train)} saat (Afet: {severe_events_train}) | "
-        f"Test Kümesi: {len(X_test)} saat (Afet: {severe_events_test})"
-    )
-    print("Fizik kısıtlı (Physics-Informed) karar motoru eğitiliyor...")
-
-    weights = np.zeros(X_train.shape[1])
-    bias = 0.0
-    lr = 0.05
-    pos_weight = (len(y_train) - np.sum(y_train)) / (np.sum(y_train) + 1e-5)
-
-    for epoch in range(1500):
-        linear_model = np.dot(X_train_norm, weights) + bias
-        y_predicted = sigmoid(linear_model)
-
-        errors = (y_predicted - y_train) * np.where(y_train == 1, pos_weight, 1)
-
-        dw = (1 / len(X_train)) * np.dot(X_train_norm.T, errors)
-        db = (1 / len(X_train)) * np.sum(errors)
-
-        weights -= lr * dw
-        bias -= lr * db
-
-    # Test performansı ölçümü
-    test_preds_prob = sigmoid(np.dot(X_test_norm, weights) + bias)
-    test_preds = (test_preds_prob >= 0.5).astype(int)
-
-    tp = int(np.sum((y_test == 1) & (test_preds == 1)))
-    fp = int(np.sum((y_test == 0) & (test_preds == 1)))
-    fn = int(np.sum((y_test == 1) & (test_preds == 0)))
-    tn = int(np.sum((y_test == 0) & (test_preds == 0)))
-
-    precision = tp / (tp + fp + 1e-7)
-    recall = tp / (tp + fn + 1e-7)
-    f1 = 2 * (precision * recall) / (precision + recall + 1e-7)
-
-    print("\n--- MODEL TEST PERFORMANSI (ÇOKLU TEHLİKE TESTİ) ---")
-    print(f"Test Kümesi F1-Skoru: {f1:.3f}")
-    print(f"Yakalanan Şiddetli Hava Olayları (Recall): %{recall * 100:.1f}")
-    print(f"Doğruluk (Precision): %{precision * 100:.1f}")
-    print(f"Karmaşıklık Matrisi: TP={tp}, FP={fp}, FN={fn}, TN={tn}")
-
-    os.makedirs(os.path.dirname(model_output_path), exist_ok=True)
-    model_payload = {
-        "features": features,
-        "weights": weights.tolist(),
-        "bias": float(bias),
-        "mean": mean.tolist(),
-        "std": std.tolist(),
-        "last_trained_timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "total_logs_trained": 0,
+    url = "https://archive-api.open-meteo.com/v1/archive"
+    params = {
+        "latitude": LAT_MERKEZ,
+        "longitude": LON_MERKEZ,
+        "start_date": start_date,
+        "end_date": end_date,
+        "hourly": [
+            "temperature_2m",
+            "dew_point_2m",
+            "precipitation",
+            "snowfall",
+            "surface_pressure",
+            "wind_speed_10m",
+            "wind_gusts_10m",
+            "wind_direction_10m",
+            "cloud_cover",
+        ],
+        "timezone": "Europe/Istanbul",
     }
 
-    with open(model_output_path, "w", encoding="utf-8") as f:
-        json.dump(model_payload, f, indent=4)
+    print(f"[MetaCast Train] {start_date} -> {end_date} arası Malatya arşiv verisi çekiliyor...")
+    resp = requests.get(url, params=params, timeout=30)
+    resp.raise_for_status()
+    hourly = resp.json().get("hourly", {})
+    df = pd.DataFrame(hourly)
+    df["time"] = pd.to_datetime(df["time"])
+    return df.dropna().reset_index(drop=True)
 
-    print(f"\nModel başarıyla kaydedildi: {model_output_path}")
+
+def build_features_and_labels(df):
+    w_speed = df["wind_speed_10m"].astype(float).values
+    w_gust = df["wind_gusts_10m"].astype(float).values
+    w_dir = df["wind_direction_10m"].astype(float).values
+    temp = df["temperature_2m"].astype(float).values
+    dew_pt = df["dew_point_2m"].astype(float).values
+    precip = df["precipitation"].astype(float).values
+    snowfall = df["snowfall"].astype(float).values
+    cloud = df["cloud_cover"].astype(float).values
+
+    pressure_diff = df["surface_pressure"].astype(float).diff(periods=3).fillna(0.0).values
+    mountain_blockage = calculate_gaussian_blockage(w_dir)
+    gust_factor = np.clip(w_gust / (w_speed + 1e-5), 1.0, 5.0)
+
+    # Kış yağış & kar fazı tespiti (Sıcaklık + Çiy noktası + Gerçek kar verisi)
+    wet_bulb_est = temp - ((temp - dew_pt) * 0.35)
+    is_snow_phase = ((snowfall > 0.05) | ((precip > 0.1) & (wet_bulb_est <= 1.2))).astype(float)
+
+    # Konvektif dolu / şiddetli sağanak potansiyeli
+    hail_potential = ((precip >= 3.5) & (w_gust >= 40.0) & (temp >= 18.0)).astype(float)
+
+    X = np.column_stack([
+        w_speed,
+        pressure_diff,
+        mountain_blockage,
+        gust_factor,
+        is_snow_phase,
+        hail_potential,
+    ])
+
+    # Malatya havzası kritik kış + yaz afet etiketleri (Ground Truth)
+    is_night = (df["time"].dt.hour >= 21) | (df["time"].dt.hour <= 7)
+    winter_frost = is_night & (temp <= 1.0) & (cloud <= 35.0)
+    heavy_snow_or_ice = (snowfall >= 0.4) | ((precip >= 0.8) & (temp <= 1.5))
+    winter_rain_storm = (precip >= 2.5) & (w_gust >= 35.0)
+    unblocked_windstorm = (w_gust >= 48.0) & (mountain_blockage < 0.65)
+
+    y = (winter_frost | heavy_snow_or_ice | winter_rain_storm | unblocked_windstorm).astype(float).values
+
+    # Kış aylarına (Kasım, Aralık, Ocak, Şubat, Mart) 3.5x eğitim ağırlığı
+    months = df["time"].dt.month.values
+    sample_weights = np.where(np.isin(months, [11, 12, 1, 2, 3]), 3.5, 1.0)
+
+    return X, y, sample_weights
 
 
-# --- 2. CANLI KENDİ KENDİNE ÖĞRENME MOTORU (SQLITE LOGLARI İLE OTOMATİK KALİBRASYON) ---
-def retrain_from_logs(
-    db_path: str = "data/metacast_logs.db",
-    model_path: str = "models/metacast_weights.json",
-    min_new_records: int = 50,
-):
-    """
-    SQLite tablosunda biriken gerçek Erhaç METAR ölçümlerini okur.
-    Zaman sönümlemesi (Time-Decay) ve L2 düzenlileştirmesi uygulayarak
-    ağırlıkları yerel topoğrafik blokaja göre güvenli biçimde günceller.
-    """
-    if not os.path.exists(db_path) or not os.path.exists(model_path):
-        return False, "Veritabanı veya model ağırlık dosyası bulunamadı."
+def train_weighted_logistic_regression(X, y, sample_weights, lr=0.08, epochs=1800, l2_reg=0.01):
+    mean = X.mean(axis=0)
+    std = X.std(axis=0) + 1e-8
+    X_norm = (X - mean) / std
 
-    conn = sqlite3.connect(db_path)
-    df_logs = pd.read_sql_query(
-        "SELECT * FROM validation_logs WHERE obs_gust IS NOT NULL ORDER BY id ASC", conn
-    )
-    conn.close()
+    n_samples, n_features = X_norm.shape
+    weights = np.zeros(n_features, dtype=float)
+    bias = 0.0
 
-    if len(df_logs) < min_new_records:
-        return False, f"Yetersiz kayıt sayısı ({len(df_logs)}/{min_new_records})."
+    weight_norm_factor = sample_weights / sample_weights.mean()
 
-    with open(model_path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
+    for epoch in range(epochs):
+        z = np.dot(X_norm, weights) + bias
+        preds = sigmoid(z)
+        errors = (preds - y) * weight_norm_factor
 
-    weights = np.array(payload["weights"])
-    bias = float(payload["bias"])
+        grad_w = (np.dot(X_norm.T, errors) / n_samples) + (l2_reg * weights)
+        grad_b = np.mean(errors)
 
-    # --- 1. ZAMANLA UNUTMA (TIME-DECAY) AĞIRLIKLANDIRMASI ---
-    # Son kayıtlara daha çok, eski kayıtlara daha az ağırlık verilir (decay factor: 0.98)
-    n_records = len(df_logs)
-    time_weights = np.exp(np.linspace(-2.0, 0.0, n_records))
-    time_weights /= np.sum(time_weights)
+        weights -= lr * grad_w
+        bias -= lr * grad_b
 
-    delta_w = df_logs["delta_wind"].values
-    # Ağırlıklı ortalama hata
-    weighted_mean_bias = float(np.sum(delta_w * time_weights))
+    return weights, float(bias), mean, std
 
-    # --- 2. GÜVENLİ DERECELİ GÜNCELLEME VE L2 CEZASI ---
-    lr = 0.008
-    l2_reg = 0.001  # Katsayıların patlamasını engelleyen L2 katsayısı
 
-    # 4. indeks mountain_blockage_index katsayısıdır
-    if len(weights) > 4:
-        # Ağırlığı güncellerken hafif bir L2 geri çekmesi uygula
-        weights[4] = weights[4] * (1.0 - lr * l2_reg) - (lr * weighted_mean_bias * 0.1)
-        # Katsayıyı güvenli sınırda tut (-5.0 ile 5.0 arası)
-        weights[4] = float(np.clip(weights[4], -5.0, 5.0))
+def save_weights(weights, bias, mean, std, total_records):
+    os.makedirs("models", exist_ok=True)
+    payload = {
+        "weights": np.round(weights, 6).tolist(),
+        "bias": round(float(bias), 6),
+        "mean": np.round(mean, 6).tolist(),
+        "std": np.round(std, 6).tolist(),
+        "last_calibrated_timestamp": datetime.now(TR_TZ).strftime("%Y-%m-%d %H:%M"),
+        "total_logs_trained": int(total_records),
+        "season_profile": "Winter-Weighted Malatya Basin v2",
+    }
+    with open(WEIGHTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    print(f"[MetaCast Train] Ağırlıklar kaydedildi -> {WEIGHTS_PATH}")
 
-    bias = bias - (lr * weighted_mean_bias * 0.05)
-    bias = float(np.clip(bias, -10.0, 10.0))
 
-    payload["weights"] = weights.tolist()
-    payload["bias"] = bias
-    payload["last_calibrated_timestamp"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
-    payload["total_logs_trained"] = len(df_logs)
+def retrain_from_logs(min_new_records=50):
+    """app.py tarafından canlı SQLite doğrulama kayıtları biriktikçe çağrılır."""
+    df_hist = fetch_historical_malatya_data(start_date="2020-01-01")
+    X, y, sample_weights = build_features_and_labels(df_hist)
 
-    with open(model_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=4)
+    extra_logs = 0
+    if os.path.exists(DB_PATH):
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            df_logs = pd.read_sql_query(
+                "SELECT * FROM validation_logs WHERE obs_gust IS NOT NULL", conn
+            )
+            conn.close()
+            extra_logs = len(df_logs)
+        except Exception:
+            extra_logs = 0
 
-    return True, f"Model {len(df_logs)} yer istasyonu kaydıyla (Time-Decay + L2) güvenle güncellendi!"
+    weights, bias, mean, std = train_weighted_logistic_regression(X, y, sample_weights)
+    save_weights(weights, bias, mean, std, total_records=len(df_hist) + extra_logs)
 
 
 if __name__ == "__main__":
-    input_features = os.path.join("data", "features_data.csv")
-    output_model = os.path.join("models", "metacast_weights.json")
-    
-    # Dosya doğrudan çalıştırıldığında ana eğitimi başlatır
-    train_metacast_model(input_features, output_model)
+    retrain_from_logs(min_new_records=0)
+    print("[MetaCast Train] Kış sezonu kalibrasyonu başarıyla tamamlandı.")
