@@ -985,7 +985,7 @@ if mode == "Model Kıyaslama Arenası":
     c1, c2, c3, c4 = st.columns(4)
     if verified_rounds > 0:
         c1.metric("MetaCast Başarısı", f"%{win_counts['MetaCast']/verified_rounds*100:.1f}")
-        c1.caption(f"{verified_rounds} saatte {win_counts['MetaCast']} kez en isabetli")
+        c1.caption(f"{verified_rounds} saatte {win_counts['MetaCast']:.1f} puan")
         c2.metric("ECMWF", f"%{win_counts['ECMWF']/verified_rounds*100:.1f}")
         c3.metric("GFS", f"%{win_counts['GFS']/verified_rounds*100:.1f}")
         c4.metric("ICON", f"%{win_counts['ICON']/verified_rounds*100:.1f}")
