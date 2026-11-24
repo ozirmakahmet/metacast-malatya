@@ -913,16 +913,19 @@ if mode == "Model Kıyaslama Arenası":
 
             if "Yağış" in selected_param and c_ref == 0.0 and max(c_mc, c_ec, c_gfs, c_icon) <= 0.05:
                 row_winner_txt = "🤝 Konsensüs (Kuru)"
+                for m in win_counts:
+                    win_counts[m] += 0.25
             else:
                 min_err_val = min(diffs_row.values())
                 tied_models = [m for m, err in diffs_row.items() if abs(err - min_err_val) <= 0.05]
+                share_point = 1.0 / len(tied_models)
                 if len(tied_models) > 1:
                     row_winner_txt = f"🤝 {' & '.join(tied_models)}"
                     for m in tied_models:
-                        win_counts[m] += 1
+                        win_counts[m] += share_point
                 else:
                     best_model_row = tied_models[0]
-                    win_counts[best_model_row] += 1
+                    win_counts[best_model_row] += 1.0
                     row_winner_txt = f"🏆 {best_model_row}"
 
             table_records.append({
