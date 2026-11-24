@@ -21,6 +21,50 @@ LON_ERHAC = 38.0910
 
 TR_TZ = timezone(timedelta(hours=3))
 today_date = datetime.now(TR_TZ).date()
+RADAR_ARCHIVE_DIR = "data/radar_archive"
+RADAR_NPY_PATH = os.path.join(RADAR_ARCHIVE_DIR, "malatya_winter_radar.npy")
+RADAR_META_PATH = os.path.join(RADAR_ARCHIVE_DIR, "archive_meta.json")
+
+def archive_live_radar_sequence(frames_128x128: np.ndarray, frame_timestamps: list):
+    """Canlı radar karelerini (6, 128, 128) yağış ekosu varsa .npy eğitim setine ekler."""
+    try:
+        os.makedirs(RADAR_ARCHIVE_DIR, exist_ok=True)
+        arr = np.asarray(frames_128x128, dtype=np.float32)
+
+        if arr.ndim != 3 or arr.shape[1:] != (128, 128) or arr.shape[0] < 6:
+            return False, "Yetersiz kare boyutu"
+
+        # Yağış aktivitesi filtresi (hava açıksa diski doldurma)
+        if float(np.mean(arr > 0.12)) < 0.005:
+            return False, "Hava açık"
+
+        latest_ts = str(frame_timestamps[-1]) if frame_timestamps else datetime.now(TR_TZ).strftime("%Y%m%d_%H%M")
+        meta = {"saved_timestamps": [], "total_sequences": 0}
+        if os.path.exists(RADAR_META_PATH):
+            with open(RADAR_META_PATH, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+
+        if latest_ts in meta["saved_timestamps"]:
+            return False, "Zaten arşivlendi"
+
+        seq_block = arr[-6:][None, :, :, :]
+        if os.path.exists(RADAR_NPY_PATH):
+            existing = np.load(RADAR_NPY_PATH)
+            updated = np.concatenate([existing, seq_block], axis=0)[-1500:]
+        else:
+            updated = seq_block
+
+        np.save(RADAR_NPY_PATH, updated.astype(np.float32))
+
+        meta["saved_timestamps"] = (meta["saved_timestamps"] + [latest_ts])[-2000:]
+        meta["total_sequences"] = int(updated.shape[0])
+        meta["last_updated"] = datetime.now(TR_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        with open(RADAR_META_PATH, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+
+        return True, f"Arşivlendi ({updated.shape[0]} sekans)"
+    except Exception as e:
+        return False, f"Hata: {e}"
 
 st.set_page_config(
     page_title="MetaCast Malatya - Karar Destek & Meteorolojik Doğrulama",
