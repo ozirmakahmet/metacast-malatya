@@ -1612,36 +1612,81 @@ with st.expander("🛰️ Canlı Meteoroloji Radarı & Dynamic Nowcast Akışı"
             unsafe_allow_html=True,
         )
     else:
-        if cur_wind_spd < 8.0:
+        # 1. Dinamik Parametreleri Çek
+        cur_cape = float(cape_series.iloc[cur_idx_radar]) if not cape_series.empty else 0.0
+        upcoming_max_p = max(api_hourly_precips[:4]) if len(api_hourly_precips) >= 4 else current_p
+        effective_p = max(current_p, upcoming_max_p)
+
+        # Modeller arası rüzgâr mutabakatı (ECMWF, GFS, ICON ne kadar hemfikir?)
+        spread_now = float(gust_std[cur_idx_radar]) if cur_idx_radar < len(gust_std) else 3.0
+        model_agreement_bonus = max(-10.0, min(8.0, (6.0 - spread_now) * 1.5))
+
+        # Yağış ve konvektif enerji katkısı (Zayıf bulut ile aktif sağanak ayrımı)
+        intensity_factor = min(14.0, (effective_p * 4.5) + (cur_cape / 220.0) + (max(0.0, current_c - 55.0) * 0.12))
+
+        if cur_wind_spd < 9.0:
+            # Rüzgâr 0 km/s'ye yaklaştıkça hapsolma ihtimali artar, 9 km/s'ye yaklaştıkça düşer
+            stagnation_factor = (9.0 - cur_wind_spd) * 2.4  # 0 ile +21.6 arası
+            raw_prob = 48.0 + stagnation_factor + intensity_factor + model_agreement_bonus
             traj_title = "⚠️ DURAĞAN KÜTLE: Yerel Çanak İçi Hapsolma Riski"
             traj_target = "Malatya Merkez, Yeşilyurt, Battalgazi"
-            traj_prob = "%84"
-            traj_color = "#ef4444"
-            traj_desc = "Düşük adveksiyon hızı nedeniyle kütleler yatay ötelenememektedir. Gelişen bulutlar yerinde patlayarak lokal sağanak ve dolu yapabilir."
+            traj_color = "#ef4444" if raw_prob >= 70 else "#f97316"
+            traj_desc = (
+                f"Adveksiyon hızı çok düşük ({cur_wind_spd:.1f} km/s); kütleler yatay ötelenemiyor. "
+                "Gelişen bulutlar çanak içinde asılı kalarak lokal yağış bırakabilir."
+            )
+
         elif 190 <= cur_wind_deg <= 240:
+            # 215° Beydağları dik açısına yakınlık ve rüzgâr itiş gücü
+            blk_ratio = float(calculate_gaussian_blockage(cur_wind_deg, peak_angle=215.0, spread=25.0))
+            wind_push = min(12.0, max(0.0, (cur_wind_spd - 8.0) * 0.65))
+            raw_prob = 45.0 + (blk_ratio * 24.0) + wind_push + (intensity_factor * 0.6) + model_agreement_bonus
             traj_title = "⚠️ GÜNEYBATI AKIŞI: Beydağları Orografik Sapması (Elazığ Kırılması)"
             traj_target = "Elazığ, Baskil, Keban, Hazar Havzası"
-            traj_prob = "%78"
             traj_color = "#f97316"
-            traj_desc = "Beydağları orografik engeli kütleyi yukarı zorlayarak enerjisini güney yamaçta tüketir. Kütle Fırat Nehri Kanyonu koridoruna bükülerek Elazığ'a kayar."
+            traj_desc = (
+                f"Güneybatılı akış ({cur_wind_deg:.0f}°, {cur_wind_spd:.1f} km/s) Beydağları engeline çarpıp "
+                "Fırat Kanyonu koridoruna bükülerek Elazığ hattına yöneliyor."
+            )
+
         elif 140 <= cur_wind_deg < 190:
+            corridor_align = 1.0 - (abs(cur_wind_deg - 165.0) / 30.0)
+            wind_push = min(12.0, max(0.0, (cur_wind_spd - 8.0) * 0.6))
+            raw_prob = 44.0 + (corridor_align * 18.0) + wind_push + (intensity_factor * 0.6) + model_agreement_bonus
             traj_title = "↗️ GÜNEY AKIŞI: Kuzey Oluğu (Hekimhan - Kangal - Sivas Hattı)"
             traj_target = "Yazıhan, Hekimhan, Kuluncak, Kangal, Sivas"
-            traj_prob = "%72"
             traj_color = "#38bdf8"
-            traj_desc = "Kütleler şehir merkezini teğet geçerek Tohma Çayı ve Hekimhan vadisini izler."
+            traj_desc = (
+                f"Güneyli rüzgâr ({cur_wind_deg:.0f}°, {cur_wind_spd:.1f} km/s) kütleleri şehir merkezine "
+                "bırakmadan Tohma Çayı ve Hekimhan vadisi boyunca kuzeye taşıyor."
+            )
+
         elif 240 < cur_wind_deg <= 290:
+            corridor_align = 1.0 - (abs(cur_wind_deg - 265.0) / 30.0)
+            wind_push = min(12.0, max(0.0, (cur_wind_spd - 8.0) * 0.6))
+            raw_prob = 42.0 + (corridor_align * 18.0) + wind_push + (intensity_factor * 0.6) + model_agreement_bonus
             traj_title = "➡️ BATI SİKLONİK AKIŞI: Yukarı Fırat & Doğu Koridoru"
             traj_target = "Karakaya Barajı, Baskil, Tunceli Vadisi, Bingöl"
-            traj_prob = "%68"
             traj_color = "#a855f7"
-            traj_desc = "Karakaya Baraj Gölü üzerinden nem toplayan hava kütlesi doğu dağlarına yönelir."
+            traj_desc = (
+                f"Batılı akış ({cur_wind_deg:.0f}°, {cur_wind_spd:.1f} km/s) Karakaya Baraj Gölü üzerinden "
+                "nem kazanarak doğu yamaçlarına ilerliyor."
+            )
+
         else:
+            wind_push = min(14.0, max(0.0, (cur_wind_spd - 8.0) * 0.55))
+            raw_prob = 38.0 + wind_push + (intensity_factor * 0.7) + model_agreement_bonus
             traj_title = "🟢 SİNOPTİK DEĞERLENDİRME: Standart Geçiş Rotası"
             traj_target = "Bölgesel Yayılım / Kararlı Vadi Akışı"
-            traj_prob = "%55"
             traj_color = "#22c55e"
-            traj_desc = "Rüzgâr akışı belirgin bir orografik sapmaya uğramadan genel rotasını takip eder."
+            traj_desc = (
+                f"Rüzgâr akışı ({cur_wind_deg:.0f}°, {cur_wind_spd:.1f} km/s) belirgin bir orografik sapmaya "
+                "uğramadan genel rotasını takip ediyor."
+            )
+
+        # Olasılığı gerçekçi sınırlar içine sabitle (%32 - %94)
+        final_traj_prob = int(round(max(32.0, min(94.0, raw_prob))))
+        traj_prob = f"%{final_traj_prob}"
 
         st.markdown(
             f"""
