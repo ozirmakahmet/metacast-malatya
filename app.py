@@ -1515,13 +1515,16 @@ with tab_forecast:
             return ("☀️", "Açık / Güneşli") if is_day else ("🌙", "Açık / Gece")
 
     now_time = datetime.now(TR_TZ)
+    forecast_dates_7d = [(now_time + timedelta(days=i)).date() for i in range(7)]
 
-    # 7 Günlük Gündüz / Gece Özet Kartları
+    # 7 Günlük Tıklanabilir Gündüz / Gece Özet Kartları
     summary_cols = st.columns(7)
     for d_idx in range(7):
         dt_day = now_time + timedelta(days=d_idx)
+        card_date = dt_day.date()
         day_label = "Bugün" if d_idx == 0 else gunler_tr[dt_day.weekday()]
         date_short = dt_day.strftime("%d.%m")
+        is_selected_card = (st.session_state.current_date == card_date)
 
         s_h = d_idx * 24
         idx_day = min(s_h + 14, len(api_hourly_temps) - 1) if api_hourly_temps else -1
@@ -1545,14 +1548,18 @@ with tab_forecast:
         t_min_v = int(round(daily_tmin_list[d_idx])) if d_idx < len(daily_tmin_list) else 4
         pop_max_v = int(daily_popmax_list[d_idx]) if d_idx < len(daily_popmax_list) else 0
 
-        border_style = "border: 1.5px solid #38bdf8; background: rgba(56, 189, 248, 0.08);" if d_idx == 0 else ""
+        border_style = (
+            "border: 1.8px solid #38bdf8; background: rgba(56, 189, 248, 0.12); box-shadow: 0 4px 14px rgba(56, 189, 248, 0.15);"
+            if is_selected_card
+            else ""
+        )
         pop_badge = f"💧 %{pop_max_v}" if pop_max_v >= 15 else "☀️ Kuru"
         pop_badge_color = "#38bdf8" if pop_max_v >= 15 else "#94a3b8"
 
         with summary_cols[d_idx]:
             st.markdown(
                 f"""
-                <div class="day-summary-card" style="{border_style}">
+                <div class="day-summary-card" style="{border_style} margin-bottom: 6px;">
                     <div style="font-size: 0.85rem; font-weight: 800; color: #ffffff;">{day_label}</div>
                     <div style="font-size: 0.72rem; color: #90caf9; margin-bottom: 6px;">{date_short}</div>
                     <div style="display: flex; justify-content: center; align-items: center; gap: 6px; margin: 4px 0;">
@@ -1569,197 +1576,237 @@ with tab_forecast:
                 """,
                 unsafe_allow_html=True,
             )
+            btn_label = "✓ Seçili" if is_selected_card else "İncele"
+            if st.button(
+                btn_label,
+                key=f"select_day_card_{d_idx}",
+                type="primary" if is_selected_card else "secondary",
+                use_container_width=True,
+            ):
+                if card_date in available_dates:
+                    st.session_state.current_date = card_date
+                    st.rerun()
 
-    st.write("")
+    # Seçili Günün Başlığı ve 24 Saatlik Detaylı Akışı
+    selected_dt = st.session_state.current_date
+    selected_day_name = "Bugün" if selected_dt == today_date else gunler_tr[selected_dt.weekday()]
+    st.markdown(
+        f"<div style='font-size: 1.02rem; font-weight: 700; color: #f8fafc; margin: 12px 0 6px 0;'>"
+        f"🕒 {selected_day_name} ({selected_dt.strftime('%d %B %Y')}) — Saatlik Hava Akışı</div>",
+        unsafe_allow_html=True,
+    )
 
-    day_tabs = st.tabs([
-        f"{'📍 Bugün' if i == 0 else gunler_tr[(now_time + timedelta(days=i)).weekday()]} ({(now_time + timedelta(days=i)).strftime('%d.%m')})"
-        for i in range(7)
-    ])
+    if selected_dt in forecast_dates_7d:
+        d_idx = forecast_dates_7d.index(selected_dt)
+        sr_dt, ss_dt = None, None
+        try:
+            if d_idx < len(sunrise_list):
+                sr_dt = datetime.fromisoformat(sunrise_list[d_idx])
+            if d_idx < len(sunset_list):
+                ss_dt = datetime.fromisoformat(sunset_list[d_idx])
+        except Exception:
+            pass
 
-    for d_idx, tab in enumerate(day_tabs):
-        with tab:
-            sr_dt, ss_dt = None, None
-            try:
-                if d_idx < len(sunrise_list):
-                    sr_dt = datetime.fromisoformat(sunrise_list[d_idx])
-                if d_idx < len(sunset_list):
-                    ss_dt = datetime.fromisoformat(sunset_list[d_idx])
-            except Exception:
-                pass
+        sr_time_str = sr_dt.strftime("%H:%M") if sr_dt else "06:44"
+        ss_time_str = ss_dt.strftime("%H:%M") if ss_dt else "17:47"
+        sr_hour = sr_dt.hour if sr_dt else 6
+        ss_hour = ss_dt.hour if ss_dt else 17
 
-            sr_time_str = sr_dt.strftime("%H:%M") if sr_dt else "06:44"
-            ss_time_str = ss_dt.strftime("%H:%M") if ss_dt else "17:47"
-            sr_hour = sr_dt.hour if sr_dt else 6
-            ss_hour = ss_dt.hour if ss_dt else 17
+        day_start_hour = d_idx * 24
+        timeline_items = []
+        chart_hours, chart_temps, chart_pops = [], [], []
 
-            day_start_hour = d_idx * 24
-            timeline_items = []
-            chart_hours, chart_temps, chart_pops = [], [], []
+        for h in range(24):
+            abs_hour_idx = day_start_hour + h
 
-            for h in range(24):
-                abs_hour_idx = day_start_hour + h
+            t_val = api_hourly_temps[abs_hour_idx] if abs_hour_idx < len(api_hourly_temps) else float(temp.iloc[min(h, len(temp)-1)])
+            p_val = api_hourly_precips[abs_hour_idx] if abs_hour_idx < len(api_hourly_precips) else float(precip.iloc[min(h, len(precip)-1)])
+            pop_val = int(api_hourly_pops[abs_hour_idx]) if abs_hour_idx < len(api_hourly_pops) else (65 if p_val > 0.1 else 5)
+            c_val = api_hourly_clouds[abs_hour_idx] if abs_hour_idx < len(api_hourly_clouds) else float(cloud_cover.iloc[min(h, len(cloud_cover)-1)])
+            code_val = int(api_hourly_codes[abs_hour_idx]) if abs_hour_idx < len(api_hourly_codes) else 0
+            cape_val = api_hourly_capes[abs_hour_idx] if abs_hour_idx < len(api_hourly_capes) else float(cape_series.iloc[min(h, len(cape_series)-1)])
 
-                t_val = api_hourly_temps[abs_hour_idx] if abs_hour_idx < len(api_hourly_temps) else 14.0
-                p_val = api_hourly_precips[abs_hour_idx] if abs_hour_idx < len(api_hourly_precips) else 0.0
-                pop_val = int(api_hourly_pops[abs_hour_idx]) if abs_hour_idx < len(api_hourly_pops) else 0
-                c_val = api_hourly_clouds[abs_hour_idx] if abs_hour_idx < len(api_hourly_clouds) else 0
-                code_val = int(api_hourly_codes[abs_hour_idx]) if abs_hour_idx < len(api_hourly_codes) else 0
-                cape_val = api_hourly_capes[abs_hour_idx] if abs_hour_idx < len(api_hourly_capes) else 0
+            chart_hours.append(f"{h:02d}:00")
+            chart_temps.append(round(float(t_val), 1))
+            chart_pops.append(pop_val)
 
-                chart_hours.append(f"{h:02d}:00")
-                chart_temps.append(round(float(t_val), 1))
-                chart_pops.append(pop_val)
+            if sr_dt and ss_dt:
+                is_day = (sr_dt.hour < h < ss_dt.hour) or (h == sr_dt.hour and sr_dt.minute <= 30) or (h == ss_hour and ss_dt.minute >= 30)
+            else:
+                is_day = 6 <= h < 18
 
-                if sr_dt and ss_dt:
-                    is_day = (sr_dt.hour < h < ss_dt.hour) or (h == sr_dt.hour and sr_dt.minute <= 30) or (h == ss_hour and ss_dt.minute >= 30)
-                else:
-                    is_day = 6 <= h < 18
+            icon_h, desc_h = get_accurate_weather_display(code_val, c_val, p_val, t_val, cape_val, is_day)
+            is_current_hour_card = (d_idx == 0 and h == now_time.hour)
 
-                icon_h, desc_h = get_accurate_weather_display(code_val, c_val, p_val, t_val, cape_val, is_day)
-                is_current_hour_card = (d_idx == 0 and h == now_time.hour)
+            timeline_items.append({
+                "time": f"{h:02d}:00",
+                "temp": f"{int(round(t_val))}°",
+                "icon": icon_h,
+                "desc": desc_h,
+                "pop": pop_val,
+                "precip": p_val,
+                "special": False,
+                "is_now": is_current_hour_card,
+            })
 
+            if h == sr_hour:
                 timeline_items.append({
-                    "time": f"{h:02d}:00",
-                    "temp": f"{int(round(t_val))}°",
-                    "icon": icon_h,
-                    "desc": desc_h,
-                    "pop": pop_val,
-                    "precip": p_val,
-                    "special": False,
-                    "is_now": is_current_hour_card,
+                    "time": sr_time_str,
+                    "title": "Gün Doğumu",
+                    "icon": "🌅",
+                    "desc": "Doğuş Anı",
+                    "special": True,
+                    "color": "#f59e0b",
                 })
 
-                if h == sr_hour:
-                    timeline_items.append({
-                        "time": sr_time_str,
-                        "title": "Gün Doğumu",
-                        "icon": "🌅",
-                        "desc": "Doğuş Anı",
-                        "special": True,
-                        "color": "#f59e0b",
-                    })
+            if h == ss_hour:
+                timeline_items.append({
+                    "time": ss_time_str,
+                    "title": "Gün Batımı",
+                    "icon": "🌇",
+                    "desc": "Batış Anı",
+                    "special": True,
+                    "color": "#f97316",
+                })
 
-                if h == ss_hour:
-                    timeline_items.append({
-                        "time": ss_time_str,
-                        "title": "Gün Batımı",
-                        "icon": "🌇",
-                        "desc": "Batış Anı",
-                        "special": True,
-                        "color": "#f97316",
-                    })
+        day_slice_temps = api_hourly_temps[day_start_hour:day_start_hour + 24]
+        day_slice_precips = api_hourly_precips[day_start_hour:day_start_hour + 24]
+    else:
+        # Geçmiş bir tarih seçildiyse df (arşiv verisi) üzerinden göster
+        timeline_items = []
+        chart_hours, chart_temps, chart_pops = [], [], []
+        for h in range(min(24, len(df))):
+            t_val = float(temp.iloc[h])
+            p_val = float(precip.iloc[h])
+            c_val = float(cloud_cover.iloc[h])
+            cape_val = float(cape_series.iloc[h])
+            pop_val = 70 if p_val > 0.1 else 5
+            is_day = 6 <= h < 18
+            icon_h, desc_h = get_accurate_weather_display(0, c_val, p_val, t_val, cape_val, is_day)
 
-            cards_html = ""
-            for item in timeline_items:
-                if item.get("special"):
-                    cards_html += (
-                        f'<div style="min-width: 105px; flex-shrink: 0; background: rgba(245, 158, 11, 0.08); '
-                        f'border: 1.5px solid {item["color"]}; border-radius: 12px; padding: 12px 6px; text-align: center;">'
-                        f'<div style="font-size: 0.88rem; font-weight: 800; color: {item["color"]};">{item["time"]}</div>'
-                        f'<div style="font-size: 1.8rem; margin: 4px 0;">{item["icon"]}</div>'
-                        f'<div style="font-size: 0.82rem; font-weight: 800; color: #ffffff; white-space: nowrap;">{item["title"]}</div>'
-                        f'<div style="font-size: 0.70rem; font-weight: 700; color: {item["color"]};">{item["desc"]}</div>'
-                        f"</div>"
-                    )
-                else:
-                    pop_color = "#38bdf8" if item["pop"] >= 20 else "#64748b"
-                    precip_sub = f'<div style="font-size: 0.65rem; color: #38bdf8; font-weight: 700;">{item["precip"]:.1f} mm</div>' if item["precip"] > 0.05 else ""
-                    card_border = "2px solid #22c55e" if item.get("is_now") else "1px solid rgba(255, 255, 255, 0.08)"
-                    card_bg = "rgba(34, 197, 94, 0.12)" if item.get("is_now") else "rgba(255, 255, 255, 0.025)"
-                    time_label = f"📍 {item['time']}" if item.get("is_now") else item["time"]
-                    time_color = "#4ade80" if item.get("is_now") else "#90caf9"
+            chart_hours.append(f"{h:02d}:00")
+            chart_temps.append(round(t_val, 1))
+            chart_pops.append(pop_val)
+            timeline_items.append({
+                "time": f"{h:02d}:00",
+                "temp": f"{int(round(t_val))}°",
+                "icon": icon_h,
+                "desc": desc_h,
+                "pop": pop_val,
+                "precip": p_val,
+                "special": False,
+                "is_now": False,
+            })
+        day_slice_temps = chart_temps
+        day_slice_precips = [float(x) for x in precip.values[:24]]
 
-                    cards_html += (
-                        f'<div style="min-width: 96px; flex-shrink: 0; background: {card_bg}; border: {card_border}; '
-                        f'border-radius: 12px; padding: 10px 6px; text-align: center;">'
-                        f'<div style="font-size: 0.86rem; font-weight: 800; color: {time_color};">{time_label}</div>'
-                        f'<div style="font-size: 1.8rem; margin: 2px 0;">{item["icon"]}</div>'
-                        f'<div style="font-size: 1.15rem; font-weight: 800; color: #ffffff;">{item["temp"]}</div>'
-                        f'<div style="font-size: 0.70rem; color: #b0bec5; margin-bottom: 4px; white-space: nowrap;">{item["desc"]}</div>'
-                        f'<div style="font-size: 0.72rem; font-weight: 800; color: {pop_color};">💧 %{item["pop"]}</div>'
-                        f"{precip_sub}"
-                        f"</div>"
-                    )
+    cards_html = ""
+    for item in timeline_items:
+        if item.get("special"):
+            cards_html += (
+                f'<div style="min-width: 105px; flex-shrink: 0; background: rgba(245, 158, 11, 0.08); '
+                f'border: 1.5px solid {item["color"]}; border-radius: 12px; padding: 12px 6px; text-align: center;">'
+                f'<div style="font-size: 0.88rem; font-weight: 800; color: {item["color"]};">{item["time"]}</div>'
+                f'<div style="font-size: 1.8rem; margin: 4px 0;">{item["icon"]}</div>'
+                f'<div style="font-size: 0.82rem; font-weight: 800; color: #ffffff; white-space: nowrap;">{item["title"]}</div>'
+                f'<div style="font-size: 0.70rem; font-weight: 700; color: {item["color"]};">{item["desc"]}</div>'
+                f"</div>"
+            )
+        else:
+            pop_color = "#38bdf8" if item["pop"] >= 20 else "#64748b"
+            precip_sub = f'<div style="font-size: 0.65rem; color: #38bdf8; font-weight: 700;">{item["precip"]:.1f} mm</div>' if item["precip"] > 0.05 else ""
+            card_border = "2px solid #22c55e" if item.get("is_now") else "1px solid rgba(255, 255, 255, 0.08)"
+            card_bg = "rgba(34, 197, 94, 0.12)" if item.get("is_now") else "rgba(255, 255, 255, 0.025)"
+            time_label = f"📍 {item['time']}" if item.get("is_now") else item["time"]
+            time_color = "#4ade80" if item.get("is_now") else "#90caf9"
 
+            cards_html += (
+                f'<div style="min-width: 96px; flex-shrink: 0; background: {card_bg}; border: {card_border}; '
+                f'border-radius: 12px; padding: 10px 6px; text-align: center;">'
+                f'<div style="font-size: 0.86rem; font-weight: 800; color: {time_color};">{time_label}</div>'
+                f'<div style="font-size: 1.8rem; margin: 2px 0;">{item["icon"]}</div>'
+                f'<div style="font-size: 1.15rem; font-weight: 800; color: #ffffff;">{item["temp"]}</div>'
+                f'<div style="font-size: 0.70rem; color: #b0bec5; margin-bottom: 4px; white-space: nowrap;">{item["desc"]}</div>'
+                f'<div style="font-size: 0.72rem; font-weight: 800; color: {pop_color};">💧 %{item["pop"]}</div>'
+                f"{precip_sub}"
+                f"</div>"
+            )
+
+    st.markdown(
+        f'<div class="hourly-scroll-container" style="display: flex; gap: 10px; overflow-x: auto; padding: 8px 4px 12px 4px;">{cards_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+    fig_mini = go.Figure()
+    fig_mini.add_trace(
+        go.Scatter(
+            x=chart_hours,
+            y=chart_temps,
+            mode="lines+markers+text",
+            text=[f"{int(round(t))}°" for t in chart_temps],
+            textposition="top center",
+            textfont=dict(size=10, color="#ffb74d"),
+            name="Sıcaklık (°C)",
+            line=dict(color="#ff9800", width=2.5, shape="spline"),
+            marker=dict(size=5, color="#ffb74d"),
+        )
+    )
+    fig_mini.add_trace(
+        go.Bar(
+            x=chart_hours,
+            y=chart_pops,
+            name="Yağış İhtimali (%)",
+            marker_color="rgba(56, 189, 248, 0.22)",
+            yaxis="y2",
+        )
+    )
+    fig_mini.update_layout(
+        height=160,
+        margin=dict(l=10, r=10, t=20, b=10),
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(255,255,255,0.015)",
+        showlegend=False,
+        xaxis=dict(showgrid=False, tickfont=dict(size=10, color="#94a3b8")),
+        yaxis=dict(visible=False, range=[min(chart_temps) - 3, max(chart_temps) + 4]),
+        yaxis2=dict(visible=False, overlaying="y", side="right", range=[0, 110]),
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig_mini, use_container_width=True, config={"displayModeBar": False}, key=f"mini_chart_{selected_dt}")
+
+    if day_slice_temps and day_slice_precips:
+        snow_24h_cm, _ = calculate_snow_accumulation_cm(day_slice_temps, day_slice_precips, hours=24)
+        if snow_24h_cm > 0.0:
+            snow_status = (
+                "İnce Beyaz Örtü (Buzlanma Tehlikesi)"
+                if snow_24h_cm < 3.0
+                else (
+                    "Kuvvetli Kar Yağışı (Trafik ve Tipi Riski)"
+                    if snow_24h_cm < 10.0
+                    else "🚨 Yoğun Kar Fırtınası (Afet Protokolü)"
+                )
+            )
+            snow_color = "#38bdf8" if snow_24h_cm < 3.0 else ("#f59e0b" if snow_24h_cm < 10.0 else "#ef4444")
             st.markdown(
-                f'<div class="hourly-scroll-container" style="display: flex; gap: 10px; overflow-x: auto; padding: 8px 4px 12px 4px;">{cards_html}</div>',
+                f"""
+                <div style="background: rgba(14, 165, 233, 0.08); border: 1.5px solid {snow_color}; border-radius: 12px; padding: 12px 18px; margin: 10px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                    <div>
+                        <div style="font-weight: 800; font-size: 1.02rem; color: #ffffff;">❄️ 24 Saatlik Tahmini Kar Birikimi: <span style="color: {snow_color}; font-size: 1.2rem;">{snow_24h_cm} cm</span></div>
+                        <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 2px;">{snow_status} • <em>Kuchera SLR Dinamik Kristalizasyon Modeli</em></div>
+                    </div>
+                    <span style="background: {snow_color}; color: #000; font-weight: 800; font-size: 0.74rem; padding: 3px 8px; border-radius: 4px;">KAR ÖRTÜSÜ</span>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
 
-            fig_mini = go.Figure()
-            fig_mini.add_trace(
-                go.Scatter(
-                    x=chart_hours,
-                    y=chart_temps,
-                    mode="lines+markers+text",
-                    text=[f"{int(round(t))}°" for t in chart_temps],
-                    textposition="top center",
-                    textfont=dict(size=10, color="#ffb74d"),
-                    name="Sıcaklık (°C)",
-                    line=dict(color="#ff9800", width=2.5, shape="spline"),
-                    marker=dict(size=5, color="#ffb74d"),
-                )
-            )
-            fig_mini.add_trace(
-                go.Bar(
-                    x=chart_hours,
-                    y=chart_pops,
-                    name="Yağış İhtimali (%)",
-                    marker_color="rgba(56, 189, 248, 0.22)",
-                    yaxis="y2",
-                )
-            )
-            fig_mini.update_layout(
-                height=155,
-                margin=dict(l=10, r=10, t=20, b=10),
-                template="plotly_dark",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(255,255,255,0.015)",
-                showlegend=False,
-                xaxis=dict(showgrid=False, tickfont=dict(size=10, color="#94a3b8")),
-                yaxis=dict(visible=False, range=[min(chart_temps) - 3, max(chart_temps) + 4]),
-                yaxis2=dict(visible=False, overlaying="y", side="right", range=[0, 110]),
-                hovermode="x unified",
-            )
-            st.plotly_chart(fig_mini, use_container_width=True, config={"displayModeBar": False}, key=f"mini_chart_{d_idx}")
-
-            day_slice_temps = api_hourly_temps[day_start_hour:day_start_hour + 24]
-            day_slice_precips = api_hourly_precips[day_start_hour:day_start_hour + 24]
-
-            if day_slice_temps and day_slice_precips:
-                snow_24h_cm, _ = calculate_snow_accumulation_cm(day_slice_temps, day_slice_precips, hours=24)
-                if snow_24h_cm > 0.0:
-                    snow_status = (
-                        "İnce Beyaz Örtü (Buzlanma Tehlikesi)"
-                        if snow_24h_cm < 3.0
-                        else (
-                            "Kuvvetli Kar Yağışı (Trafik ve Tipi Riski)"
-                            if snow_24h_cm < 10.0
-                            else "🚨 Yoğun Kar Fırtınası (Afet Protokolü)"
-                        )
-                    )
-                    snow_color = "#38bdf8" if snow_24h_cm < 3.0 else ("#f59e0b" if snow_24h_cm < 10.0 else "#ef4444")
-                    st.markdown(
-                        f"""
-                        <div style="background: rgba(14, 165, 233, 0.08); border: 1.5px solid {snow_color}; border-radius: 12px; padding: 12px 18px; margin: 10px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-                            <div>
-                                <div style="font-weight: 800; font-size: 1.02rem; color: #ffffff;">❄️ 24 Saatlik Tahmini Kar Birikimi: <span style="color: {snow_color}; font-size: 1.2rem;">{snow_24h_cm} cm</span></div>
-                                <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 2px;">{snow_status} • <em>Kuchera SLR Dinamik Kristalizasyon Modeli</em></div>
-                            </div>
-                            <span style="background: {snow_color}; color: #000; font-weight: 800; font-size: 0.74rem; padding: 3px 8px; border-radius: 4px;">KAR ÖRTÜSÜ</span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
     st.write("")
-    st.markdown("##### 📋 Sektörel Operasyonel Reçeteler")
+    st.markdown(f"##### 📋 {selected_day_name} Günü Sektörel Operasyonel Reçeteler")
 
     if is_radiation_frost_danger:
         kayisi_status, kayisi_border = "🚨 ACİL DON TEDBİRİ", "#f44336"
         kayisi_recete = f"• Sıcaklık {night_min_temp:.1f}°C'ye iniyor. Don savar pervaneleri devreye alın veya yağmurlama sistemiyle koruyucu buz zırhı oluşturun."
-    elif hail_potential.sum() > 0 or metar["is_hail"]:
+    elif hail_potential.sum() > 0 or (selected_dt == today_date and metar["is_hail"]):
         kayisi_status, kayisi_border = "⚡ DOLU UYARISI", "#e91e63"
         kayisi_recete = "• Koruma filelerini gerin; açıkta bulunan hasat ekipmanlarını kapalı depolara çekin."
     else:
@@ -1779,7 +1826,7 @@ with tab_forecast:
     if is_snow_phase.sum() > 0 or (temp.min() <= 1.0 and precip.sum() > 0.5):
         loj_status, loj_border = "❄️ BUZLANMA & TUZLAMA", "#2196f3"
         loj_recete = "• Reşadiye ve Doğanşehir geçitlerine tuzlama ekipleri sevk edilmeli; zincir kontrolü uygulanmalıdır."
-    elif metar["is_fog"] or (metar["visib_m"] and metar["visib_m"] <= 1200):
+    elif selected_dt == today_date and (metar["is_fog"] or (metar["visib_m"] and metar["visib_m"] <= 1200)):
         loj_status, loj_border = "🌫️ GÖRÜŞ KISITI", "#ff9800"
         loj_recete = f"• Erhaç görüşü {metar['visib_m']} m. Sis farları ve takip mesafesi protokolü uygulanmalıdır."
     else:
