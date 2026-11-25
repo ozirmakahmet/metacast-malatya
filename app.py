@@ -1406,7 +1406,7 @@ with hdr_col1:
     st.markdown(
         f"""
         <div style="padding-top: 2px;">
-            <h2 style="margin: 0; font-size: 1.55rem; color: #f8fafc;">⚡ MetaCast • {st.session_state.selected_district}</h2>
+            <h2 style="margin: 0; font-size: 1.55rem; color: #f8fafc;">⚡ MetaCast • MetaCast • {active_location_name}</h2>
             <div style="font-size: 0.84rem; color: #94a3b8; margin-top: 2px;">
                 {active_location_name} ({dist_elev} m • {dist_profile}) Fizik Kısıtlı Karar-Destek Sistemi • <span style="color:#38bdf8;">Güncelleme: {last_update}</span>
             </div>
@@ -1616,7 +1616,7 @@ with cmd_c1:
     card1_gust = merkez_g_est if (is_merkez_selected and merkez_g_est is not None) else round(mod_gust_now, 1)
     card1_feels = calculate_feels_like(card1_temp, card1_gust, metar.get("rh_pct") or 50.0)
     st.metric(
-        label=f"📍 {st.session_state.selected_district.split(' (')[0]} (Anlık)",
+        label=f"📍 {active_location_name.split(' (')[0]} (Anlık)",
         value=f"{card1_temp}°C" if card1_temp is not None else "--",
         delta=f"Hamle: {card1_gust} km/s",
         delta_color="off",
@@ -1637,7 +1637,7 @@ with cmd_c2:
         dist_pres_now = round(mod_pres_now, 1)
         dist_rh_now = int(round(float(get_clean_series(df, "relative_humidity_2m", 60.0).iloc[cur_idx]))) if "relative_humidity_2m" in df.columns else 60
         st.metric(
-            label=f"🧭 {st.session_state.selected_district.split(' (')[0]} Atmosfer",
+            label=f"label=f"🧭 {active_location_name.split(' (')[0]} Atmosfer",(' (')[0]} Atmosfer",
             value=f"{dist_pres_now} hPa",
             delta=f"Bağıl Nem: %{dist_rh_now}",
             delta_color="off",
