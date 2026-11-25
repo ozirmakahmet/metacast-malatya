@@ -1637,7 +1637,7 @@ with cmd_c2:
         dist_pres_now = round(mod_pres_now, 1)
         dist_rh_now = int(round(float(get_clean_series(df, "relative_humidity_2m", 60.0).iloc[cur_idx]))) if "relative_humidity_2m" in df.columns else 60
         st.metric(
-            label=f"label=f"🧭 {active_location_name.split(' (')[0]} Atmosfer",(' (')[0]} Atmosfer",
+            label=f"🧭 {active_location_name.split(' (')[0]} Atmosfer",
             value=f"{dist_pres_now} hPa",
             delta=f"Bağıl Nem: %{dist_rh_now}",
             delta_color="off",
