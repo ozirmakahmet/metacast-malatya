@@ -235,19 +235,25 @@ def analyze_route_weather_4d(start_lat: float, start_lon: float, end_lat: float,
         elev = topo["elev"]
 
         # İlgili kontrol noktasının varış saatindeki meteorolojik veriyi bul
-        item = w_resp[i] if i < len(w_resp) else w_resp[0]
+        item = w_resp[i] if i < len(w_resp) else (w_resp[0] if w_resp else {})
         hourly = item.get("hourly", {})
         times = hourly.get("time", [])
         target_hour_str = eta_dt.strftime("%Y-%m-%dT%H:00")
         h_idx = times.index(target_hour_str) if target_hour_str in times else 0
 
-        raw_t = float(hourly["temperature_2m"][h_idx]) + topo["temp_offset"]
-        rh = float(hourly["relative_humidity_2m"][h_idx])
-        dew = float(hourly["dew_point_2m"][h_idx])
-        precip = float(hourly["precipitation"][h_idx])
-        snow = float(hourly["snowfall"][h_idx])
-        wind = float(hourly["wind_speed_10m"][h_idx]) * topo["wind_mult"]
-        gust = float(hourly["wind_gusts_10m"][h_idx]) * topo["wind_mult"]
+        def _safe_val(key, default_v):
+            arr = hourly.get(key, [])
+            if arr and len(arr) > h_idx and arr[h_idx] is not None:
+                return float(arr[h_idx])
+            return float(default_v)
+
+        raw_t = _safe_val("temperature_2m", 2.0) + topo["temp_offset"]
+        rh = _safe_val("relative_humidity_2m", 70.0)
+        dew = _safe_val("dew_point_2m", raw_t - 3.0)
+        precip = _safe_val("precipitation", 0.0)
+        snow = _safe_val("snowfall", 0.0)
+        wind = _safe_val("wind_speed_10m", 12.0) * topo["wind_mult"]
+        gust = _safe_val("wind_gusts_10m", 20.0) * topo["wind_mult"]
 
         # Fizik tabanlı yol risk analizi
         risks = []
