@@ -1734,7 +1734,7 @@ def detect_malatya_winter_front(df_hourly: pd.DataFrame, now_dt: datetime, distr
     except Exception:
         return None
 
-_front_alert = detect_malatya_winter_front(df, datetime.now(TR_TZ), active_location_name.split(" (")[0]
+_front_alert = detect_malatya_winter_front(df, datetime.now(TR_TZ), active_location_name.split(" (")[0])
 if _front_alert:
     st.warning(_front_alert)
 
