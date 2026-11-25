@@ -1495,6 +1495,8 @@ if app_mode == "🧭 AI Rota & Yolculuk Asistanı":
         st.session_state.route_end = (38.1967, 38.8719, "Pütürge")
     if "map_click_target" not in st.session_state:
         st.session_state.map_click_target = "Varış Noktası"
+    if "route_gps_active" not in st.session_state:
+        st.session_state.route_gps_active = False
 
     rc1, rc2, rc3 = st.columns([1.4, 1.4, 1.0])
     with rc1:
@@ -1502,6 +1504,7 @@ if app_mode == "🧭 AI Rota & Yolculuk Asistanı":
         b_s1, b_s2 = st.columns(2)
         with b_s1:
             if st.button("📍 Başlangıcı Bul", use_container_width=True):
+                st.session_state.route_gps_active = False
                 res = geocode_place_turkey(start_query)
                 if res:
                     st.session_state.route_start = (res["lat"], res["lon"], res["display_name"])
@@ -1510,15 +1513,20 @@ if app_mode == "🧭 AI Rota & Yolculuk Asistanı":
                     st.warning("Konum bulunamadı, ilçe/köy adını kontrol edin.")
         with b_s2:
             if st.button("🛰️ GPS Konumum", use_container_width=True):
-                loc = get_geolocation()
-                if loc and "coords" in loc:
-                    glat, glon = float(loc["coords"]["latitude"]), float(loc["coords"]["longitude"])
-                    gtopo = analyze_micro_topography(glat, glon)
-                    st.session_state.route_start = (glat, glon, gtopo["place_title"])
-                    st.rerun()
+                st.session_state.route_gps_active = True
+
+        if st.session_state.route_gps_active:
+            loc = get_geolocation(component_key="route_gps_loc")
+            if loc and "coords" in loc:
+                glat = float(loc["coords"]["latitude"])
+                glon = float(loc["coords"]["longitude"])
+                gtopo = analyze_micro_topography(glat, glon)
+                st.session_state.route_start = (glat, glon, gtopo["place_title"])
+                st.session_state.route_gps_active = False
+                st.rerun()
 
     with rc2:
-        end_query = st.text_input("🏁 Varış Noktası (Örn: Pütürge Çayköy İlkokulu):", value=st.session_state.route_end[2])
+        end_query = st.text_input("🏁 Varış Noktası:", value=st.session_state.route_end[2])
         if st.button("🔍 Varış Noktasını Bul", use_container_width=True):
             res_end = geocode_place_turkey(end_query)
             if res_end:
