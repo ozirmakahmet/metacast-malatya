@@ -18,6 +18,22 @@ LON_MERKEZ = 38.3095
 
 LAT_ERHAC = 38.4350
 LON_ERHAC = 38.0910
+MALATYA_DISTRICTS = {
+    "Malatya Merkez (Battalgazi / Yeşilyurt)": {"lat": 38.3552, "lon": 38.3095, "elev": 950, "tag": "merkez", "profile": "Çanak & Merkez Havza"},
+    "Akçadağ": {"lat": 38.3389, "lon": 37.9681, "elev": 1065, "tag": "akcadag", "profile": "Batı Platosu & Levent Vadisi"},
+    "Arapgir": {"lat": 39.0414, "lon": 38.4936, "elev": 1210, "tag": "arapgir", "profile": "Kuzey Yüksek Plato & Sert Kış"},
+    "Arguvan": {"lat": 38.7819, "lon": 38.2636, "elev": 1140, "tag": "arguvan", "profile": "Kuzey Rüzgâr Koridoru"},
+    "Battalgazi": {"lat": 38.4215, "lon": 38.3650, "elev": 885, "tag": "battalgazi", "profile": "Ova Tabanı & Enverziyon Çukuru"},
+    "Darende": {"lat": 38.5469, "lon": 37.5086, "elev": 1045, "tag": "darende", "profile": "Tohma Kanyonu & Batı Geçidi"},
+    "Doğanşehir": {"lat": 38.0942, "lon": 37.8825, "elev": 1245, "tag": "dogansehir", "profile": "Sürgü Boğazı & Yüksek Kar Kuşağı"},
+    "Doğanyol": {"lat": 38.3008, "lon": 39.0267, "elev": 965, "tag": "doganyol", "profile": "Fırat Vadisi & Güneydoğu Eşiği"},
+    "Hekimhan": {"lat": 38.8172, "lon": 37.9317, "elev": 1090, "tag": "hekimhan", "profile": "Kuzeybatı Dağ Geçidi"},
+    "Kale": {"lat": 38.4064, "lon": 38.7653, "elev": 745, "tag": "kale", "profile": "Karakaya Baraj Kıyısı & Ilıman Mikroiklim"},
+    "Kuluncak": {"lat": 38.8806, "lon": 37.6683, "elev": 1295, "tag": "kuluncak", "profile": "Yüksek Yayla & Erken Ayaz Kuşağı"},
+    "Pütürge": {"lat": 38.1967, "lon": 38.8719, "elev": 1265, "tag": "puturge", "profile": "Kubbe Dağı & Güneydoğu Toros Yamacı"},
+    "Yazıhan": {"lat": 38.5947, "lon": 38.1872, "elev": 890, "tag": "yazihan", "profile": "Kuzey Ovası & Açık Rüzgâr Hattı"},
+    "Yeşilyurt": {"lat": 38.2950, "lon": 38.2450, "elev": 1015, "tag": "yesilyurt", "profile": "Beydağı Eteği & Termal Kemer"},
+}
 
 TR_TZ = timezone(timedelta(hours=3))
 today_date = datetime.now(TR_TZ).date()
@@ -534,10 +550,10 @@ def fetch_live_forecast(lat=LAT_MERKEZ, lon=LON_MERKEZ, location_tag="merkez"):
 
 
 @st.cache_data(ttl=1200)
-def get_malatya_full_7day_forecast():
+def get_malatya_full_7day_forecast(lat=LAT_MERKEZ, lon=LON_MERKEZ):
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={LAT_MERKEZ}&longitude={LON_MERKEZ}&"
+        f"latitude={lat}&longitude={LON}&"
         f"hourly=temperature_2m,dew_point_2m,precipitation_probability,precipitation,cloud_cover,weather_code,cape,wind_speed_10m,wind_gusts_10m,wind_direction_10m&"
         f"daily=sunrise,sunset,temperature_2m_max,temperature_2m_min,precipitation_probability_max&"
         f"timezone=Europe%2FIstanbul&forecast_days=7"
@@ -1181,9 +1197,44 @@ if mode == "What-If Laboratuvarı":
 # ==============================================================================
 # 🟢 CANLI OPERASYONEL VEYA GEÇMİŞ SENARYO VERİ HAZIRLIĞI
 # ==============================================================================
-with st.spinner("Atmosferik veriler ve yerel fizik motoru çalıştırılıyor..."):
-    df_raw, last_update = fetch_live_forecast(LAT_MERKEZ, LON_MERKEZ, "merkez")
-    daily_data, hourly_data = get_malatya_full_7day_forecast()
+if "selected_district" not in st.session_state:
+    st.session_state.selected_district = "Malatya Merkez (Battalgazi / Yeşilyurt)"
+
+search_col1, search_col2 = st.columns([2.6, 1.4])
+with search_col1:
+    picked_district = st.selectbox(
+        "🔍 İlçe Ara ve Seç (Örn: Pütürge, Darende, Doğanşehir, Arapgir...):",
+        options=list(MALATYA_DISTRICTS.keys()),
+        index=list(MALATYA_DISTRICTS.keys()).index(st.session_state.selected_district),
+        placeholder="İlçe adı yazın...",
+    )
+    if picked_district != st.session_state.selected_district:
+        st.session_state.selected_district = picked_district
+        st.rerun()
+
+dist_info = MALATYA_DISTRICTS[st.session_state.selected_district]
+dist_lat, dist_lon, dist_elev, dist_tag, dist_profile = (
+    dist_info["lat"],
+    dist_info["lon"],
+    dist_info["elev"],
+    dist_info["tag"],
+    dist_info["profile"],
+)
+
+with search_col2:
+    st.markdown(
+        f"""
+        <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 10px; padding: 8px 12px; margin-top: 22px; font-size: 0.80rem; color: #e2e8f0;">
+            ⛰️ <strong>Rakım:</strong> {dist_elev} m • 🧭 {dist_lat:.2f}°K, {dist_lon:.2f}°D<br>
+            <span style="color: #90caf9;">{dist_profile}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with st.spinner(f"{st.session_state.selected_district} atmosferik verileri yükleniyor..."):
+    df_raw, last_update = fetch_live_forecast(dist_lat, dist_lon, dist_tag)
+    daily_data, hourly_data = get_malatya_full_7day_forecast(dist_lat, dist_lon)
 
 available_dates = sorted(df_raw["time"].dt.date.unique())
 if "current_date" not in st.session_state or st.session_state.current_date not in available_dates:
@@ -1233,7 +1284,7 @@ with hdr_col1:
     st.markdown(
         f"""
         <div style="padding-top: 2px;">
-            <h2 style="margin: 0; font-size: 1.55rem; color: #f8fafc;">⚡ MetaCast Malatya</h2>
+            <h2 style="margin: 0; font-size: 1.55rem; color: #f8fafc;">⚡ MetaCast • {st.session_state.selected_district}</h2>
             <div style="font-size: 0.84rem; color: #94a3b8; margin-top: 2px;">
                 Malatya Merkez & Erhaç (LTAT) Fizik Kısıtlı Hibrit Karar-Destek Sistemi • <span style="color:#38bdf8;">Güncelleme: {last_update}</span>
             </div>
@@ -1438,14 +1489,17 @@ wind_dir_name = compass_dirs[int((live_wind_deg + 22.5) % 360 // 45)]
 cmd_c1, cmd_c2, cmd_c3, cmd_c4, cmd_c5 = st.columns([1.25, 1.35, 1.15, 1.15, 1.1])
 
 with cmd_c1:
+    is_merkez_selected = (dist_tag == "merkez")
+    card1_temp = merkez_t_est if (is_merkez_selected and merkez_t_est is not None) else round(mod_temp_now, 1)
+    card1_gust = merkez_g_est if (is_merkez_selected and merkez_g_est is not None) else round(mod_gust_now, 1)
+    card1_feels = calculate_feels_like(card1_temp, card1_gust, metar.get("rh_pct") or 50.0)
     st.metric(
-        label="🏢 Malatya Merkez (Anlık)",
-        value=f"{merkez_t_est}°C" if merkez_t_est is not None else "--",
-        delta=f"Hamle: {merkez_g_est} km/s",
+        label=f"📍 {st.session_state.selected_district.split(' (')[0]} (Anlık)",
+        value=f"{card1_temp}°C" if card1_temp is not None else "--",
+        delta=f"Hamle: {card1_gust} km/s",
         delta_color="off",
-        help="Erhaç istasyon verisinin rakım ve Beydağları sürtünme katsayısı ile şehir merkezine uyarlanmış değeridir.",
     )
-    st.caption(f"Erhaç: **{obs_temp}°C** | Hissedilen: **{feels_like_now}°C**" if obs_temp is not None else "Erhaç verisi bekleniyor")
+    st.caption(f"Rakım: **{dist_elev} m** | Hissedilen: **{card1_feels}°C**")
 
 with cmd_c2:
     st.metric(
