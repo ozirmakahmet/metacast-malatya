@@ -1286,7 +1286,7 @@ with hdr_col1:
         <div style="padding-top: 2px;">
             <h2 style="margin: 0; font-size: 1.55rem; color: #f8fafc;">⚡ MetaCast • {st.session_state.selected_district}</h2>
             <div style="font-size: 0.84rem; color: #94a3b8; margin-top: 2px;">
-                Malatya Merkez & Erhaç (LTAT) Fizik Kısıtlı Hibrit Karar-Destek Sistemi • <span style="color:#38bdf8;">Güncelleme: {last_update}</span>
+                {st.session_state.selected_district} ({dist_elev} m • {dist_profile}) Fizik Kısıtlı Karar-Destek Sistemi • <span style="color:#38bdf8;">Güncelleme: {last_update}</span>
             </div>
         </div>
         """,
@@ -1502,15 +1502,25 @@ with cmd_c1:
     st.caption(f"Rakım: **{dist_elev} m** | Hissedilen: **{card1_feels}°C**")
 
 with cmd_c2:
-    st.metric(
-        label="📡 Erhaç (LTAT) İstasyonu",
-        value=f"{obs_gust} km/s",
-        delta=f"{int(obs_pres)} hPa • Nem {rh_display}" if obs_pres else f"Nem {rh_display}",
-        delta_color="off",
-        help=f"Ham METAR: {metar['raw']}",
-    )
-    st.caption(f"Görüş: **{vis_str}** | {rel_badge}")
-
+    if dist_tag == "merkez":
+        st.metric(
+            label="📡 Erhaç (LTAT) İstasyonu",
+            value=f"{obs_gust} km/s",
+            delta=f"{int(obs_pres)} hPa • Nem {rh_display}" if obs_pres else f"Nem {rh_display}",
+            delta_color="off",
+            help=f"Ham METAR: {metar['raw']}",
+        )
+        st.caption(f"Görüş: **{vis_str}** | {rel_badge}")
+    else:
+        dist_pres_now = round(mod_pres_now, 1)
+        dist_rh_now = int(round(float(get_clean_series(df, "relative_humidity_2m", 60.0).iloc[cur_idx]))) if "relative_humidity_2m" in df.columns else 60
+        st.metric(
+            label=f"🧭 {st.session_state.selected_district.split(' (')[0]} Atmosfer",
+            value=f"{dist_pres_now} hPa",
+            delta=f"Bağıl Nem: %{dist_rh_now}",
+            delta_color="off",
+        )
+        st.caption(f"Koridor: **{dist_profile.split('&')[0].strip()}**")
 with cmd_c3:
     st.metric(
         label="💨 Günün Pik Rüzgârı",
@@ -1591,7 +1601,7 @@ def detect_malatya_winter_front(df_hourly: pd.DataFrame, now_dt: datetime):
             return (
                 "❄️ **ANİ AYAZ VE SERT SOĞUMA UYARISI:** "
                 f"Önümüzdeki saatlerde sıcaklık **{abs(temp_drop):.1f}°C** birden gerileyerek "
-                f"**{temp_after:.1f}°C** seviyesine iniyor; Erhaç ve ova hattında buzlanma bekleniyor."
+                f"**{temp_after:.1f}°C** seviyesine iniyor; {district_name} ve çevre yüksek kesimlerinde buzlanma bekleniyor."
             )
         elif pres_jump >= 3.5 and is_northerly:
             return (
@@ -1602,7 +1612,7 @@ def detect_malatya_winter_front(df_hourly: pd.DataFrame, now_dt: datetime):
     except Exception:
         return None
 
-_front_alert = detect_malatya_winter_front(df, datetime.now(TR_TZ))
+_front_alert = detect_malatya_winter_front(df, datetime.now(TR_TZ), st.session_state.selected_district.split(" (")[0])
 if _front_alert:
     st.warning(_front_alert)
 
@@ -1721,7 +1731,7 @@ with tab_forecast:
     selected_day_name = "Bugün" if selected_dt == today_date else gunler_tr[selected_dt.weekday()]
     st.markdown(
         f"<div style='font-size: 1.02rem; font-weight: 700; color: #f8fafc; margin: 12px 0 6px 0;'>"
-        f"🕒 {selected_day_name} ({selected_dt.strftime('%d %B %Y')}) — Malatya Merkez Saatlik Hava Akışı</div>",
+        f"🕒 {selected_day_name} ({selected_dt.strftime('%d %B %Y')}) — {st.session_state.selected_district.split(' (')[0]} Saatlik Hava Akışı</div>",
         unsafe_allow_html=True,
     )
 
@@ -1953,7 +1963,7 @@ with tab_forecast:
 
     if is_snow_phase.sum() > 0 or (temp.min() <= 1.0 and precip.sum() > 0.5):
         loj_status, loj_border = "❄️ BUZLANMA & TUZLAMA", "#2196f3"
-        loj_recete = "• Reşadiye ve Doğanşehir geçitlerine tuzlama ekipleri sevk edilmeli; zincir kontrolü uygulanmalıdır."
+        loj_recete = f"• {st.session_state.selected_district.split(' (')[0]} yüksek geçitleri ve bağlantı yollarında tuzlama ve gizli buzlanma tedbiri uygulanmalıdır."
     elif selected_dt == today_date and (metar["is_fog"] or (metar["visib_m"] and metar["visib_m"] <= 1200)):
         loj_status, loj_border = "🌫️ GÖRÜŞ KISITI", "#ff9800"
         loj_recete = f"• Erhaç görüşü {metar['visib_m']} m. Sis farları ve takip mesafesi protokolü uygulanmalıdır."
@@ -1974,11 +1984,11 @@ with tab_forecast:
 # ------------------------------------------------------------------------------
 with tab_radar_map:
     st.markdown("##### 🛰️ Canlı Meteoroloji Radarı & Dinamik Kütle Yörüngesi")
-    windy_radar_html = """
+    windy_radar_html = f"""
     <iframe 
         width="100%" 
         height="480" 
-        src="https://embed.windy.com/embed2.html?lat=38.355&lon=38.309&detailLat=38.355&detailLon=38.309&width=100%25&height=480&zoom=8&level=surface&overlay=radar&product=nowcast&menu=true&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1&play=true" 
+        src="https://embed.windy.com/embed2.html?lat={dist_lat}&lon={dist_lon}&detailLat={dist_lat}&detailLon={dist_lon}&width=100%25&height=480&zoom=9&level=surface&overlay=radar&product=nowcast&menu=true&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=km%2Fh&metricTemp=%C2%B0C&radarRange=-1&play=true"
         frameborder="0"
         style="border-radius: 12px; border: 1px solid rgba(255,255,255,0.12);">
     </iframe>
@@ -2186,7 +2196,7 @@ with tab_radar_map:
 
     with c_map1:
         stations = [
-            {"name": "Malatya Merkez", "lat": 38.3552, "lon": 38.3095, "type": "merkez"},
+            {"name": f"📍 {st.session_state.selected_district.split(' (')[0]}", "lat": dist_lat, "lon": dist_lon, "type": dist_tag},
             {"name": "Erhaç (LTAT)", "lat": 38.4312, "lon": 38.0898, "type": "erhac"},
             {"name": "Tulga Meydanı", "lat": 38.3310, "lon": 38.2580, "type": "tulga"},
             {"name": "Battalgazi", "lat": 38.4215, "lon": 38.3650, "type": "battalgazi"},
@@ -2253,11 +2263,11 @@ with tab_radar_map:
 
         fig_map = go.Figure(data=[trace_points])
         fig_map.update_layout(
-            map=dict(
-                style="white-bg",
-                center=dict(lat=38.30, lon=38.25),
-                zoom=8.3,
-                layers=[
+           map=dict(
+         style="white-bg",
+         center=dict(lat=dist_lat, lon=dist_lon),
+         zoom=9.4 if dist_tag != "merkez" else 8.3,
+         layers=[
                     dict(
                         sourcetype="raster",
                         source=["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"],
@@ -2354,26 +2364,27 @@ with tab_radar_map:
         )
 
     st.write("")
-    st.markdown("##### 🏢 Havza İstasyonları Değerlendirmesi")
+    if dist_tag == "merkez":
+        st.markdown("##### 🏢 Havza İstasyonları Değerlendirmesi")
 
-    erh_color = "#f44336" if night_min_temp <= 1.0 and is_radiation_frost_danger else ("#ff9800" if peak_gust >= 50 else "#4caf50")
-    tulga_gust = peak_gust + 3.5
-    tulga_color = "#f44336" if tulga_gust >= 45 else ("#ff9800" if tulga_gust >= 38 else "#4caf50")
-    bat_color = "#f44336" if (night_min_temp - 0.8) <= 1.0 and night_avg_cloud <= 35 else "#4caf50"
-    yes_color = "#ff9800" if (peak_gust + 5.0) >= 45 else "#4caf50"
-    dog_color = "#f44336" if (peak_gust + 12.0) >= 50 else "#ff9800"
+        erh_color = "#f44336" if night_min_temp <= 1.0 and is_radiation_frost_danger else ("#ff9800" if peak_gust >= 50 else "#4caf50")
+        tulga_gust = peak_gust + 3.5
+        tulga_color = "#f44336" if tulga_gust >= 45 else ("#ff9800" if tulga_gust >= 38 else "#4caf50")
+        bat_color = "#f44336" if (night_min_temp - 0.8) <= 1.0 and night_avg_cloud <= 35 else "#4caf50"
+        yes_color = "#ff9800" if (peak_gust + 5.0) >= 45 else "#4caf50"
+        dog_color = "#f44336" if (peak_gust + 12.0) >= 50 else "#ff9800"
 
-    r1, r2, r3, r4, r5 = st.columns(5)
-    with r1:
-        st.markdown(f'<div class="region-card"><strong style="color:#90caf9;">🛫 Erhaç (LTAT)</strong><div style="font-size:0.75rem; color:#78909c;">Rakım: 862m</div><div style="font-size:0.85rem; margin-top:4px;">Pik: {peak_gust:.1f} km/s<br>Min: {night_min_temp:.1f}°C</div><div style="font-size:0.75rem; font-weight:700; color:{erh_color}; margin-top:3px;">Ana Meydan</div></div>', unsafe_allow_html=True)
-    with r2:
-        st.markdown(f'<div class="region-card"><strong style="color:#80d8ff;">🚁 Tulga Üssü</strong><div style="font-size:0.75rem; color:#78909c;">Rakım: 975m</div><div style="font-size:0.85rem; margin-top:4px;">Pik: {tulga_gust:.1f} km/s<br>Min: {night_min_temp+0.4:.1f}°C</div><div style="font-size:0.75rem; font-weight:700; color:{tulga_color}; margin-top:3px;">Kara Havacılık</div></div>', unsafe_allow_html=True)
-    with r3:
-        st.markdown(f'<div class="region-card"><strong style="color:#ffb74d;">🍑 Battalgazi</strong><div style="font-size:0.75rem; color:#78909c;">Rakım: 948m</div><div style="font-size:0.85rem; margin-top:4px;">Pik: {max(5.0, peak_gust-6.0):.1f} km/s<br>Min: {night_min_temp-0.8:.1f}°C</div><div style="font-size:0.75rem; font-weight:700; color:{bat_color}; margin-top:3px;">Enverziyon Çukuru</div></div>', unsafe_allow_html=True)
-    with r4:
-        st.markdown(f'<div class="region-card"><strong style="color:#a5d6a7;">🏔️ Yeşilyurt</strong><div style="font-size:0.75rem; color:#78909c;">Rakım: 1.010m</div><div style="font-size:0.85rem; margin-top:4px;">Pik: {peak_gust+5.0:.1f} km/s<br>Min: {night_min_temp+0.9:.1f}°C</div><div style="font-size:0.75rem; font-weight:700; color:{yes_color}; margin-top:3px;">Termal Kemer</div></div>', unsafe_allow_html=True)
-    with r5:
-        st.markdown(f'<div class="region-card"><strong style="color:#ef9a9a;">🌪️ Doğanşehir</strong><div style="font-size:0.75rem; color:#78909c;">Rakım: 1.220m</div><div style="font-size:0.85rem; margin-top:4px;">Pik: {peak_gust+12.0:.1f} km/s<br>Min: {night_min_temp-1.8:.1f}°C</div><div style="font-size:0.75rem; font-weight:700; color:{dog_color}; margin-top:3px;">Boğaz Rüzgârı</div></div>', unsafe_allow_html=True)
+        r1, r2, r3, r4, r5 = st.columns(5)
+        with r1:
+            st.markdown(f'<div class="region-card"><strong style="color:#90caf9;">🛫 Erhaç (LTAT)</strong><div style="font-size:0.75rem; color:#78909c;">Rakım: 862m</div><div style="font-size:0.85rem; margin-top:4px;">Pik: {peak_gust:.1f} km/s<br>Min: {night_min_temp:.1f}°C</div><div style="font-size:0.75rem; font-weight:700; color:{erh_color}; margin-top:3px;">Ana Meydan</div></div>', unsafe_allow_html=True)
+        with r2:
+            st.markdown(f'<div class="region-card"><strong style="color:#80d8ff;">🚁 Tulga Üssü</strong><div style="font-size:0.75rem; color:#78909c;">Rakım: 975m</div><div style="font-size:0.85rem; margin-top:4px;">Pik: {tulga_gust:.1f} km/s<br>Min: {night_min_temp+0.4:.1f}°C</div><div style="font-size:0.75rem; font-weight:700; color:{tulga_color}; margin-top:3px;">Kara Havacılık</div></div>', unsafe_allow_html=True)
+        with r3:
+            st.markdown(f'<div class="region-card"><strong style="color:#ffb74d;">🍑 Battalgazi</strong><div style="font-size:0.75rem; color:#78909c;">Rakım: 948m</div><div style="font-size:0.85rem; margin-top:4px;">Pik: {max(5.0, peak_gust-6.0):.1f} km/s<br>Min: {night_min_temp-0.8:.1f}°C</div><div style="font-size:0.75rem; font-weight:700; color:{bat_color}; margin-top:3px;">Enverziyon Çukuru</div></div>', unsafe_allow_html=True)
+        with r4:
+            st.markdown(f'<div class="region-card"><strong style="color:#a5d6a7;">🏔️ Yeşilyurt</strong><div style="font-size:0.75rem; color:#78909c;">Rakım: 1.010m</div><div style="font-size:0.85rem; margin-top:4px;">Pik: {peak_gust+5.0:.1f} km/s<br>Min: {night_min_temp+0.9:.1f}°C</div><div style="font-size:0.75rem; font-weight:700; color:{yes_color}; margin-top:3px;">Termal Kemer</div></div>', unsafe_allow_html=True)
+        with r5:
+            st.markdown(f'<div class="region-card"><strong style="color:#ef9a9a;">🌪️ Doğanşehir</strong><div style="font-size:0.75rem; color:#78909c;">Rakım: 1.220m</div><div style="font-size:0.85rem; margin-top:4px;">Pik: {peak_gust+12.0:.1f} km/s<br>Min: {night_min_temp-1.8:.1f}°C</div><div style="font-size:0.75rem; font-weight:700; color:{dog_color}; margin-top:3px;">Boğaz Rüzgârı</div></div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------------------
 # SEKME 3: YAPAY ZEKÂ (XAI) & NWP MODEL KIYASLAMASI
