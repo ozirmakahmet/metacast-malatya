@@ -1,0 +1,4 @@
+data/radar_archive/*.npy
+__pycache__/
+*.pyc
+venv/
