@@ -1507,6 +1507,50 @@ st.markdown(
     f'<div class="alert-strip" style="border-left: 4px solid {strip_border};">{strip_msg}</div>',
     unsafe_allow_html=True,
 )
+def detect_malatya_winter_front(df_hourly: pd.DataFrame, now_dt: datetime):
+    try:
+        if df_hourly is None or len(df_hourly) < 6:
+            return None
+        idx = int(np.argmin(np.abs(df_hourly["time"].dt.hour - now_dt.hour)))
+        start_i = max(0, idx - 3)
+        end_i = min(len(df_hourly) - 1, idx + 3)
+        wdir_col = next((c for c in df_hourly.columns if "wind_direction" in c or "wind_dir" in c), None)
+        temp_col = next((c for c in df_hourly.columns if "temperature" in c or "temp" in c), None)
+        pres_col = next((c for c in df_hourly.columns if "pressure" in c), None)
+        if not wdir_col or not temp_col:
+            return None
+        dir_before = float(df_hourly[wdir_col].iloc[start_i])
+        dir_after = float(df_hourly[wdir_col].iloc[end_i])
+        temp_before = float(df_hourly[temp_col].iloc[start_i])
+        temp_after = float(df_hourly[temp_col].iloc[end_i])
+        temp_drop = temp_after - temp_before
+        pres_jump = (float(df_hourly[pres_col].iloc[end_i]) - float(df_hourly[pres_col].iloc[start_i])) if pres_col else 0.0
+        is_southerly = 110.0 <= dir_before <= 250.0
+        is_northerly = (dir_after >= 290.0) or (dir_after <= 70.0)
+        if is_southerly and is_northerly and temp_drop <= -2.5:
+            return (
+                "🚨 **KIŞ CEPHESİ GEÇİŞİ (Lodos → Poyraz/Karayel Kırılması):** "
+                f"Rüzgâr {int(dir_before)}° yönünden {int(dir_after)}° yönüne dönüyor; "
+                f"sıcaklıkta **{abs(temp_drop):.1f}°C** ani düşüş ve cephe yağışı/buzlanma riski var."
+            )
+        elif temp_drop <= -4.0 and temp_after <= 1.0:
+            return (
+                "❄️ **ANİ AYAZ VE SERT SOĞUMA UYARISI:** "
+                f"Önümüzdeki saatlerde sıcaklık **{abs(temp_drop):.1f}°C** birden gerileyerek "
+                f"**{temp_after:.1f}°C** seviyesine iniyor; Erhaç ve ova hattında buzlanma bekleniyor."
+            )
+        elif pres_jump >= 3.5 and is_northerly:
+            return (
+                "🌬️ **KUZEYLİ YÜKSEK BASINÇ TAKVİYESİ:** "
+                f"Basınçta **+{pres_jump:.1f} hPa** artışla birlikte kuzeyli soğuk hava akışı güçleniyor."
+            )
+        return None
+    except Exception:
+        return None
+
+_front_alert = detect_malatya_winter_front(df, datetime.now(TR_TZ))
+if _front_alert:
+    st.warning(_front_alert)
 
 # ==============================================================================
 # 🗂️ 3 ANA SEKME İLE SADELEŞTİRİLMİŞ MODÜLER YAPI
