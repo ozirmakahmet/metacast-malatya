@@ -34,6 +34,95 @@ MALATYA_DISTRICTS = {
     "Yazıhan": {"lat": 38.5947, "lon": 38.1872, "elev": 890, "tag": "yazihan", "profile": "Kuzey Ovası & Açık Rüzgâr Hattı"},
     "Yeşilyurt": {"lat": 38.2950, "lon": 38.2450, "elev": 1015, "tag": "yesilyurt", "profile": "Beydağı Eteği & Termal Kemer"},
 }
+from streamlit_js_eval import get_geolocation
+
+@st.cache_data(ttl=3600)
+def analyze_micro_topography(lat: float, lon: float):
+    """
+    Merkez + 8 komşu noktanın (~1.2 km yarıçap) rakımını Open-Meteo Elevation API ile ölçer;
+    TPI (Topographic Position Index) ve Bakı (Aspect) hesabıyla Vadi/Sırt/Yamaç sınıfını çıkarır.
+    """
+    d_lat = 0.011  # ~1.22 km
+    d_lon = 0.014  # ~1.22 km (38.3° enleminde)
+    # 0: Merkez, 1:K, 2:KD, 3:D, 4:GD, 5:G, 6:GB, 7:B, 8:KB
+    lats = [lat, lat + d_lat, lat + d_lat, lat, lat - d_lat, lat - d_lat, lat - d_lat, lat, lat + d_lat]
+    lons = [lon, lon, lon + d_lon, lon + d_lon, lon + d_lon, lon, lon - d_lon, lon - d_lon, lon - d_lon]
+
+    elevations = [950.0] * 9
+    try:
+        lat_str = ",".join(f"{x:.5f}" for x in lats)
+        lon_str = ",".join(f"{x:.5f}" for x in lons)
+        r = requests.get(f"https://api.open-meteo.com/v1/elevation?latitude={lat_str}&longitude={lon_str}", timeout=6)
+        if r.status_code == 200:
+            res_elev = r.json().get("elevation", [])
+            if len(res_elev) == 9:
+                elevations = [float(e) for e in res_elev]
+    except Exception:
+        pass
+
+    center_elev = elevations[0]
+    surrounding_mean = float(np.mean(elevations[1:]))
+    tpi = center_elev - surrounding_mean  # Pozitif: Tepe/Sırt, Negatif: Vadi/Çanak
+
+    # Kuzey-Güney eğim farkı (Bakı analizi)
+    north_elev = elevations[1]
+    south_elev = elevations[5]
+    ns_diff = north_elev - south_elev  # Pozitifse kuzey yüksek -> Güneye bakan yamaç
+
+    if tpi <= -35.0:
+        terrain_type = "vadi"
+        terrain_label = "Vadi Tabanı / Çukur Havza"
+        temp_offset = -1.6
+        wind_mult = 0.82
+        frost_boost = True
+    elif tpi >= 35.0:
+        terrain_type = "tepe"
+        terrain_label = "Yüksek Sırt / Tepe Zirvesi"
+        temp_offset = -0.6
+        wind_mult = 1.22
+        frost_boost = False
+    else:
+        terrain_type = "yamac"
+        if ns_diff >= 25.0:
+            terrain_label = "Güney Bakı Yamacı (Güneş Alan)"
+            temp_offset = 0.4
+        elif ns_diff <= -25.0:
+            terrain_label = "Kuzey Bakı Yamacı (Dulda / Serin)"
+            temp_offset = -0.5
+        else:
+            terrain_label = "Plato / Orta Yamaç"
+            temp_offset = 0.0
+        wind_mult = 1.04
+        frost_boost = False
+
+    # Köy / Mahalle / İlçe ters coğrafi kodlama (Nominatim)
+    place_title = "GPS Konumu"
+    try:
+        geo_r = requests.get(
+            f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat:.5f}&lon={lon:.5f}&zoom=14&accept-language=tr",
+            headers={"User-Agent": "MetaCastMalatya/2.0"},
+            timeout=5,
+        )
+        if geo_r.status_code == 200:
+            addr = geo_r.json().get("address", {})
+            district = addr.get("town") or addr.get("county") or addr.get("city_district") or addr.get("province") or ""
+            village = addr.get("village") or addr.get("suburb") or addr.get("neighbourhood") or addr.get("hamlet") or ""
+            parts = [p for p in [district, village] if p]
+            if parts:
+                place_title = " • ".join(parts)
+    except Exception:
+        pass
+
+    return {
+        "elev": int(round(center_elev)),
+        "tpi": round(tpi, 1),
+        "terrain_type": terrain_type,
+        "terrain_label": terrain_label,
+        "temp_offset": temp_offset,
+        "wind_mult": wind_mult,
+        "frost_boost": frost_boost,
+        "place_title": place_title,
+    }
 
 TR_TZ = timezone(timedelta(hours=3))
 today_date = datetime.now(TR_TZ).date()
@@ -1199,42 +1288,75 @@ if mode == "What-If Laboratuvarı":
 # ==============================================================================
 if "selected_district" not in st.session_state:
     st.session_state.selected_district = "Malatya Merkez (Battalgazi / Yeşilyurt)"
+if "gps_mode" not in st.session_state:
+    st.session_state.gps_mode = False
+if "gps_coords" not in st.session_state:
+    st.session_state.gps_coords = None
 
-search_col1, search_col2 = st.columns([2.6, 1.4])
+search_col1, search_col_gps, search_col2 = st.columns([2.1, 0.9, 1.5])
 with search_col1:
     picked_district = st.selectbox(
-        "🔍 İlçe Ara ve Seç (Örn: Pütürge, Darende, Doğanşehir, Arapgir...):",
+        "🔍 İlçe Ara ve Seç (veya sağdan anlık GPS konumunuzu kullanın):",
         options=list(MALATYA_DISTRICTS.keys()),
         index=list(MALATYA_DISTRICTS.keys()).index(st.session_state.selected_district),
         placeholder="İlçe adı yazın...",
     )
     if picked_district != st.session_state.selected_district:
         st.session_state.selected_district = picked_district
+        st.session_state.gps_mode = False
         st.rerun()
 
-dist_info = MALATYA_DISTRICTS[st.session_state.selected_district]
-dist_lat, dist_lon, dist_elev, dist_tag, dist_profile = (
-    dist_info["lat"],
-    dist_info["lon"],
-    dist_info["elev"],
-    dist_info["tag"],
-    dist_info["profile"],
-)
+with search_col_gps:
+    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+    if st.button("📍 Konumumu Kullan", use_container_width=True, help="Bulunduğunuz köy/vadi/tepe noktasına göre mikro-topoğrafik tahmin hesaplar"):
+        st.session_state.gps_mode = True
+
+if st.session_state.gps_mode:
+    loc_data = get_geolocation()
+    if loc_data and "coords" in loc_data:
+        st.session_state.gps_coords = (
+            float(loc_data["coords"]["latitude"]),
+            float(loc_data["coords"]["longitude"]),
+        )
+
+if st.session_state.gps_mode and st.session_state.gps_coords is not None:
+    dist_lat, dist_lon = st.session_state.gps_coords
+    topo = analyze_micro_topography(dist_lat, dist_lon)
+    dist_elev = topo["elev"]
+    dist_tag = f"gps_{topo['terrain_type']}"
+    dist_profile = f"{topo['terrain_label']} (TPI: {topo['tpi']:+.0f} m)"
+    active_location_name = topo["place_title"]
+else:
+    dist_info = MALATYA_DISTRICTS[st.session_state.selected_district]
+    dist_lat, dist_lon, dist_elev, dist_tag, dist_profile = (
+        dist_info["lat"],
+        dist_info["lon"],
+        dist_info["elev"],
+        dist_info["tag"],
+        dist_info["profile"],
+    )
+    topo = analyze_micro_topography(dist_lat, dist_lon)
+    active_location_name = st.session_state.selected_district
 
 with search_col2:
     st.markdown(
         f"""
         <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 10px; padding: 8px 12px; margin-top: 22px; font-size: 0.80rem; color: #e2e8f0;">
-            ⛰️ <strong>Rakım:</strong> {dist_elev} m • 🧭 {dist_lat:.2f}°K, {dist_lon:.2f}°D<br>
+            ⛰️ <strong>Rakım:</strong> {dist_elev} m • 🧭 {dist_lat:.3f}°K, {dist_lon:.3f}°D<br>
             <span style="color: #90caf9;">{dist_profile}</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-with st.spinner(f"{st.session_state.selected_district} atmosferik verileri yükleniyor..."):
+with st.spinner(f"{active_location_name} mikro-topoğrafik verileri yükleniyor..."):
     df_raw, last_update = fetch_live_forecast(dist_lat, dist_lon, dist_tag)
     daily_data, hourly_data = get_malatya_full_7day_forecast(dist_lat, dist_lon)
+    if df_raw is not None and not df_raw.empty:
+        for t_col in [c for c in df_raw.columns if "temperature" in c or "temp" in c]:
+            df_raw[t_col] = df_raw[t_col] + topo["temp_offset"]
+        for w_col in [c for c in df_raw.columns if "wind_speed" in c or "wind_gust" in c]:
+            df_raw[w_col] = df_raw[w_col] * topo["wind_mult"]
 
 available_dates = sorted(df_raw["time"].dt.date.unique())
 if "current_date" not in st.session_state or st.session_state.current_date not in available_dates:
@@ -1286,7 +1408,7 @@ with hdr_col1:
         <div style="padding-top: 2px;">
             <h2 style="margin: 0; font-size: 1.55rem; color: #f8fafc;">⚡ MetaCast • {st.session_state.selected_district}</h2>
             <div style="font-size: 0.84rem; color: #94a3b8; margin-top: 2px;">
-                {st.session_state.selected_district} ({dist_elev} m • {dist_profile}) Fizik Kısıtlı Karar-Destek Sistemi • <span style="color:#38bdf8;">Güncelleme: {last_update}</span>
+                {active_location_name} ({dist_elev} m • {dist_profile}) Fizik Kısıtlı Karar-Destek Sistemi • <span style="color:#38bdf8;">Güncelleme: {last_update}</span>
             </div>
         </div>
         """,
@@ -1612,7 +1734,7 @@ def detect_malatya_winter_front(df_hourly: pd.DataFrame, now_dt: datetime, distr
     except Exception:
         return None
 
-_front_alert = detect_malatya_winter_front(df, datetime.now(TR_TZ), st.session_state.selected_district.split(" (")[0])
+_front_alert = detect_malatya_winter_front(df, datetime.now(TR_TZ), active_location_name.split(" (")[0]
 if _front_alert:
     st.warning(_front_alert)
 
@@ -1731,7 +1853,7 @@ with tab_forecast:
     selected_day_name = "Bugün" if selected_dt == today_date else gunler_tr[selected_dt.weekday()]
     st.markdown(
         f"<div style='font-size: 1.02rem; font-weight: 700; color: #f8fafc; margin: 12px 0 6px 0;'>"
-        f"🕒 {selected_day_name} ({selected_dt.strftime('%d %B %Y')}) — {st.session_state.selected_district.split(' (')[0]} Saatlik Hava Akışı</div>",
+        f"🕒 {selected_day_name} ({selected_dt.strftime('%d %B %Y')}) — {active_location_name.split(' (')[0]} Saatlik Hava Akışı</div>",
         unsafe_allow_html=True,
     )
 
