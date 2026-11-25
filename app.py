@@ -1541,8 +1541,22 @@ if app_mode == "🧭 AI Rota & Yolculuk Asistanı":
 
     center_lat = (st.session_state.route_start[0] + st.session_state.route_end[0]) / 2
     center_lon = (st.session_state.route_start[1] + st.session_state.route_end[1]) / 2
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=9, tiles="OpenStreetMap")
-
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=9, tiles=None)
+    folium.TileLayer(
+        tiles="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+        attr="Google",
+        name="🛰️ Google Uydu + Yollar (Hibrit)",
+        overlay=False,
+        control=True,
+    ).add_to(m)
+    folium.TileLayer(
+        tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
+        attr="Google",
+        name="🗺️ Google Yol Haritası",
+        overlay=False,
+        control=True,
+    ).add_to(m)
+    folium.LayerControl(position="topright").add_to(m)
     folium.PolyLine(route_res["route_coords"], color="#38bdf8", weight=5, opacity=0.75, tooltip="Karayolu Güzergâhı").add_to(m)
 
     folium.Marker(
