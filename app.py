@@ -553,7 +553,7 @@ def fetch_live_forecast(lat=LAT_MERKEZ, lon=LON_MERKEZ, location_tag="merkez"):
 def get_malatya_full_7day_forecast(lat=LAT_MERKEZ, lon=LON_MERKEZ):
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={lat}&longitude={LON}&"
+        f"latitude={lat}&longitude={lon}&"
         f"hourly=temperature_2m,dew_point_2m,precipitation_probability,precipitation,cloud_cover,weather_code,cape,wind_speed_10m,wind_gusts_10m,wind_direction_10m&"
         f"daily=sunrise,sunset,temperature_2m_max,temperature_2m_min,precipitation_probability_max&"
         f"timezone=Europe%2FIstanbul&forecast_days=7"
