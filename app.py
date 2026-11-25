@@ -1571,7 +1571,7 @@ st.markdown(
     f'<div class="alert-strip" style="border-left: 4px solid {strip_border};">{strip_msg}</div>',
     unsafe_allow_html=True,
 )
-def detect_malatya_winter_front(df_hourly: pd.DataFrame, now_dt: datetime):
+def detect_malatya_winter_front(df_hourly: pd.DataFrame, now_dt: datetime, district_name: str = "Malatya"):
     try:
         if df_hourly is None or len(df_hourly) < 6:
             return None
