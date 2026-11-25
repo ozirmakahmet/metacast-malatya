@@ -1898,18 +1898,18 @@ with tab_radar_map:
 
     has_active_radar_echo = (current_p > 0.05) or (current_c >= 55.0) or upcoming_p
     if has_active_radar_echo:
-    _yy, _xx = np.mgrid[0:128, 0:128].astype(np.float32)
-    _rad = np.deg2rad(cur_wind_deg + 180.0)
-    _vx = float(np.cos(_rad) * max(cur_wind_spd, 4.0) * 0.18)
-    _vy = float(-np.sin(_rad) * max(cur_wind_spd, 4.0) * 0.18)
-    _intens = float(np.clip(max(current_p * 0.35, (current_c / 100.0) * 0.45), 0.15, 0.95))
-    _beydag = 1.0 + 0.30 * np.exp(-(((_yy / 128.0) - 0.78) ** 2) / 0.025)
-    _frames = np.stack([
-        np.clip(_intens * np.exp(-0.5 * (((_xx - (64.0 + _vx * t)) / 26.0) ** 2 + ((_yy - (64.0 + _vy * t)) / 18.0) ** 2)) * _beydag, 0.0, 1.0)
-        for t in range(-5, 1)
-    ], axis=0).astype(np.float32)
-    _ts_list = [datetime.now(TR_TZ).strftime("%Y%m%d_%H") + f"_{m:02d}" for m in range(0, 60, 10)]
-    archive_live_radar_sequence(_frames, _ts_list)
+        _yy, _xx = np.mgrid[0:128, 0:128].astype(np.float32)
+        _rad = np.deg2rad(cur_wind_deg + 180.0)
+        _vx = float(np.cos(_rad) * max(cur_wind_spd, 4.0) * 0.18)
+        _vy = float(-np.sin(_rad) * max(cur_wind_spd, 4.0) * 0.18)
+        _intens = float(np.clip(max(current_p * 0.35, (current_c / 100.0) * 0.45), 0.15, 0.95))
+        _beydag = 1.0 + 0.30 * np.exp(-(((_yy / 128.0) - 0.78) ** 2) / 0.025)
+        _frames = np.stack([
+            np.clip(_intens * np.exp(-0.5 * (((_xx - (64.0 + _vx * t)) / 26.0) ** 2 + ((_yy - (64.0 + _vy * t)) / 18.0) ** 2)) * _beydag, 0.0, 1.0)
+            for t in range(-5, 1)
+        ], axis=0).astype(np.float32)
+        _ts_list = [datetime.now(TR_TZ).strftime("%Y%m%d_%H") + f"_{m:02d}" for m in range(0, 60, 10)]
+        archive_live_radar_sequence(_frames, _ts_list)
 
     if not has_active_radar_echo:
         st.markdown(
