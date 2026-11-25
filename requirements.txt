@@ -8,3 +8,5 @@ shap>=0.44.0
 joblib>=1.3.0
 onnxruntime
 streamlit-js-eval
+folium
+streamlit-folium
