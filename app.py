@@ -2202,7 +2202,7 @@ else:
             )
             st.caption(f"Koridor: **{dist_profile.split('&')[0].strip()}**")
             _safe_lat = float(locals().get("active_lat", locals().get("lat", 38.3552)))
-        _safe_lon = float(locals().get("active_lon", locals().get("lon", 38.3095)))
+            _safe_lon = float(locals().get("active_lon", locals().get("lon", 38.3095)))
 
         diag = diagnose_forecast_error_malatya(
             _safe_lat,
