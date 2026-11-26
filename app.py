@@ -688,13 +688,14 @@ def calculate_feels_like(temp_c, wind_kmh, rh=50.0):
     return round(temp_c, 1)
 
 
-def calculate_snow_accumulation_cm(temps, precips, hours=24):
+def calculate_snow_accumulation_cm(temps, precips, hours=24, soil_temps=None):
     total_snow_cm = 0.0
     valid_hours = min(len(temps), len(precips), hours)
 
     for i in range(valid_hours):
         t = float(temps[i])
         p = float(precips[i])
+        s_t = float(soil_temps[i]) if (soil_temps is not None and i < len(soil_temps)) else t
 
         if p <= 0.05:
             continue
@@ -712,46 +713,36 @@ def calculate_snow_accumulation_cm(temps, precips, hours=24):
         else:
             slr = 0.0
 
-        snow_depth_cm = (p * slr) / 10.0
+        # Toprak/asfalt sıcaklığı 1°C üzerindeyse örtü tutma verimi düşer
+        ground_retention = 0.5 if s_t > 1.0 else (0.8 if s_t > 0.0 else 1.0)
+        snow_depth_cm = ((p * slr) / 10.0) * ground_retention
         total_snow_cm += snow_depth_cm
 
     return round(total_snow_cm, 1), valid_hours
 
 
 def transfer_erhac_to_merkez(erhac_temp, erhac_gust, erhac_precip, wind_dir, cloud_cover, hour):
-    is_night = (hour >= 20) or (hour <= 7)
-    inversion = is_night and (cloud_cover <= 35.0) and (erhac_gust <= 15.0)
-    delta_t = -1.2 if inversion else -0.6
+    # Erhaç (862m) -> Merkez (950m) standart kuru adyabatik/çevre lapse-rate farkı (~0.6°C / 100m)
+    delta_t = -0.55
     merkez_temp = round(erhac_temp + delta_t, 1) if erhac_temp is not None else None
-    blk = float(calculate_gaussian_blockage(wind_dir))
-    wind_drag = (1.0 - 0.35 * blk) if (blk >= 0.50 and erhac_gust >= 25.0) else 0.95
-    merkez_gust = round(erhac_gust * wind_drag, 1)
-    precip_mult = 1.18 if erhac_precip > 0.05 else 1.0
-    merkez_precip = round(erhac_precip * precip_mult, 1)
+    merkez_gust = round(erhac_gust, 1) if erhac_gust is not None else None
+    merkez_precip = round(erhac_precip, 1) if erhac_precip is not None else None
     return merkez_temp, merkez_gust, merkez_precip
 
 
 def apply_merkez_local_physics(raw_temp, raw_precip, raw_gust, wind_dir, cloud_cover, dew_point, hour):
-    """Ham model tahminini Malatya çanağı yerel fiziğine (enverziyon, yağmur gölgesi, virga, dağ sürtünmesi) uyarlar."""
-    blk = float(calculate_gaussian_blockage(wind_dir))
-
-    # 1. Gece Radyasyonel Soğuma (Çanak Enverziyonu)
+    """Ham model tahminini yalnızca fiziksel olarak doğrulanmış çiy noktası (virga) ve gece radyasyonel soğumasına göre işler."""
     is_night = (hour >= 20) or (hour <= 7)
-    rad_cooling = 1.4 * (1.0 - cloud_cover / 100.0) * np.exp(-0.05 * raw_gust) if (is_night and cloud_cover <= 35.0 and raw_gust <= 15.0) else 0.0
+    rad_cooling = 1.0 * (1.0 - cloud_cover / 100.0) * np.exp(-0.05 * raw_gust) if (is_night and cloud_cover <= 35.0 and raw_gust <= 15.0) else 0.0
     adj_temp = round(float(raw_temp - rad_cooling), 1)
+    adj_gust = round(float(raw_gust), 1)
 
-    # 2. Beydağları Rüzgâr Sönümlemesi
-    drag_k = (1.0 - 0.30 * blk) if (blk >= 0.50 and raw_gust >= 25.0) else 1.0
-    adj_gust = round(float(raw_gust * drag_k), 1)
-
-    # 3. Virga Buharlaşma ve Beydağları Yağmur Gölgesi
     if raw_precip <= 0.02:
         adj_precip = 0.0
     else:
         dp_dep = max(0.0, adj_temp - float(dew_point))
         evap_factor = float(np.exp(-0.12 * dp_dep))
-        rain_shadow = (1.0 - 0.32 * blk) if blk >= 0.55 else 1.0
-        adj_precip = round(float(raw_precip * evap_factor * rain_shadow), 1)
+        adj_precip = round(float(raw_precip * evap_factor), 1)
 
     return adj_temp, adj_precip, adj_gust
 
@@ -959,7 +950,24 @@ def fetch_live_forecast(lat=LAT_MERKEZ, lon=LON_MERKEZ, location_tag="merkez"):
     params = {
         "latitude": lat,
         "longitude": lon,
-        "hourly": ["wind_gusts_10m", "wind_speed_10m", "wind_direction_10m", "surface_pressure", "temperature_2m", "relative_humidity_2m", "dew_point_2m", "precipitation", "cloud_cover", "cape", "weather_code"],
+        "hourly": [
+            "wind_gusts_10m",
+            "wind_speed_10m",
+            "wind_direction_10m",
+            "surface_pressure",
+            "temperature_2m",
+            "relative_humidity_2m",
+            "dew_point_2m",
+            "wet_bulb_temperature_2m",
+            "soil_temperature_0cm",
+            "freezing_level_height",
+            "temperature_850hPa",
+            "temperature_500hPa",
+            "precipitation",
+            "cloud_cover",
+            "cape",
+            "weather_code",
+        ],
         "models": ["ecmwf_ifs", "gfs_seamless", "icon_seamless"],
         "past_days": 3,
         "forecast_days": 7,
@@ -2107,23 +2115,44 @@ else:
     
     is_radiation_frost_danger = night_min_temp <= 2.0 and night_avg_cloud <= 35.0
     
+    wet_bulb_s = get_clean_series(df, "wet_bulb_temperature_2m_ecmwf_ifs", 10.0, fallback_series=(temp - 1.5))
+    t850_s = get_clean_series(df, "temperature_850hPa_ecmwf_ifs", 5.0, fallback_series=(temp - 4.0))
+    frz_level_s = get_clean_series(df, "freezing_level_height_ecmwf_ifs", 2000.0, fallback_series=pd.Series(2000.0, index=df.index))
+    soil_t_s = get_clean_series(df, "soil_temperature_0cm_ecmwf_ifs", 10.0, fallback_series=temp)
+
     precip_types = []
     precip_colors = []
-    for t_val, p_val, g_val, c_val in zip(temp.values, precip.values, gust_mean.values, cape_series.values):
+    for t_val, wb_val, t850_val, frz_val, soil_val, p_val, g_val, c_val in zip(
+        temp.values,
+        wet_bulb_s.values,
+        t850_s.values,
+        frz_level_s.values,
+        soil_t_s.values,
+        precip.values,
+        gust_mean.values,
+        cape_series.values,
+    ):
         if p_val <= 0.05:
             precip_types.append("Yağış Yok")
             precip_colors.append("rgba(0,0,0,0)")
-        elif t_val <= 1.5:
-            precip_types.append("❄️ Kar / Sulu Kar")
+        elif (wb_val <= 0.5) or (t850_val <= -5.0 and frz_val <= (dist_elev + 250)):
+            if soil_val <= 0.5:
+                precip_types.append("❄️ Kar (Örtü Yapıcı)")
+            else:
+                precip_types.append("🌨️ Kar / Zemin Islak")
             precip_colors.append("#90caf9")
+        elif wb_val <= 1.8 and t850_val <= -3.0:
+            precip_types.append("🌨️ Karla Karışık Yağmur")
+            precip_colors.append("#64b5f6")
         elif c_val >= 900.0 or (t_val >= 22.0 and p_val >= 2.0 and g_val >= 35.0):
             precip_types.append("⚡ Dolu / Süper Hücre")
             precip_colors.append("#e91e63")
         else:
             precip_types.append("💧 Sıvı Yağmur")
             precip_colors.append("#0288d1")
-    
+
     df["precip_type"] = pd.Series(precip_types, index=df.index)
+    is_snow_phase = df["precip_type"].str.contains("Kar", na=False).astype(int)
     is_snow_phase = (df["precip_type"] == "❄️ Kar / Sulu Kar").astype(int)
     hail_potential = (df["precip_type"] == "⚡ Dolu / Süper Hücre").astype(int)
     
