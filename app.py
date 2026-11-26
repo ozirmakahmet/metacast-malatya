@@ -403,6 +403,79 @@ def diagnose_forecast_error_malatya(lat: float, lon: float, model_pred_temp: flo
             "reasons": ["Atmosferik gözlem akışına ulaşılamadığı için hata nedeni şu an belirlenemiyor."],
             "bias_t": 0.0,
         }
+import sqlite3
+
+def init_learning_memory_db():
+    """2020-2026 temel iklim bilgisinin üzerine canlı saha hatalarını ve nedenlerini biriktiren SQLite tablosu."""
+    conn = sqlite3.connect("metacast_learning_memory.db")
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS forecast_error_memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recorded_at TEXT,
+            place_name TEXT,
+            elev REAL,
+            terrain_type TEXT,
+            wind_dir REAL,
+            humidity REAL,
+            cloud_cover REAL,
+            dew_spread REAL,
+            err_temp REAL,
+            err_precip REAL,
+            precip_ratio REAL,
+            mechanism TEXT,
+            explanation TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def save_and_query_learning_memory(
+    place_name: str, elev: float, terrain_type: str,
+    wind_dir: float, humidity: float, cloud_cover: float, dew_spread: float,
+    err_temp: float, err_precip: float, precip_ratio: float,
+    mechanism: str, explanation: str
+):
+    """Tespit edilen sapmayı hafızaya yazar ve benzer atmosfer koşullarındaki geçmiş tecrübeyi getirir."""
+    init_learning_memory_db()
+    conn = sqlite3.connect("metacast_learning_memory.db")
+    cur = conn.cursor()
+
+    # Aynı saatte mükerrer kayıt atmamak için son 1 saatlik kaydı kontrol et
+    hour_prefix = datetime.now(TR_TZ).strftime("%Y-%m-%d %H")
+    cur.execute(
+        "SELECT id FROM forecast_error_memory WHERE recorded_at LIKE ? AND place_name = ?",
+        (f"{hour_prefix}%", place_name)
+    )
+    if not cur.fetchone() and (abs(err_temp) >= 1.5 or abs(err_precip) >= 0.4 or mechanism != "none"):
+        cur.execute("""
+            INSERT INTO forecast_error_memory
+            (recorded_at, place_name, elev, terrain_type, wind_dir, humidity, cloud_cover, dew_spread, err_temp, err_precip, precip_ratio, mechanism, explanation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            datetime.now(TR_TZ).strftime("%Y-%m-%d %H:%M"),
+            place_name, elev, terrain_type, wind_dir, humidity, cloud_cover, dew_spread,
+            err_temp, err_precip, precip_ratio, mechanism, explanation
+        ))
+        conn.commit()
+
+    # Benzer atmosfer koşullarındaki (rüzgâr yönü ±35°, nem ±15%) geçmiş olayları hafızadan sorgula
+    cur.execute("""
+        SELECT COUNT(*), AVG(err_temp), AVG(precip_ratio)
+        FROM forecast_error_memory
+        WHERE ABS(wind_dir - ?) <= 35 AND ABS(humidity - ?) <= 15 AND mechanism != 'none'
+    """, (wind_dir, humidity))
+    row = cur.fetchone()
+    conn.close()
+
+    similar_count = int(row[0] or 0)
+    hist_avg_err_t = round(float(row[1]), 2) if row[1] is not None else 0.0
+    hist_avg_precip_ratio = round(float(row[2]), 2) if row[2] is not None else 1.0
+    return {
+        "similar_count": similar_count,
+        "hist_avg_err_t": hist_avg_err_t,
+        "hist_avg_precip_ratio": hist_avg_precip_ratio,
+    }
 TR_TZ = timezone(timedelta(hours=3))
 today_date = datetime.now(TR_TZ).date()
 RADAR_ARCHIVE_DIR = "data/radar_archive"
@@ -2135,11 +2208,85 @@ else:
             float(dist_precip_now) if "dist_precip_now" in locals() else 0.0,
             float(dist_wind_now) if "dist_wind_now" in locals() else 10.0,
         )
+        ptopo_now = analyze_micro_topography(active_lat, active_lon)
+        mem_stats = save_and_query_learning_memory(
+            place_name=ptopo_now["place_title"],
+            elev=ptopo_now["elev"],
+            terrain_type=ptopo_now["terrain_label"],
+            wind_dir=float(diag.get("obs_wdir", 180.0)),
+            humidity=float(diag.get("obs_rh", 70.0)),
+            cloud_cover=float(diag.get("obs_cloud", 50.0)),
+            dew_spread=float(diag.get("dew_spread", 3.0)),
+            err_temp=float(diag.get("bias_t", 0.0)),
+            err_precip=float(diag.get("err_p", 0.0)),
+            precip_ratio=float(diag.get("precip_factor", 1.0)),
+            mechanism=diag.get("mechanism", "none"),
+            explanation=" | ".join(diag.get("reasons", [])),
+        )
+
+        # Gelecek saatlerin tahminini Malatya coğrafyası + tespit edilen fiziksel nedene göre yeniden hesapla
+        mech = diag.get("mechanism", "none")
+        p_factor = float(diag.get("precip_factor", 1.0))
+        live_bias = float(diag.get("bias_t", 0.0))
+        recalc_notes = []
+
+        if mech == "orographic_shadow" and "precipitation" in df.columns:
+            geo_mult = p_factor if ptopo_now["elev"] < 1350 else max(0.85, p_factor)
+            for step_i in range(1, 5):
+                t_i = cur_idx + step_i
+                if t_i < len(df):
+                    df.iloc[t_i, df.columns.get_loc("precipitation")] = round(float(df.iloc[t_i]["precipitation"]) * geo_mult, 2)
+                    if "snowfall" in df.columns:
+                        df.iloc[t_i, df.columns.get_loc("snowfall")] = round(float(df.iloc[t_i]["snowfall"]) * geo_mult, 2)
+            recalc_notes.append(
+                f"🏔️ **Coğrafi Yeniden Hesaplama:** Beydağı orografik gölgesi sürdüğü için {int(ptopo_now['elev'])} m rakımlı bu noktada sonraki 4 saatin yağış/kar beklentisi **%{int(geo_mult*100)}** oranına revize edildi."
+            )
+        elif mech == "virga_dry_layer" and "precipitation" in df.columns:
+            for step_i in range(1, 3):
+                t_i = cur_idx + step_i
+                if t_i < len(df):
+                    df.iloc[t_i, df.columns.get_loc("precipitation")] = round(float(df.iloc[t_i]["precipitation"]) * 0.25, 2)
+            recalc_notes.append(
+                "🏜️ **Fiziksel Yeniden Hesaplama:** Alt atmosferdeki kuru katman (virga) doygunluğa ulaşana kadar önümüzdeki 2 saatin yağışı %75 azaltıldı."
+            )
+        elif mech == "warm_boundary_melt" and "snowfall" in df.columns:
+            if ptopo_now["elev"] < 1250:
+                for step_i in range(1, 4):
+                    t_i = cur_idx + step_i
+                    if t_i < len(df):
+                        df.iloc[t_i, df.columns.get_loc("snowfall")] = 0.0
+                recalc_notes.append(
+                    f"🌡️ **Kar Sınırı Revizyonu:** {int(ptopo_now['elev'])} m rakımda sınır tabaka sıcaklığı kar tutmasına elverişli olmadığı için sonraki 3 saat kar örtüsü 0 cm olarak güncellendi."
+                )
+
+        if abs(live_bias) >= 1.5 and "temperature_2m" in df.columns:
+            for step_i in range(4):
+                t_i = cur_idx + step_i
+                if t_i < len(df):
+                    w_ar1 = math.exp(-step_i / 2.0)
+                    df.iloc[t_i, df.columns.get_loc("temperature_2m")] = round(
+                        float(df.iloc[t_i]["temperature_2m"]) - (live_bias * w_ar1), 1
+                    )
+            dist_temp_now = round(float(dist_temp_now) - live_bias, 1)
+            recalc_notes.append(
+                f"🔄 **AR(1) Sıcaklık Kalibrasyonu (τ=2s):** {live_bias:+.1f}°C sapmaya göre anlık ve sonraki 3 saatin sıcaklık eğrisi güncellendi (Güncel: {dist_temp_now}°C)."
+            )
+
+        if mem_stats["similar_count"] > 0:
+            recalc_notes.append(
+                f"🧠 **Hafıza Eşleşmesi:** Sistem hafızasında benzer rüzgâr/nem koşullarına ait **{mem_stats['similar_count']} geçmiş olay** bulundu (Ort. sıcaklık sapması: {mem_stats['hist_avg_err_t']:+.1f}°C)."
+            )
+
+        recalc_html = ""
+        if recalc_notes:
+            items_html = "".join(f"<li style='margin-bottom:4px;'>{n}</li>" for n in recalc_notes)
+            recalc_html = f"<div style='margin-top:8px; padding-top:8px; border-top:1px solid rgba(148,163,184,0.25); color:#38bdf8;'><ul style='margin:0; padding-left:18px;'>{items_html}</ul></div>"
+
         diag_color = "#22c55e" if diag["status"] == "accurate" else ("#f59e0b" if diag["status"] == "diagnosed" else "#94a3b8")
         diag_title = (
             "✅ Model Doğrulama: Tahmin Tutarlı"
             if diag["status"] == "accurate"
-            else ("🔬 AI Hata Teşhisi: Sapma Nedeni Belirlendi" if diag["status"] == "diagnosed" else "❓ AI Hata Teşhisi: Kesin Neden Belirlenemedi")
+            else ("🔬 AI Hata Teşhisi & Hafıza Kaydı: Sapma Nedeni Belirlendi" if diag["status"] == "diagnosed" else "❓ AI Hata Teşhisi: Kesin Neden Belirlenemedi")
         )
         reasons_html = "".join(f"<li style='margin-bottom:4px;'>{r}</li>" for r in diag["reasons"])
         st.markdown(
@@ -2148,60 +2295,11 @@ else:
                 <div style="font-weight: 700; font-size: 0.98rem; margin-bottom: 6px;">{diag_title}</div>
                 <div style="color: #cbd5e1; margin-bottom: 8px;">{diag['obs_snapshot']}</div>
                 <ul style="margin: 0; padding-left: 18px; color: #e2e8f0;">{reasons_html}</ul>
+                {recalc_html}
             </div>
             """,
             unsafe_allow_html=True,
         )
-    with cmd_c3:
-        st.metric(
-            label="💨 Günün Pik Rüzgârı",
-            value=f"{peak_gust:.1f} km/s",
-            delta=f"Saat {peak_time} • {wind_dir_name.split()[0]}",
-            delta_color="inverse" if peak_gust >= 50 else "off",
-        )
-        st.caption(f"Model Sapması: ±{gust_std.mean():.1f} km/s")
-    
-    with cmd_c4:
-        st.metric(
-            label="🌡️ Gece En Düşük",
-            value=f"{night_min_temp:.1f}°C",
-            delta="❄️ Don Riski!" if night_min_temp <= 0.0 else f"Saat {night_min_time}",
-            delta_color="inverse" if night_min_temp <= 0.0 else "off",
-        )
-        st.caption(f"Gece Bulutluluk: **%{night_avg_cloud:.0f}**")
-    
-    with cmd_c5:
-        risk_label = "🔴 KRİTİK" if risk_score >= 65 else ("🟡 DİKKAT" if risk_score >= 35 else "🟢 GÜVENLİ")
-        st.metric(
-            label="🛡️ Havza Risk İndeksi",
-            value=f"%{risk_score:.0f}",
-            delta=risk_label,
-            delta_color="inverse" if risk_score >= 65 else "off",
-        )
-        st.caption(f"Tarih: **{date_display}**")
-    
-    # Tek Satırlık Dinamik Zaman Penceresi & Gözlem Özeti
-    if is_radiation_frost_danger:
-        frost_indices = df.index[night_mask & (temp <= 2.0)].tolist()
-        f_start = df["time"].iloc[frost_indices[0]].strftime("%H:00") if frost_indices else "23:00"
-        f_end = (df["time"].iloc[frost_indices[-1]] + pd.Timedelta(hours=1)).strftime("%H:00") if frost_indices else "07:00"
-        strip_msg = f"❄️ <b>Zirai Don Uyarısı:</b> <b>{f_start} – {f_end}</b> saatleri arasında sıcaklık <b>{night_min_temp:.1f}°C</b> seviyesine düşecek. • <b>İstasyon Gözlemi:</b> {', '.join(indep_hazards)}"
-        strip_border = "#ef4444"
-    else:
-        active_indices = df.index[(gust_mean >= 30.0) | (precip >= 0.5)].tolist()
-        if active_indices:
-            s_str = df["time"].iloc[active_indices[0]].strftime("%H:00")
-            e_str = (df["time"].iloc[active_indices[-1]] + pd.Timedelta(hours=1)).strftime("%H:00") if active_indices[-1] < len(df) - 1 else "23:59"
-            strip_msg = f"⏱️ <b>Aktif Hadise Penceresi:</b> <b>{s_str} – {e_str}</b> (Zirve: <b>{peak_time}</b>) • <b>İstasyon Gözlemi:</b> {', '.join(indep_hazards)}"
-            strip_border = "#f59e0b"
-        else:
-            strip_msg = f"🟢 <b>Havza Genel Durumu Sakin:</b> Gün boyunca afet eşiği aşımı beklenmiyor. • <b>İstasyon Gözlemi:</b> {', '.join(indep_hazards)}"
-            strip_border = "#22c55e"
-    
-    st.markdown(
-        f'<div class="alert-strip" style="border-left: 4px solid {strip_border};">{strip_msg}</div>',
-        unsafe_allow_html=True,
-    )
     def detect_malatya_winter_front(df_hourly: pd.DataFrame, now_dt: datetime, district_name: str = "Malatya"):
         try:
             if df_hourly is None or len(df_hourly) < 6:
