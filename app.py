@@ -713,7 +713,6 @@ def calculate_snow_accumulation_cm(temps, precips, hours=24, soil_temps=None):
         else:
             slr = 0.0
 
-        # Toprak/asfalt sıcaklığı 1°C üzerindeyse örtü tutma verimi düşer
         ground_retention = 0.5 if s_t > 1.0 else (0.8 if s_t > 0.0 else 1.0)
         snow_depth_cm = ((p * slr) / 10.0) * ground_retention
         total_snow_cm += snow_depth_cm
@@ -722,18 +721,17 @@ def calculate_snow_accumulation_cm(temps, precips, hours=24, soil_temps=None):
 
 
 def transfer_erhac_to_merkez(erhac_temp, erhac_gust, erhac_precip, wind_dir, cloud_cover, hour):
-    # Erhaç (862m) -> Merkez (950m) standart kuru adyabatik/çevre lapse-rate farkı (~0.6°C / 100m)
-    delta_t = -0.55
-    merkez_temp = round(erhac_temp + delta_t, 1) if erhac_temp is not None else None
+    # Erhaç (862m) -> Merkez (950m) standart çevre sıcaklık gradyanı (-0.65°C / 100m -> ~ -0.55°C)
+    merkez_temp = round(erhac_temp - 0.55, 1) if erhac_temp is not None else None
     merkez_gust = round(erhac_gust, 1) if erhac_gust is not None else None
     merkez_precip = round(erhac_precip, 1) if erhac_precip is not None else None
     return merkez_temp, merkez_gust, merkez_precip
 
 
 def apply_merkez_local_physics(raw_temp, raw_precip, raw_gust, wind_dir, cloud_cover, dew_point, hour):
-    """Ham model tahminini yalnızca fiziksel olarak doğrulanmış çiy noktası (virga) ve gece radyasyonel soğumasına göre işler."""
+    """Ham model tahminini çiy noktası açığı (virga) ve gece açık hava radyasyon kaybına göre işler."""
     is_night = (hour >= 20) or (hour <= 7)
-    rad_cooling = 1.0 * (1.0 - cloud_cover / 100.0) * np.exp(-0.05 * raw_gust) if (is_night and cloud_cover <= 35.0 and raw_gust <= 15.0) else 0.0
+    rad_cooling = (1.0 - cloud_cover / 100.0) * np.exp(-0.05 * raw_gust) if (is_night and cloud_cover <= 35.0 and raw_gust <= 15.0) else 0.0
     adj_temp = round(float(raw_temp - rad_cooling), 1)
     adj_gust = round(float(raw_gust), 1)
 
@@ -954,6 +952,7 @@ def fetch_live_forecast(lat=LAT_MERKEZ, lon=LON_MERKEZ, location_tag="merkez"):
             "wind_gusts_10m",
             "wind_speed_10m",
             "wind_direction_10m",
+            "wind_speed_850hPa",
             "surface_pressure",
             "temperature_2m",
             "relative_humidity_2m",
@@ -965,7 +964,12 @@ def fetch_live_forecast(lat=LAT_MERKEZ, lon=LON_MERKEZ, location_tag="merkez"):
             "temperature_500hPa",
             "precipitation",
             "cloud_cover",
+            "visibility",
+            "shortwave_radiation",
             "cape",
+            "convective_inhibition",
+            "lifted_index",
+            "boundary_layer_height",
             "weather_code",
         ],
         "models": ["ecmwf_ifs", "gfs_seamless", "icon_seamless"],
@@ -2113,28 +2117,60 @@ else:
         night_min_time = df["time"].iloc[int(temp.argmin())].strftime("%H:00")
         night_avg_cloud = float(cloud_cover.mean())
     
-    is_radiation_frost_danger = night_min_temp <= 2.0 and night_avg_cloud <= 35.0
-    
     wet_bulb_s = get_clean_series(df, "wet_bulb_temperature_2m_ecmwf_ifs", 10.0, fallback_series=(temp - 1.5))
     t850_s = get_clean_series(df, "temperature_850hPa_ecmwf_ifs", 5.0, fallback_series=(temp - 4.0))
+    t500_s = get_clean_series(df, "temperature_500hPa_ecmwf_ifs", -18.0, fallback_series=(temp - 22.0))
     frz_level_s = get_clean_series(df, "freezing_level_height_ecmwf_ifs", 2000.0, fallback_series=pd.Series(2000.0, index=df.index))
     soil_t_s = get_clean_series(df, "soil_temperature_0cm_ecmwf_ifs", 10.0, fallback_series=temp)
+    visib_s = get_clean_series(df, "visibility_ecmwf_ifs", 10000.0, fallback_series=pd.Series(10000.0, index=df.index))
+    cin_s = get_clean_series(df, "convective_inhibition_ecmwf_ifs", 50.0, fallback_series=pd.Series(50.0, index=df.index))
+    li_s = get_clean_series(df, "lifted_index_ecmwf_ifs", 2.0, fallback_series=pd.Series(2.0, index=df.index))
+    w850_s = get_clean_series(df, "wind_speed_850hPa_ecmwf_ifs", 20.0, fallback_series=gust_mean)
+    blh_s = get_clean_series(df, "boundary_layer_height_ecmwf_ifs", 500.0, fallback_series=pd.Series(500.0, index=df.index))
 
+    # 1. Zirai Don & Radyasyon Ayazı: Gece açık gökyüzü + zemin/çiy noktası donma eşiği + sığ sınır tabaka (enverziyon)
+    night_soil_min = float(soil_t_s[night_mask].min()) if not night_temps.empty else float(soil_t_s.min())
+    night_dew_min = float(dew_point_series[night_mask].min()) if not night_temps.empty else float(dew_point_series.min())
+    is_radiation_frost_danger = (
+        (night_min_temp <= 1.5 or night_soil_min <= 0.0)
+        and night_avg_cloud <= 35.0
+        and night_dew_min <= 0.5
+    )
+
+    # 2. Saatlik Hadise Sınıflandırması (Kar, Dolu/Oraj, Sis, Kuvvetli Yağmur)
     precip_types = []
     precip_colors = []
-    for t_val, wb_val, t850_val, frz_val, soil_val, p_val, g_val, c_val in zip(
+    for t_val, wb_val, dew_val, t850_val, t500_val, frz_val, soil_val, vis_val, p_val, g_val, c_val, cin_val, li_val in zip(
         temp.values,
         wet_bulb_s.values,
+        dew_point_series.values,
         t850_s.values,
+        t500_s.values,
         frz_level_s.values,
         soil_t_s.values,
+        visib_s.values,
         precip.values,
         gust_mean.values,
         cape_series.values,
+        cin_s.values,
+        li_s.values,
     ):
+        # Konvektif Dolu / Süper Hücre: Yüksek CAPE + düşük CIN + negatif Lifted Index + uygun donma yüksekliği
+        is_convective_hail = (
+            (c_val >= 800.0 and cin_val <= 100.0 and li_val <= -2.0 and p_val >= 0.5)
+            or (t500_val <= -22.0 and c_val >= 600.0 and g_val >= 40.0)
+        )
+
         if p_val <= 0.05:
-            precip_types.append("Yağış Yok")
-            precip_colors.append("rgba(0,0,0,0)")
+            if vis_val <= 1000.0 or ((t_val - dew_val) <= 1.2 and g_val <= 10.0):
+                precip_types.append("🌫️ Yoğun Sis / Pus" if t_val > 0 else "🌫️ Kırağı / Donan Sis")
+                precip_colors.append("#94a3b8")
+            else:
+                precip_types.append("Yağış Yok")
+                precip_colors.append("rgba(0,0,0,0)")
+        elif is_convective_hail:
+            precip_types.append("⚡ Dolu / Süper Hücre")
+            precip_colors.append("#e91e63")
         elif (wb_val <= 0.5) or (t850_val <= -5.0 and frz_val <= (dist_elev + 250)):
             if soil_val <= 0.5:
                 precip_types.append("❄️ Kar (Örtü Yapıcı)")
@@ -2144,17 +2180,16 @@ else:
         elif wb_val <= 1.8 and t850_val <= -3.0:
             precip_types.append("🌨️ Karla Karışık Yağmur")
             precip_colors.append("#64b5f6")
-        elif c_val >= 900.0 or (t_val >= 22.0 and p_val >= 2.0 and g_val >= 35.0):
-            precip_types.append("⚡ Dolu / Süper Hücre")
-            precip_colors.append("#e91e63")
         else:
             precip_types.append("💧 Sıvı Yağmur")
             precip_colors.append("#0288d1")
 
     df["precip_type"] = pd.Series(precip_types, index=df.index)
     is_snow_phase = df["precip_type"].str.contains("Kar", na=False).astype(int)
-    is_snow_phase = (df["precip_type"] == "❄️ Kar / Sulu Kar").astype(int)
     hail_potential = (df["precip_type"] == "⚡ Dolu / Süper Hücre").astype(int)
+
+    # 3. Üst Seviye Rüzgâr Aktarımı (850 hPa Jet + Derin Karışım Tabakası -> Yer Hamlesi Riski)
+    momentum_transfer_risk = ((w850_s >= 55.0) & (blh_s >= 1200.0)).astype(int)
     
     X_input = np.column_stack([
         w_speed_series.values,
@@ -2742,7 +2777,12 @@ else:
         st.plotly_chart(fig_mini, use_container_width=True, config={"displayModeBar": False}, key=f"mini_chart_{selected_dt}")
     
         if day_slice_temps and day_slice_precips:
-            snow_24h_cm, _ = calculate_snow_accumulation_cm(day_slice_temps, day_slice_precips, hours=24)
+            snow_24h_cm, _ = calculate_snow_accumulation_cm(
+                day_slice_temps,
+                day_slice_precips,
+                hours=24,
+                soil_temps=soil_t_s.values,
+            )
             if snow_24h_cm > 0.0:
                 snow_status = (
                     "İnce Beyaz Örtü (Buzlanma Tehlikesi)"
@@ -3162,30 +3202,42 @@ else:
             h_c1.metric("Sıcaklık", f"{sel_temp:.1f}°C", delta=f"Çiy: {sel_dew:.1f}°C")
             h_c2.metric("Pik Hamle", f"{sel_gust:.1f} km/s", delta=f"{sel_gust - sel_speed:+.1f} Hamle")
     
+            sel_wb = interp_val(wet_bulb_s)
+            sel_t850 = interp_val(t850_s)
+            sel_t500 = interp_val(t500_s)
+            sel_frz = interp_val(frz_level_s)
+            sel_soil = interp_val(soil_t_s)
+            sel_vis = interp_val(visib_s)
+            sel_cin = interp_val(cin_s)
+            sel_li = interp_val(li_s)
+            sel_w850 = interp_val(w850_s)
+            sel_blh = interp_val(blh_s)
+
             hazards_summary = []
+            is_sel_hail = (sel_cape >= 800 and sel_cin <= 100 and sel_li <= -2.0 and sel_precip >= 0.5) or (sel_t500 <= -22.0 and sel_cape >= 600 and sel_gust >= 40.0)
+
             if sel_precip > 0.05:
-                if sel_temp <= 1.5:
-                    hazards_summary.append(f"❄️ <strong>Kar / Sulu Kar:</strong> Yağış hızı {sel_precip:.1f} mm/s. Yollarda gizli buzlanma riski.")
-                elif sel_cape >= 900 or (sel_temp >= 22 and sel_gust >= 35):
-                    hazards_summary.append(f"⚡ <strong>Konvektif Dolu:</strong> Termodinamik enerji yüksek ({sel_cape:.0f} J/kg).")
+                if is_sel_hail:
+                    hazards_summary.append(f"⚡ <strong>Konvektif Dolu / Oraj:</strong> CAPE {sel_cape:.0f} J/kg, LI {sel_li:.1f}, 500 hPa {sel_t500:.1f}°C.")
+                elif sel_wb <= 0.5 or (sel_t850 <= -5.0 and sel_frz <= (dist_elev + 250)):
+                    zemin_notu = f"Zemin {sel_soil:.1f}°C (Örtü tutar)" if sel_soil <= 0.5 else f"Zemin {sel_soil:.1f}°C (İlk aşamada ıslak)"
+                    hazards_summary.append(f"❄️ <strong>Kar Yağışı ({sel_precip:.1f} mm/s):</strong> Yaş termometre {sel_wb:.1f}°C, 850 hPa {sel_t850:.1f}°C • {zemin_notu}.")
+                elif sel_wb <= 1.8 and sel_t850 <= -3.0:
+                    hazards_summary.append(f"🌨️ <strong>Karla Karışık Yağmur ({sel_precip:.1f} mm/s):</strong> Donma seviyesi {int(sel_frz)} m.")
                 else:
-                    hazards_summary.append(f"💧 <strong>Sıvı Yağış:</strong> {sel_precip:.1f} mm yağış bekleniyor.")
+                    hazards_summary.append(f"💧 <strong>Sıvı Yağış:</strong> {sel_precip:.1f} mm/s (Donma seviyesi {int(sel_frz)} m).")
             else:
-                hazards_summary.append("☀️ <strong>Yağış Yok:</strong> Zemin kuru.")
-    
-            blockage_sel = float(calculate_gaussian_blockage(sel_wind_deg))
-            if blockage_sel >= 0.70 and sel_gust >= 40.0:
-                hazards_summary.append(f"⛰️ <strong>Beydağları Blokajı:</strong> Rüzgâr ({sel_wind_deg:.0f}°) dağa çarparak sönümleniyor.")
-            elif sel_gust >= 50.0:
-                hazards_summary.append(f"🚨 <strong>Kuvvetli Fırtına:</strong> {sel_gust:.1f} km/s hamle ile çatı uçması riski.")
-    
+                if sel_vis <= 1000.0 or ((sel_temp - sel_dew) <= 1.2 and sel_gust <= 10.0):
+                    hazards_summary.append(f"🌫️ <strong>Yoğun Sis / Görüş Kısıtı:</strong> Görüş ~{int(sel_vis)} m, çiy noktası açığı {sel_temp - sel_dew:.1f}°C.")
+                else:
+                    hazards_summary.append(f"☀️ <strong>Yağış Yok:</strong> Zemin kuru (Toprak: {sel_soil:.1f}°C, Görüş: >{min(10, int(sel_vis/1000))} km).")
+
+            if sel_gust >= 50.0 or (sel_w850 >= 55.0 and sel_blh >= 1200.0):
+                hazards_summary.append(f"🚨 <strong>Kuvvetli Rüzgâr / Türbülans:</strong> Yer hamlesi {sel_gust:.1f} km/s (850 hPa rüzgârı: {sel_w850:.0f} km/s).")
+
             is_sel_night = (current_sel_h >= 21) or (current_sel_h <= 7)
-            if is_sel_night and sel_temp <= 2.0 and sel_cloud <= 35:
-                hazards_summary.append(f"❄️ <strong>Radyasyon Donu:</strong> Gökyüzü açık (%{sel_cloud:.0f} bulut). Zirai don tedbiri alınız.")
-    
-            st.markdown(
-                f"""
-                <div class="benchmark-box" style="margin-top: 8px; padding: 12px; font-size: 0.84rem; line-height: 1.5; color: #e2e8f0;">
+            if is_sel_night and (sel_temp <= 1.5 or sel_soil <= 0.0) and sel_cloud <= 35:
+                hazards_summary.append(f"❄️ <strong>Zirai Don / Kırağı Riski:</strong> Hava {sel_temp:.1f}°C, Zemin {sel_soil:.1f}°C, Bulut %{sel_cloud:.0f}.")
 - {'<br>• '.join(hazards_summary)}
                 </div>
                 """,
