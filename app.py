@@ -3238,7 +3238,11 @@ else:
             is_sel_night = (current_sel_h >= 21) or (current_sel_h <= 7)
             if is_sel_night and (sel_temp <= 1.5 or sel_soil <= 0.0) and sel_cloud <= 35:
                 hazards_summary.append(f"❄️ <strong>Zirai Don / Kırağı Riski:</strong> Hava {sel_temp:.1f}°C, Zemin {sel_soil:.1f}°C, Bulut %{sel_cloud:.0f}.")
-- {'<br>• '.join(hazards_summary)}
+
+            st.markdown(
+                f"""
+                <div class="benchmark-box" style="margin-top: 8px; padding: 12px; font-size: 0.84rem; line-height: 1.5; color: #e2e8f0;">
+                    • {'<br>• '.join(hazards_summary)}
                 </div>
                 """,
                 unsafe_allow_html=True,
