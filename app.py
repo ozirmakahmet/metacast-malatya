@@ -309,7 +309,100 @@ def analyze_route_weather_4d(start_lat: float, start_lon: float, end_lat: float,
         "total_dur_min": int(total_dur_min),
         "segments": segments,
     }
+@st.cache_data(ttl=900)
+def diagnose_forecast_error_malatya(lat: float, lon: float, model_pred_temp: float, model_pred_precip: float, model_pred_wind: float):
+    """
+    Son saatlerin gerçekleşen atmosfer verilerini (bulut örtüsü, nem, rüzgâr yönü/hızı, basınç, yağış)
+    inceleyerek modelin neden yanıldığını fiziksel gerekçelerle açıklar; açıklayamazsa açıkça belirtir.
+    """
+    try:
+        url = (
+            f"https://api.open-meteo.com/v1/forecast?latitude={lat:.5f}&longitude={lon:.5f}"
+            f"&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,cloud_cover,precipitation,wind_speed_10m,wind_direction_10m,surface_pressure"
+            f"&past_hours=6&forecast_hours=2&timezone=Europe%2FIstanbul"
+        )
+        res = requests.get(url, timeout=8).json()
+        hourly = res.get("hourly", {})
+        times = hourly.get("time", [])
+        if len(times) < 3:
+            return {"status": "unknown", "summary": "Gerçekleşen saatlik gözlem verisi henüz yayınlanmadığı için hata nedeni analiz edilemedi."}
 
+        # En son tamamlanan saati (indeks -3) referans al
+        idx = len(times) - 3
+        obs_time = times[idx][-5:]
+        obs_t = float(hourly["temperature_2m"][idx])
+        obs_rh = float(hourly["relative_humidity_2m"][idx])
+        obs_dew = float(hourly["dew_point_2m"][idx])
+        obs_cloud = float(hourly["cloud_cover"][idx])
+        obs_precip = float(hourly["precipitation"][idx])
+        obs_wind = float(hourly["wind_speed_10m"][idx])
+        obs_wdir = float(hourly["wind_direction_10m"][idx])
+
+        err_t = round(model_pred_temp - obs_t, 1)
+        err_p = round(model_pred_precip - obs_precip, 1)
+        err_w = round(model_pred_wind - obs_wind, 1)
+
+        sky_desc = "kapalı/çok bulutlu" if obs_cloud >= 70 else ("parçalı bulutlu" if obs_cloud >= 30 else "açık/bulutsuz")
+        reasons = []
+
+        # 1. Sıcaklık hatası analizi
+        if abs(err_t) >= 1.5:
+            if err_t < 0 and obs_cloud >= 65:
+                reasons.append(f"O saatte gökyüzü **{sky_desc} (%{int(obs_cloud)})** olduğu için yerden ısı kaçışı (radyasyon soğuması) engellendi; hava modelin beklediğinden {abs(err_t)}°C daha sıcak kaldı.")
+            elif err_t > 0 and obs_cloud <= 25:
+                reasons.append(f"O saatte gökyüzü **{sky_desc} (%{int(obs_cloud)})** seyrettiği için açık gökyüzü ayazı oluştu ve sıcaklık model tahmininden {abs(err_t)}°C daha fazla düştü.")
+            elif err_t < 0 and obs_wind >= 18.0:
+                reasons.append(f"Rüzgârın **{int(obs_wind)} km/s** hıza çıkması Malatya ovasındaki soğuk hava tabakasını (inversiyon) dağıttı; dikey karışım havayı {abs(err_t)}°C ısıttı.")
+            elif abs(obs_t - obs_dew) <= 2.0 and obs_rh >= 82:
+                reasons.append(f"Bağıl nemin **%{int(obs_rh)}** seviyesine çıkması ve çiy noktası kapanması (pus/sis) sıcaklık değişimini frenledi.")
+
+        # 2. Yağış hatası analizi
+        if abs(err_p) >= 0.5:
+            if err_p > 0 and obs_precip == 0:
+                if 135 <= obs_wdir <= 225:
+                    reasons.append(f"Rüzgârın güneyli (**{int(obs_wdir)}°**) esmesi nedeniyle Beydağı/Toros sırası nemi tuttu (**orografik yağış gölgesi**) ve merkezde yağış yere düşmedi.")
+                elif obs_rh < 65:
+                    reasons.append(f"Bulutluluk %{int(obs_cloud)} olmasına rağmen alt atmosfer kuru kaldığı (**nem %{int(obs_rh)}**) için yağış yere inmeden buharlaştı (virga).")
+            elif err_p < 0 and obs_precip > 0:
+                reasons.append(f"Yerel konvektif kütle ve yüksek nem (**%{int(obs_rh)}**) küresel modelin çözünürlüğünden daha dar alanda ani yağış ({obs_precip} mm) üretti.")
+
+        # 3. Rüzgâr hatası analizi
+        if abs(err_w) >= 12.0:
+            reasons.append(f"Beydağı-vadi kanal etkisi nedeniyle rüzgâr hızı model öngörüsünden {abs(err_w)} km/s farklı ({int(obs_wind)} km/s) gerçekleşti.")
+
+        obs_snapshot = f"🕒 **{obs_time} Gerçekleşen Durum:** Sıcaklık **{obs_t}°C**, Gökyüzü **{sky_desc} (%{int(obs_cloud)})**, Nem **%{int(obs_rh)}**, Rüzgâr **{int(obs_wind)} km/s**, Yağış **{obs_precip} mm**."
+
+        if abs(err_t) < 1.5 and abs(err_p) < 0.5 and abs(err_w) < 12.0:
+            return {
+                "status": "accurate",
+                "obs_snapshot": obs_snapshot,
+                "reasons": ["Model tahmini gerçekleşen atmosfer koşullarıyla tutarlı seyretti (belirgin bir sapma yok)."],
+                "bias_t": err_t,
+            }
+
+        if reasons:
+            return {
+                "status": "diagnosed",
+                "obs_snapshot": obs_snapshot,
+                "reasons": reasons,
+                "bias_t": err_t,
+            }
+        else:
+            return {
+                "status": "unknown",
+                "obs_snapshot": obs_snapshot,
+                "reasons": [
+                    f"Model ile gerçekleşen arasında **{err_t:+.1f}°C** sıcaklık farkı oluştu ancak o saatteki bulut örtüsü (%{int(obs_cloud)}), nem (%{int(obs_rh)}) ve rüzgâr ({int(obs_wind)} km/s) olağan seyrindeydi. **Bu sapmanın kesin fiziksel nedeni mevcut yer verileriyle belirlenemedi** (cephe geçişi zamanlama kayması veya mikro-ölçekli yerel etki olabilir)."
+                ],
+                "bias_t": err_t,
+            }
+    except Exception:
+        return {
+            "status": "unknown",
+            "obs_snapshot": "Gözlem verisine erişilemedi.",
+            "reasons": ["Atmosferik gözlem akışına ulaşılamadığı için hata nedeni şu an belirlenemiyor."],
+            "bias_t": 0.0,
+        }
 TR_TZ = timezone(timedelta(hours=3))
 today_date = datetime.now(TR_TZ).date()
 RADAR_ARCHIVE_DIR = "data/radar_archive"
@@ -2035,6 +2128,30 @@ else:
                 delta_color="off",
             )
             st.caption(f"Koridor: **{dist_profile.split('&')[0].strip()}**")
+            diag = diagnose_forecast_error_malatya(
+            active_lat,
+            active_lon,
+            float(dist_temp_now),
+            float(dist_precip_now) if "dist_precip_now" in locals() else 0.0,
+            float(dist_wind_now) if "dist_wind_now" in locals() else 10.0,
+        )
+        diag_color = "#22c55e" if diag["status"] == "accurate" else ("#f59e0b" if diag["status"] == "diagnosed" else "#94a3b8")
+        diag_title = (
+            "✅ Model Doğrulama: Tahmin Tutarlı"
+            if diag["status"] == "accurate"
+            else ("🔬 AI Hata Teşhisi: Sapma Nedeni Belirlendi" if diag["status"] == "diagnosed" else "❓ AI Hata Teşhisi: Kesin Neden Belirlenemedi")
+        )
+        reasons_html = "".join(f"<li style='margin-bottom:4px;'>{r}</li>" for r in diag["reasons"])
+        st.markdown(
+            f"""
+            <div style="background: rgba(15, 23, 42, 0.85); border-left: 4px solid {diag_color}; border-radius: 10px; padding: 14px 18px; margin: 12px 0; color: #f8fafc; font-size: 0.9rem;">
+                <div style="font-weight: 700; font-size: 0.98rem; margin-bottom: 6px;">{diag_title}</div>
+                <div style="color: #cbd5e1; margin-bottom: 8px;">{diag['obs_snapshot']}</div>
+                <ul style="margin: 0; padding-left: 18px; color: #e2e8f0;">{reasons_html}</ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     with cmd_c3:
         st.metric(
             label="💨 Günün Pik Rüzgârı",
