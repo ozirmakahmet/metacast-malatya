@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import sqlite3
@@ -436,83 +437,6 @@ def diagnose_forecast_error_malatya(lat: float, lon: float, model_pred_temp: flo
             "obs_rh": 70.0,
             "obs_cloud": 50.0,
             "dew_spread": 3.0,
-        }
-
-        # En son tamamlanan saati (indeks -3) referans al
-        idx = len(times) - 3
-        obs_time = times[idx][-5:]
-        obs_t = float(hourly["temperature_2m"][idx])
-        obs_rh = float(hourly["relative_humidity_2m"][idx])
-        obs_dew = float(hourly["dew_point_2m"][idx])
-        obs_cloud = float(hourly["cloud_cover"][idx])
-        obs_precip = float(hourly["precipitation"][idx])
-        obs_wind = float(hourly["wind_speed_10m"][idx])
-        obs_wdir = float(hourly["wind_direction_10m"][idx])
-
-        err_t = round(model_pred_temp - obs_t, 1)
-        err_p = round(model_pred_precip - obs_precip, 1)
-        err_w = round(model_pred_wind - obs_wind, 1)
-
-        sky_desc = "kapalı/çok bulutlu" if obs_cloud >= 70 else ("parçalı bulutlu" if obs_cloud >= 30 else "açık/bulutsuz")
-        reasons = []
-
-        # 1. Sıcaklık hatası analizi
-        if abs(err_t) >= 1.5:
-            if err_t < 0 and obs_cloud >= 65:
-                reasons.append(f"O saatte gökyüzü **{sky_desc} (%{int(obs_cloud)})** olduğu için yerden ısı kaçışı (radyasyon soğuması) engellendi; hava modelin beklediğinden {abs(err_t)}°C daha sıcak kaldı.")
-            elif err_t > 0 and obs_cloud <= 25:
-                reasons.append(f"O saatte gökyüzü **{sky_desc} (%{int(obs_cloud)})** seyrettiği için açık gökyüzü ayazı oluştu ve sıcaklık model tahmininden {abs(err_t)}°C daha fazla düştü.")
-            elif err_t < 0 and obs_wind >= 18.0:
-                reasons.append(f"Rüzgârın **{int(obs_wind)} km/s** hıza çıkması Malatya ovasındaki soğuk hava tabakasını (inversiyon) dağıttı; dikey karışım havayı {abs(err_t)}°C ısıttı.")
-            elif abs(obs_t - obs_dew) <= 2.0 and obs_rh >= 82:
-                reasons.append(f"Bağıl nemin **%{int(obs_rh)}** seviyesine çıkması ve çiy noktası kapanması (pus/sis) sıcaklık değişimini frenledi.")
-
-        # 2. Yağış hatası analizi
-        if abs(err_p) >= 0.5:
-            if err_p > 0 and obs_precip == 0:
-                if 135 <= obs_wdir <= 225:
-                    reasons.append(f"Rüzgârın güneyli (**{int(obs_wdir)}°**) esmesi nedeniyle Beydağı/Toros sırası nemi tuttu (**orografik yağış gölgesi**) ve merkezde yağış yere düşmedi.")
-                elif obs_rh < 65:
-                    reasons.append(f"Bulutluluk %{int(obs_cloud)} olmasına rağmen alt atmosfer kuru kaldığı (**nem %{int(obs_rh)}**) için yağış yere inmeden buharlaştı (virga).")
-            elif err_p < 0 and obs_precip > 0:
-                reasons.append(f"Yerel konvektif kütle ve yüksek nem (**%{int(obs_rh)}**) küresel modelin çözünürlüğünden daha dar alanda ani yağış ({obs_precip} mm) üretti.")
-
-        # 3. Rüzgâr hatası analizi
-        if abs(err_w) >= 12.0:
-            reasons.append(f"Beydağı-vadi kanal etkisi nedeniyle rüzgâr hızı model öngörüsünden {abs(err_w)} km/s farklı ({int(obs_wind)} km/s) gerçekleşti.")
-
-        obs_snapshot = f"🕒 **{obs_time} Gerçekleşen Durum:** Sıcaklık **{obs_t}°C**, Gökyüzü **{sky_desc} (%{int(obs_cloud)})**, Nem **%{int(obs_rh)}**, Rüzgâr **{int(obs_wind)} km/s**, Yağış **{obs_precip} mm**."
-
-        if abs(err_t) < 1.5 and abs(err_p) < 0.5 and abs(err_w) < 12.0:
-            return {
-                "status": "accurate",
-                "obs_snapshot": obs_snapshot,
-                "reasons": ["Model tahmini gerçekleşen atmosfer koşullarıyla tutarlı seyretti (belirgin bir sapma yok)."],
-                "bias_t": err_t,
-            }
-
-        if reasons:
-            return {
-                "status": "diagnosed",
-                "obs_snapshot": obs_snapshot,
-                "reasons": reasons,
-                "bias_t": err_t,
-            }
-        else:
-            return {
-                "status": "unknown",
-                "obs_snapshot": obs_snapshot,
-                "reasons": [
-                    f"Model ile gerçekleşen arasında **{err_t:+.1f}°C** sıcaklık farkı oluştu ancak o saatteki bulut örtüsü (%{int(obs_cloud)}), nem (%{int(obs_rh)}) ve rüzgâr ({int(obs_wind)} km/s) olağan seyrindeydi. **Bu sapmanın kesin fiziksel nedeni mevcut yer verileriyle belirlenemedi** (cephe geçişi zamanlama kayması veya mikro-ölçekli yerel etki olabilir)."
-                ],
-                "bias_t": err_t,
-            }
-    except Exception:
-        return {
-            "status": "unknown",
-            "obs_snapshot": "Gözlem verisine erişilemedi.",
-            "reasons": ["Atmosferik gözlem akışına ulaşılamadığı için hata nedeni şu an belirlenemiyor."],
-            "bias_t": 0.0,
         }
 import sqlite3
 
@@ -1240,8 +1164,8 @@ if mode == "Model Kıyaslama Arenası":
         <div class="benchmark-box">
             <h5 style="margin: 0 0 6px 0; color: #ffb74d;">🎯 Bilimsel Doğrulama Protokolü</h5>
             <div style="font-size: 0.88rem; line-height: 1.5; color: #eceff1;">
-• <strong>Seçili Hakem:</strong> <code>{ref_label}</code> — {protocol_note}<br>
-• <strong>Kural:</strong> İleri tarihli saatlerde henüz yer ölçümü yapılamayacağından yalnızca model tahminleri sunulur; maç skoru geçmiş ve anlık saatler üzerinden hesaplanır.
+- <strong>Seçili Hakem:</strong> <code>{ref_label}</code> — {protocol_note}<br>
+- <strong>Kural:</strong> İleri tarihli saatlerde henüz yer ölçümü yapılamayacağından yalnızca model tahminleri sunulur; maç skoru geçmiş ve anlık saatler üzerinden hesaplanır.
             </div>
         </div>
         """,
@@ -1622,8 +1546,8 @@ if mode == "Akademik Doğrulama Modu":
     <div class="benchmark-box">
         <h5 style="margin: 0 0 6px 0; color: #90caf9;">🗓️ Yapay Zekâ Nasıl Test Edildi?</h5>
         <div style="font-size: 0.90rem; line-height: 1.5; color: #eceff1;">
-• <strong>Ders Çalıştığı Dönem (Eğitim):</strong> Yapay zekâya <code>01.01.2023 – 31.12.2023</code> (8.760 Saat) tüm hava durumu koşulları öğretildi.<br>
-• <strong>Sınava Girdiği Dönem (Kör Test):</strong> Hiç görmediği <code>01.01.2024 – 31.12.2024</code> (8.784 Saat Kör Test) verileri üzerinden geçmişe dönük tahmin yapması istendi ve Erhaç yer istasyonunun ölçümleriyle karşılaştırıldı.
+- <strong>Ders Çalıştığı Dönem (Eğitim):</strong> Yapay zekâya <code>01.01.2023 – 31.12.2023</code> (8.760 Saat) tüm hava durumu koşulları öğretildi.<br>
+- <strong>Sınava Girdiği Dönem (Kör Test):</strong> Hiç görmediği <code>01.01.2024 – 31.12.2024</code> (8.784 Saat Kör Test) verileri üzerinden geçmişe dönük tahmin yapması istendi ve Erhaç yer istasyonunun ölçümleriyle karşılaştırıldı.
         </div>
     </div>
     """,
@@ -2075,7 +1999,7 @@ else:
         st.markdown(
             f"""
             <div style="padding-top: 2px;">
-                <h2 style="margin: 0; font-size: 1.55rem; color: #f8fafc;">⚡ MetaCast • MetaCast • {active_location_name}</h2>
+                <h2 style="margin: 0; font-size: 1.55rem; color: #f8fafc;">⚡ MetaCast • {active_location_name}</h2>
                 <div style="font-size: 0.84rem; color: #94a3b8; margin-top: 2px;">
                     {active_location_name} ({dist_elev} m • {dist_profile}) Fizik Kısıtlı Karar-Destek Sistemi • <span style="color:#38bdf8;">Güncelleme: {last_update}</span>
                 </div>
@@ -2312,7 +2236,39 @@ else:
                 delta_color="off",
             )
             st.caption(f"Koridor: **{dist_profile.split('&')[0].strip()}**")
-            diag = diagnose_forecast_error_malatya(
+
+    with cmd_c3:
+        st.metric(
+            label="💨 Günlük Pik Hamle",
+            value=f"{peak_gust:.1f} km/s",
+            delta=f"Saat {peak_time} • {wind_dir_name.split(' (')[0]}",
+            delta_color="off",
+        )
+        blk_pct_now = int(round(float(mountain_blockage.iloc[peak_idx]) * 100))
+        st.caption(f"Yön: **{int(live_wind_deg)}°** | Dağ Blokajı: **%{blk_pct_now}**")
+
+    with cmd_c4:
+        day_max_t = float(temp.max())
+        day_min_t = float(temp.min())
+        st.metric(
+            label="🌡️ Günlük Sıcaklık Bandı",
+            value=f"{day_max_t:.1f}° / {day_min_t:.1f}°",
+            delta=f"Gece En Düşük: {night_min_temp:.1f}°C",
+            delta_color="off",
+        )
+        st.caption(f"Ayaz Saati: **{night_min_time}** | Bulut: **%{int(night_avg_cloud)}**")
+
+    with cmd_c5:
+        risk_lbl = "🔴 Kritik" if risk_score >= 65 else ("🟡 Dikkat" if risk_score >= 35 else "🟢 Dengeli")
+        st.metric(
+            label="🛡️ Afet / Don Riski",
+            value=f"%{risk_score:.0f}",
+            delta=risk_lbl,
+            delta_color="off",
+        )
+        st.caption("❄️ Zirai Don Aktif" if is_radiation_frost_danger else "Koridor & Faz Normal")
+
+    diag = diagnose_forecast_error_malatya(
         float(dist_lat),
         float(dist_lon),
         float(mod_temp_now),
@@ -2324,96 +2280,97 @@ else:
         float(dist_lon),
     )
     mem_stats = save_and_query_learning_memory(
-            place_name=ptopo_now["place_title"],
-            elev=ptopo_now["elev"],
-            terrain_type=ptopo_now["terrain_label"],
-            wind_dir=float(diag.get("obs_wdir", 180.0)),
-            humidity=float(diag.get("obs_rh", 70.0)),
-            cloud_cover=float(diag.get("obs_cloud", 50.0)),
-            dew_spread=float(diag.get("dew_spread", 3.0)),
-            err_temp=float(diag.get("bias_t", 0.0)),
-            err_precip=float(diag.get("err_p", 0.0)),
-            precip_ratio=float(diag.get("precip_factor", 1.0)),
-            mechanism=diag.get("mechanism", "none"),
-            explanation=" | ".join(diag.get("reasons", [])),
+        place_name=ptopo_now["place_title"],
+        elev=ptopo_now["elev"],
+        terrain_type=ptopo_now["terrain_label"],
+        wind_dir=float(diag.get("obs_wdir", 180.0)),
+        humidity=float(diag.get("obs_rh", 70.0)),
+        cloud_cover=float(diag.get("obs_cloud", 50.0)),
+        dew_spread=float(diag.get("dew_spread", 3.0)),
+        err_temp=float(diag.get("bias_t", 0.0)),
+        err_precip=float(diag.get("err_p", 0.0)),
+        precip_ratio=float(diag.get("precip_factor", 1.0)),
+        mechanism=diag.get("mechanism", "none"),
+        explanation=" | ".join(diag.get("reasons", [])),
+    )
+
+    # Gelecek saatlerin tahminini Malatya coğrafyası + tespit edilen fiziksel nedene göre yeniden hesapla
+    mech = diag.get("mechanism", "none")
+    p_factor = float(diag.get("precip_factor", 1.0))
+    live_bias = float(diag.get("bias_t", 0.0))
+    recalc_notes = []
+
+    if mech == "orographic_shadow" and "precipitation" in df.columns:
+        geo_mult = p_factor if ptopo_now["elev"] < 1350 else max(0.85, p_factor)
+        for step_i in range(1, 5):
+            t_i = cur_idx + step_i
+            if t_i < len(df):
+                df.iloc[t_i, df.columns.get_loc("precipitation")] = round(float(df.iloc[t_i]["precipitation"]) * geo_mult, 2)
+                if "snowfall" in df.columns:
+                    df.iloc[t_i, df.columns.get_loc("snowfall")] = round(float(df.iloc[t_i]["snowfall"]) * geo_mult, 2)
+        recalc_notes.append(
+            f"🏔️ **Coğrafi Yeniden Hesaplama:** Beydağı orografik gölgesi sürdüğü için {int(ptopo_now['elev'])} m rakımlı bu noktada sonraki 4 saatin yağış/kar beklentisi **%{int(geo_mult*100)}** oranına revize edildi."
         )
-
-        # Gelecek saatlerin tahminini Malatya coğrafyası + tespit edilen fiziksel nedene göre yeniden hesapla
-        mech = diag.get("mechanism", "none")
-        p_factor = float(diag.get("precip_factor", 1.0))
-        live_bias = float(diag.get("bias_t", 0.0))
-        recalc_notes = []
-
-        if mech == "orographic_shadow" and "precipitation" in df.columns:
-            geo_mult = p_factor if ptopo_now["elev"] < 1350 else max(0.85, p_factor)
-            for step_i in range(1, 5):
+    elif mech == "virga_dry_layer" and "precipitation" in df.columns:
+        for step_i in range(1, 3):
+            t_i = cur_idx + step_i
+            if t_i < len(df):
+                df.iloc[t_i, df.columns.get_loc("precipitation")] = round(float(df.iloc[t_i]["precipitation"]) * 0.25, 2)
+        recalc_notes.append(
+            "🏜️ **Fiziksel Yeniden Hesaplama:** Alt atmosferdeki kuru katman (virga) doygunluğa ulaşana kadar önümüzdeki 2 saatin yağışı %75 azaltıldı."
+        )
+    elif mech == "warm_boundary_melt" and "snowfall" in df.columns:
+        if ptopo_now["elev"] < 1250:
+            for step_i in range(1, 4):
                 t_i = cur_idx + step_i
                 if t_i < len(df):
-                    df.iloc[t_i, df.columns.get_loc("precipitation")] = round(float(df.iloc[t_i]["precipitation"]) * geo_mult, 2)
-                    if "snowfall" in df.columns:
-                        df.iloc[t_i, df.columns.get_loc("snowfall")] = round(float(df.iloc[t_i]["snowfall"]) * geo_mult, 2)
+                    df.iloc[t_i, df.columns.get_loc("snowfall")] = 0.0
             recalc_notes.append(
-                f"🏔️ **Coğrafi Yeniden Hesaplama:** Beydağı orografik gölgesi sürdüğü için {int(ptopo_now['elev'])} m rakımlı bu noktada sonraki 4 saatin yağış/kar beklentisi **%{int(geo_mult*100)}** oranına revize edildi."
-            )
-        elif mech == "virga_dry_layer" and "precipitation" in df.columns:
-            for step_i in range(1, 3):
-                t_i = cur_idx + step_i
-                if t_i < len(df):
-                    df.iloc[t_i, df.columns.get_loc("precipitation")] = round(float(df.iloc[t_i]["precipitation"]) * 0.25, 2)
-            recalc_notes.append(
-                "🏜️ **Fiziksel Yeniden Hesaplama:** Alt atmosferdeki kuru katman (virga) doygunluğa ulaşana kadar önümüzdeki 2 saatin yağışı %75 azaltıldı."
-            )
-        elif mech == "warm_boundary_melt" and "snowfall" in df.columns:
-            if ptopo_now["elev"] < 1250:
-                for step_i in range(1, 4):
-                    t_i = cur_idx + step_i
-                    if t_i < len(df):
-                        df.iloc[t_i, df.columns.get_loc("snowfall")] = 0.0
-                recalc_notes.append(
-                    f"🌡️ **Kar Sınırı Revizyonu:** {int(ptopo_now['elev'])} m rakımda sınır tabaka sıcaklığı kar tutmasına elverişli olmadığı için sonraki 3 saat kar örtüsü 0 cm olarak güncellendi."
-                )
-
-        if abs(live_bias) >= 1.5 and "temperature_2m" in df.columns:
-            for step_i in range(4):
-                t_i = cur_idx + step_i
-                if t_i < len(df):
-                    w_ar1 = math.exp(-step_i / 2.0)
-                    df.iloc[t_i, df.columns.get_loc("temperature_2m")] = round(
-                        float(df.iloc[t_i]["temperature_2m"]) - (live_bias * w_ar1), 1
-                    )
-            dist_temp_now = round(float(dist_temp_now) - live_bias, 1)
-            recalc_notes.append(
-                f"🔄 **AR(1) Sıcaklık Kalibrasyonu (τ=2s):** {live_bias:+.1f}°C sapmaya göre anlık ve sonraki 3 saatin sıcaklık eğrisi güncellendi (Güncel: {dist_temp_now}°C)."
+                f"🌡️ **Kar Sınırı Revizyonu:** {int(ptopo_now['elev'])} m rakımda sınır tabaka sıcaklığı kar tutmasına elverişli olmadığı için sonraki 3 saat kar örtüsü 0 cm olarak güncellendi."
             )
 
-        if mem_stats["similar_count"] > 0:
-            recalc_notes.append(
-                f"🧠 **Hafıza Eşleşmesi:** Sistem hafızasında benzer rüzgâr/nem koşullarına ait **{mem_stats['similar_count']} geçmiş olay** bulundu (Ort. sıcaklık sapması: {mem_stats['hist_avg_err_t']:+.1f}°C)."
-            )
-
-        recalc_html = ""
-        if recalc_notes:
-            items_html = "".join(f"<li style='margin-bottom:4px;'>{n}</li>" for n in recalc_notes)
-            recalc_html = f"<div style='margin-top:8px; padding-top:8px; border-top:1px solid rgba(148,163,184,0.25); color:#38bdf8;'><ul style='margin:0; padding-left:18px;'>{items_html}</ul></div>"
-
-        diag_color = "#22c55e" if diag["status"] == "accurate" else ("#f59e0b" if diag["status"] == "diagnosed" else "#94a3b8")
-        diag_title = (
-            "✅ Model Doğrulama: Tahmin Tutarlı"
-            if diag["status"] == "accurate"
-            else ("🔬 AI Hata Teşhisi & Hafıza Kaydı: Sapma Nedeni Belirlendi" if diag["status"] == "diagnosed" else "❓ AI Hata Teşhisi: Kesin Neden Belirlenemedi")
+    if abs(live_bias) >= 1.5:
+        for step_i in range(4):
+            t_i = cur_idx + step_i
+            if t_i < len(df):
+                w_ar1 = math.exp(-step_i / 2.0)
+                temp.iloc[t_i] = round(float(temp.iloc[t_i]) - (live_bias * w_ar1), 1)
+                if "temperature_2m" in df.columns:
+                    df.iloc[t_i, df.columns.get_loc("temperature_2m")] = temp.iloc[t_i]
+        mod_temp_now = float(temp.iloc[cur_idx])
+        recalc_notes.append(
+            f"🔄 **AR(1) Sıcaklık Kalibrasyonu (τ=2s):** {live_bias:+.1f}°C sapmaya göre anlık ve sonraki 3 saatin sıcaklık eğrisi güncellendi (Güncel: {mod_temp_now}°C)."
         )
-        reasons_html = "".join(f"<li style='margin-bottom:4px;'>{r}</li>" for r in diag["reasons"])
-        st.markdown(
-            f"""
-            <div style="background: rgba(15, 23, 42, 0.85); border-left: 4px solid {diag_color}; border-radius: 10px; padding: 14px 18px; margin: 12px 0; color: #f8fafc; font-size: 0.9rem;">
-                <div style="font-weight: 700; font-size: 0.98rem; margin-bottom: 6px;">{diag_title}</div>
-                <div style="color: #cbd5e1; margin-bottom: 8px;">{diag['obs_snapshot']}</div>
-                <ul style="margin: 0; padding-left: 18px; color: #e2e8f0;">{reasons_html}</ul>
-                {recalc_html}
-            </div>
-            """,
-            unsafe_allow_html=True,
+
+    if mem_stats["similar_count"] > 0:
+        recalc_notes.append(
+            f"🧠 **Hafıza Eşleşmesi:** Sistem hafızasında benzer rüzgâr/nem koşullarına ait **{mem_stats['similar_count']} geçmiş olay** bulundu (Ort. sıcaklık sapması: {mem_stats['hist_avg_err_t']:+.1f}°C)."
         )
+
+    recalc_html = ""
+    if recalc_notes:
+        items_html = "".join(f"<li style='margin-bottom:4px;'>{n}</li>" for n in recalc_notes)
+        recalc_html = f"<div style='margin-top:8px; padding-top:8px; border-top:1px solid rgba(148,163,184,0.25); color:#38bdf8;'><ul style='margin:0; padding-left:18px;'>{items_html}</ul></div>"
+
+    diag_color = "#22c55e" if diag["status"] == "accurate" else ("#f59e0b" if diag["status"] == "diagnosed" else "#94a3b8")
+    diag_title = (
+        "✅ Model Doğrulama: Tahmin Tutarlı"
+        if diag["status"] == "accurate"
+        else ("🔬 AI Hata Teşhisi & Hafıza Kaydı: Sapma Nedeni Belirlendi" if diag["status"] == "diagnosed" else "❓ AI Hata Teşhisi: Kesin Neden Belirlenemedi")
+    )
+    reasons_html = "".join(f"<li style='margin-bottom:4px;'>{r}</li>" for r in diag["reasons"])
+    st.markdown(
+        f"""
+        <div style="background: rgba(15, 23, 42, 0.85); border-left: 4px solid {diag_color}; border-radius: 10px; padding: 14px 18px; margin: 12px 0; color: #f8fafc; font-size: 0.9rem;">
+            <div style="font-weight: 700; font-size: 0.98rem; margin-bottom: 6px;">{diag_title}</div>
+            <div style="color: #cbd5e1; margin-bottom: 8px;">{diag['obs_snapshot']}</div>
+            <ul style="margin: 0; padding-left: 18px; color: #e2e8f0;">{reasons_html}</ul>
+            {recalc_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     def detect_malatya_winter_front(df_hourly: pd.DataFrame, now_dt: datetime, district_name: str = "Malatya"):
         try:
             if df_hourly is None or len(df_hourly) < 6:
@@ -2871,8 +2828,8 @@ else:
                         <span style="background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">Durum: Sakin / Açık</span>
                     </div>
                     <div style="font-size: 0.86rem; line-height: 1.5; color: #cbd5e1;">
-    • <strong>Yansıtırlık Eşiği:</strong> Malatya havzası ve çevre menzilde (0-60 km) 15 dBZ üzeri konvektif yağış hücresi bulunmamaktadır.<br>
-    • <strong>Nowcast Durumu:</strong> Atmosferik sütun kararlı. Kütle oluşumu algılandığında orografik yörünge motoru otomatik devreye girecektir.
+- <strong>Yansıtırlık Eşiği:</strong> Malatya havzası ve çevre menzilde (0-60 km) 15 dBZ üzeri konvektif yağış hücresi bulunmamaktadır.<br>
+- <strong>Nowcast Durumu:</strong> Atmosferik sütun kararlı. Kütle oluşumu algılandığında orografik yörünge motoru otomatik devreye girecektir.
                     </div>
                 </div>
                 """,
@@ -2952,8 +2909,8 @@ else:
                         <span style="background: {traj_color}; color: #000; font-weight: 800; font-size: 0.76rem; padding: 2px 8px; border-radius: 4px;">Hedef Olasılığı: {traj_prob}</span>
                     </div>
                     <div style="font-size: 0.86rem; line-height: 1.5; color: #cbd5e1;">
-    • <strong>Öngörülen Rota:</strong> {traj_target}<br>
-    • <strong>Mekanizma:</strong> {traj_desc}
+- <strong>Öngörülen Rota:</strong> {traj_target}<br>
+- <strong>Mekanizma:</strong> {traj_desc}
                     </div>
                 </div>
                 """,
@@ -3200,7 +3157,7 @@ else:
             st.markdown(
                 f"""
                 <div class="benchmark-box" style="margin-top: 8px; padding: 12px; font-size: 0.84rem; line-height: 1.5; color: #e2e8f0;">
-    • {'<br>• '.join(hazards_summary)}
+- {'<br>• '.join(hazards_summary)}
                 </div>
                 """,
                 unsafe_allow_html=True,
