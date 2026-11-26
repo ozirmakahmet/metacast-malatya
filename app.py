@@ -2201,17 +2201,17 @@ else:
                 delta_color="off",
             )
             st.caption(f"Koridor: **{dist_profile.split('&')[0].strip()}**")
-            _safe_lat = float(locals().get("active_lat", locals().get("lat", 38.3552)))
-            _safe_lon = float(locals().get("active_lon", locals().get("lon", 38.3095)))
-
-        diag = diagnose_forecast_error_malatya(
-            _safe_lat,
-            _safe_lon,
+            diag = diagnose_forecast_error_malatya(
+            float(locals().get("active_lat", locals().get("lat", 38.3552))),
+            float(locals().get("active_lon", locals().get("lon", 38.3095))),
             float(dist_temp_now),
             float(dist_precip_now) if "dist_precip_now" in locals() else 0.0,
             float(dist_wind_now) if "dist_wind_now" in locals() else 10.0,
         )
-        ptopo_now = analyze_micro_topography(_safe_lat, _safe_lon)
+        ptopo_now = analyze_micro_topography(
+            float(locals().get("active_lat", locals().get("lat", 38.3552))),
+            float(locals().get("active_lon", locals().get("lon", 38.3095))),
+        )
         mem_stats = save_and_query_learning_memory(
             place_name=ptopo_now["place_title"],
             elev=ptopo_now["elev"],
