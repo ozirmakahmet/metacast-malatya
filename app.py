@@ -312,20 +312,131 @@ def analyze_route_weather_4d(start_lat: float, start_lon: float, end_lat: float,
 @st.cache_data(ttl=900)
 def diagnose_forecast_error_malatya(lat: float, lon: float, model_pred_temp: float, model_pred_precip: float, model_pred_wind: float):
     """
-    Son saatlerin gerçekleşen atmosfer verilerini (bulut örtüsü, nem, rüzgâr yönü/hızı, basınç, yağış)
-    inceleyerek modelin neden yanıldığını fiziksel gerekçelerle açıklar; açıklayamazsa açıkça belirtir.
+    Son saatlerin gerçekleşen atmosfer verilerini ve Malatya'nın coğrafi yer şekillerini
+    (Beydağı orografik gölgesi, Karakaya havzası nemi, rakım kar sınırı) analiz ederek
+    sapmanın fiziksel nedenini ve gelecek saatlere etkisini hesaplar.
     """
     try:
+        topo = analyze_micro_topography(lat, lon)
+        elev = topo["elev"]
+
         url = (
             f"https://api.open-meteo.com/v1/forecast?latitude={lat:.5f}&longitude={lon:.5f}"
-            f"&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,cloud_cover,precipitation,wind_speed_10m,wind_direction_10m,surface_pressure"
+            f"&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,cloud_cover,precipitation,snowfall,wind_speed_10m,wind_direction_10m"
             f"&past_hours=6&forecast_hours=2&timezone=Europe%2FIstanbul"
         )
         res = requests.get(url, timeout=8).json()
         hourly = res.get("hourly", {})
         times = hourly.get("time", [])
         if len(times) < 3:
-            return {"status": "unknown", "summary": "Gerçekleşen saatlik gözlem verisi henüz yayınlanmadığı için hata nedeni analiz edilemedi."}
+            return {
+                "status": "unknown",
+                "obs_snapshot": "Gözlem verisi bekleniyor.",
+                "reasons": ["Gerçekleşen saatlik gözlem verisi henüz yayınlanmadığı için hata nedeni analiz edilemedi."],
+                "bias_t": 0.0,
+                "err_p": 0.0,
+                "precip_factor": 1.0,
+                "mechanism": "none",
+                "obs_wdir": 180.0,
+                "obs_rh": 70.0,
+                "obs_cloud": 50.0,
+                "dew_spread": 3.0,
+            }
+
+        idx = len(times) - 3
+        obs_time = times[idx][-5:]
+        obs_t = float(hourly["temperature_2m"][idx])
+        obs_rh = float(hourly["relative_humidity_2m"][idx])
+        obs_dew = float(hourly["dew_point_2m"][idx])
+        obs_cloud = float(hourly["cloud_cover"][idx])
+        obs_precip = float(hourly["precipitation"][idx])
+        obs_snow = float(hourly.get("snowfall", [0.0] * len(times))[idx] or 0.0)
+        obs_wind = float(hourly["wind_speed_10m"][idx])
+        obs_wdir = float(hourly["wind_direction_10m"][idx])
+        dew_spread = round(obs_t - obs_dew, 1)
+
+        err_t = round(model_pred_temp - obs_t, 1)
+        err_p = round(model_pred_precip - obs_precip, 1)
+        err_w = round(model_pred_wind - obs_wind, 1)
+
+        sky_desc = "kapalı/çok bulutlu" if obs_cloud >= 70 else ("parçalı bulutlu" if obs_cloud >= 30 else "açık/bulutsuz")
+        reasons = []
+        precip_factor = 1.0
+        mechanism = "none"
+
+        if err_p >= 0.4 or (model_pred_precip >= 0.5 and obs_precip < model_pred_precip * 0.6):
+            if 130 <= obs_wdir <= 230 and elev < 1350:
+                precip_factor = round(max(0.25, obs_precip / max(model_pred_precip, 0.5)), 2)
+                mechanism = "orographic_shadow"
+                reasons.append(
+                    f"**Beydağı / Güneydoğu Toroslar Orografik Yağış Gölgesi (Föhn):** Rüzgâr güneyli (**{int(obs_wdir)}°**) estiği için nemli kütle dağ silsilesinin güney yamacında takıldı; "
+                    f"{int(elev)} m rakımlı bu bölgede yağış beklenenin **%{int(precip_factor*100)}** kadarına ({obs_precip} mm) düştü."
+                )
+            elif dew_spread >= 4.5 or obs_rh < 68:
+                precip_factor = 0.20
+                mechanism = "virga_dry_layer"
+                reasons.append(
+                    f"**Kuru Alt Katman Buharlaşması (Virga):** Gökyüzü %{int(obs_cloud)} bulutlu olmasına rağmen yer seviyesinde çiy noktası açığı **{dew_spread}°C** (nem **%{int(obs_rh)}**) kaldığı için yağış yere ulaşamadan havada buharlaştı."
+                )
+            elif obs_t > 0.8 and obs_precip > 0 and obs_snow == 0:
+                mechanism = "warm_boundary_melt"
+                reasons.append(
+                    f"**Kar Sınırı Yükselmesi:** {int(elev)} m rakımda yer sıcaklığı **{obs_t}°C** seviyesinde kaldığı için beklenen kar yağışı yağmur/sulu kara dönüştü ve örtü oluşturmadı."
+                )
+
+        if abs(err_t) >= 1.5:
+            if err_t < 0 and obs_cloud >= 65:
+                reasons.append(f"**Bulut Örtüsü Isı Freni:** Gökyüzü **{sky_desc} (%{int(obs_cloud)})** olduğu için yerden radyasyonla ısı kaçışı engellendi; sıcaklık öngörülenden {abs(err_t)}°C yüksek kaldı.")
+            elif err_t > 0 and obs_cloud <= 25:
+                reasons.append(f"**Açık Gökyüzü Ayazı:** Bulutsuz (**%{int(obs_cloud)}**) atmosfer nedeniyle ısı hızla uzaya kaçtı ve {topo['terrain_label']} yapısında sıcaklık {abs(err_t)}°C daha fazla düştü.")
+            elif err_t < 0 and obs_wind >= 18.0:
+                reasons.append(f"**İnversiyon Kırılması:** Rüzgârın **{int(obs_wind)} km/s** hıza çıkması ova tabanındaki soğuk hava gölünü dağıtarak sıcaklığı {abs(err_t)}°C yükseltti.")
+
+        if abs(err_w) >= 12.0:
+            reasons.append(f"**Topografik Kanal Etkisi:** Arazi eğimi ve geçit yönelimi nedeniyle rüzgâr hızı model öngörüsünden {abs(err_w)} km/s farklı ({int(obs_wind)} km/s) gerçekleşti.")
+
+        obs_snapshot = (
+            f"🕒 **{obs_time} Gerçekleşen ({int(elev)} m - {topo['terrain_label']}):** "
+            f"Sıcaklık **{obs_t}°C** (Çiy Noktası {obs_dew}°C), Gökyüzü **{sky_desc} (%{int(obs_cloud)})**, "
+            f"Nem **%{int(obs_rh)}**, Rüzgâr **{int(obs_wind)} km/s ({int(obs_wdir)}°)**, Yağış **{obs_precip} mm**."
+        )
+
+        status_val = "accurate" if (abs(err_t) < 1.5 and abs(err_p) < 0.4 and abs(err_w) < 12.0) else ("diagnosed" if reasons else "unknown")
+        if status_val == "accurate":
+            reasons = ["Model tahmini gerçekleşen atmosfer ve coğrafi koşullarla uyumlu seyretti."]
+        elif status_val == "unknown":
+            reasons = [
+                f"Model ile gerçekleşen arasında **{err_t:+.1f}°C** sıcaklık ve **{err_p:+.1f} mm** yağış farkı oluştu ancak bulut örtüsü (%{int(obs_cloud)}), "
+                f"nem (%{int(obs_rh)}) ve rüzgâr ({int(obs_wind)} km/s) normal seyrindeydi. **Kesin fiziksel neden mevcut yer verileriyle belirlenemedi**."
+            ]
+
+        return {
+            "status": status_val,
+            "obs_snapshot": obs_snapshot,
+            "reasons": reasons,
+            "bias_t": err_t if abs(err_t) >= 1.5 else 0.0,
+            "err_p": err_p,
+            "precip_factor": precip_factor,
+            "mechanism": mechanism,
+            "obs_wdir": obs_wdir,
+            "obs_rh": obs_rh,
+            "obs_cloud": obs_cloud,
+            "dew_spread": dew_spread,
+        }
+    except Exception:
+        return {
+            "status": "unknown",
+            "obs_snapshot": "Gözlem akışına erişilemedi.",
+            "reasons": ["Anlık gözlem verisi alınamadığı için hata nedeni belirlenemedi."],
+            "bias_t": 0.0,
+            "err_p": 0.0,
+            "precip_factor": 1.0,
+            "mechanism": "none",
+            "obs_wdir": 180.0,
+            "obs_rh": 70.0,
+            "obs_cloud": 50.0,
+            "dew_spread": 3.0,
+        }
 
         # En son tamamlanan saati (indeks -3) referans al
         idx = len(times) - 3
