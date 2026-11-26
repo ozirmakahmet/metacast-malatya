@@ -2542,7 +2542,11 @@ else:
         )
 
     render_realtime_watchdog()
+    
+
+    def detect_malatya_winter_front(df_hourly: pd.DataFrame, now_dt: datetime, district_name: str = "Malatya"):
         try:
+        
             if df_hourly is None or len(df_hourly) < 6:
                 return None
             idx = int(np.argmin(np.abs(df_hourly["time"].dt.hour - now_dt.hour)))
